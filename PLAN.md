@@ -75,56 +75,57 @@ ai-agent-bridge/
 **Goal**: Buildable bridge daemon with a single provider, gRPC API, and basic auth.
 
 ### 1.1 Project Scaffolding
-- [ ] Initialize Go module (`github.com/markcallen/ai-agent-bridge`)
-- [ ] Set up `.gitignore` (certs/, gen/, vendor/)
-- [ ] Create directory structure
-- [ ] Add Makefile with targets: `build`, `proto`, `test`, `lint`, `certs`
+- [x] Initialize Go module (`github.com/markcallen/ai-agent-bridge`)
+- [x] Set up `.gitignore` (certs/, gen/, vendor/)
+- [x] Create directory structure
+- [x] Add Makefile with targets: `build`, `proto`, `test`, `lint`, `certs`
 
 ### 1.2 Protobuf Definitions
-- [ ] Write `proto/bridge/v1/bridge.proto` with full service definition
+- [x] Write `proto/bridge/v1/bridge.proto` with full service definition
   - `BridgeService` with all RPCs defined in PRD section 8
   - Message types: session lifecycle, input, events, health, providers
   - `SessionStatus` enum, `EventType` enum
-- [ ] Add `buf.gen.yaml` or `go:generate` for protoc codegen
-- [ ] Generate Go stubs into `gen/bridge/v1/`
+- [x] Add `buf.gen.yaml` or `go:generate` for protoc codegen
+- [x] Generate Go stubs into `gen/bridge/v1/`
 
 ### 1.3 PKI / Certificate Authority
-- [ ] `internal/pki/ca.go` - CA initialization (generate RSA 4096 root key + self-signed cert)
-- [ ] `internal/pki/issue.go` - Issue server/client certs signed by CA
-- [ ] `internal/pki/crosssign.go` - Cross-sign external CA certificates
-- [ ] `internal/pki/bundle.go` - Build trust bundles (own CA + cross-signed CAs)
-- [ ] `cmd/bridge-ca/main.go` - CLI wrapping PKI functions
-  - Subcommands: `init`, `issue`, `cross-sign`, `bundle`, `jwt-keygen`, `renew`, `verify`
-- [ ] Unit tests for CA operations
+- [x] `internal/pki/ca.go` - CA initialization (generate RSA 4096 root key + self-signed cert)
+- [x] `internal/pki/issue.go` - Issue server/client certs signed by CA
+- [x] `internal/pki/crosssign.go` - Cross-sign external CA certificates
+- [x] `internal/pki/bundle.go` - Build trust bundles (own CA + cross-signed CAs)
+- [x] `cmd/bridge-ca/main.go` - CLI wrapping PKI functions
+  - Subcommands: `init`, `issue`, `cross-sign`, `bundle`, `jwt-keygen`, `verify`
+  - Note: `renew` subcommand not yet implemented
+- [x] Unit tests for CA operations
 
 ### 1.4 Auth Layer
-- [ ] `internal/auth/mtls.go` - Server and client TLS configs (mTLS required)
+- [x] `internal/auth/mtls.go` - Server and client TLS configs (mTLS required)
   - `ServerTLSConfig(caBundlePath, certPath, keyPath)` - requires client certs
   - `ClientTLSConfig(caBundlePath, certPath, keyPath, serverName)` - presents client cert
   - Minimum TLS 1.3
-- [ ] `internal/auth/jwt.go` - Ed25519 JWT signing and verification
+- [x] `internal/auth/jwt.go` - Ed25519 JWT signing and verification
   - `JWTVerifier` - verifies tokens with multiple public keys (one per issuer)
   - `JWTIssuer` - mints tokens (used by SDK and bridge-ca)
   - Claims: `sub`, `project_id`, `aud`, `iat`, `exp`
   - Max TTL enforcement (reject tokens with TTL > configured max)
-- [ ] gRPC interceptors for JWT extraction and verification
-- [ ] Unit tests for JWT mint/verify round-trip
+- [x] gRPC interceptors for JWT extraction and verification
+- [x] Unit tests for JWT mint/verify round-trip
 
 ### 1.5 Provider Framework
-- [ ] `internal/bridge/provider.go` - `Provider` interface definition
-- [ ] `internal/bridge/registry.go` - Provider registry (register by name, lookup, health)
-- [ ] `internal/provider/stdio.go` - Shared stdio subprocess adapter
+- [x] `internal/bridge/provider.go` - `Provider` interface definition
+- [x] `internal/bridge/registry.go` - Provider registry (register by name, lookup, health)
+- [x] `internal/provider/stdio.go` - Shared stdio subprocess adapter
   - Spawn process with `exec.CommandContext`
   - Set working directory to `repo_path`
   - Pipe stdin/stdout/stderr
   - Monitor process health (PID check)
   - Graceful shutdown: SIGTERM → wait grace period → SIGKILL
   - Emit structured events from stdout/stderr lines
-- [ ] `internal/provider/codex.go` - Codex-specific adapter (binary name, default args)
-- [ ] Unit tests with mock process
+- [x] `internal/provider/codex.go` - Codex-specific adapter (binary name, default args)
+- [x] Unit tests with mock process
 
 ### 1.6 Session Supervisor
-- [ ] `internal/bridge/supervisor.go` - Session lifecycle manager
+- [x] `internal/bridge/supervisor.go` - Session lifecycle manager
   - `Start(cfg SessionConfig)` → spawn via provider adapter
   - `Stop(sessionID, force)` → graceful/force stop
   - `Send(sessionID, text)` → write to process stdin
@@ -132,21 +133,21 @@ ai-agent-bridge/
   - `List(projectID)` → list sessions for project
   - Concurrent session tracking with `sync.RWMutex`
   - Crash detection: goroutine watching `cmd.Wait()`, emit `SESSION_FAILED`
-- [ ] `internal/bridge/policy.go` - Policy enforcement
+- [x] `internal/bridge/policy.go` - Policy enforcement
   - Per-project max sessions
   - Global max sessions
   - `repo_path` allowlist validation (glob patterns)
   - Input size limits
-- [ ] `internal/bridge/eventbuf.go` - Per-session ring buffer
+- [x] `internal/bridge/eventbuf.go` - Per-session ring buffer
   - Fixed capacity, monotonic sequence numbers
   - `Append(event)` → assigns seq, drops oldest if full
   - `After(seq)` → returns events after given sequence
   - `Subscribe()` → returns channel for live events
   - Overflow detection and `BUFFER_OVERFLOW` event emission
-- [ ] Unit tests for supervisor, policy, and event buffer
+- [x] Unit tests for supervisor, policy, and event buffer
 
 ### 1.7 gRPC Server
-- [ ] `internal/server/server.go` - Implement `BridgeService`
+- [x] `internal/server/server.go` - Implement `BridgeService`
   - Wire supervisor, registry, and event buffer
   - `StartSession` → validate JWT claims, check policy, call supervisor
   - `StopSession` → validate JWT claims, call supervisor
@@ -155,28 +156,28 @@ ai-agent-bridge/
   - `StreamEvents` → replay from buffer, then stream live
   - `Health` → aggregate provider health
   - `ListProviders` → enumerate registered providers
-- [ ] `internal/server/interceptors.go` - Auth interceptors
+- [x] `internal/auth/interceptors.go` - Auth interceptors (in auth package, not server)
   - Unary + stream JWT verification
-  - Project-scoped authorization (JWT `project_id` must match request)
-  - Audit logging interceptor
-- [ ] Unit tests
+  - Health endpoint exempted from auth
+- [ ] Project-scoped authorization (JWT `project_id` must match request) — partially done in StartSession only
+- [ ] Audit logging interceptor
+- [ ] `internal/server/server_test.go` - Unit tests
 
 ### 1.8 Configuration
-- [ ] `internal/config/config.go` - YAML config loading
+- [x] `internal/config/config.go` - YAML config loading
   - Struct matching `bridge.yaml` schema from PRD section 13
   - Defaults for all fields
-  - Validation (required fields, path existence)
-- [ ] `config/bridge.yaml` - Default config file
+- [x] `config/bridge.yaml` - Default config file
 
 ### 1.9 Bridge Daemon Entry Point
-- [ ] `cmd/bridge/main.go` - Main daemon binary
+- [x] `cmd/bridge/main.go` - Main daemon binary
   - Load config from file (flag: `--config`)
   - Initialize PKI/mTLS
   - Register providers from config
   - Start gRPC server with mTLS + JWT interceptors
   - Graceful shutdown on SIGINT/SIGTERM
   - Health/ready logging on startup
-- [ ] `scripts/dev_certs.sh` - Generate dev certs using `bridge-ca`
+- [x] `scripts/dev_certs.sh` - Generate dev certs using `bridge-ca`
 
 ---
 
@@ -185,24 +186,22 @@ ai-agent-bridge/
 **Goal**: Claude and OpenCode adapters, provider health checks.
 
 ### 2.1 Claude Adapter
-- [ ] `internal/provider/claude.go` - Claude CLI adapter
+- [x] `internal/provider/claude.go` - Claude CLI adapter
   - Binary: `claude`
   - Default args: `["--print", "--verbose"]`
-  - Parse Claude-specific output format if applicable
-  - Health check: `claude --version` or similar
+- [ ] Parse Claude-specific output format if applicable
 - [ ] Integration test: start → input → output → stop
 
 ### 2.2 OpenCode Adapter
-- [ ] `internal/provider/opencode.go` - OpenCode adapter
+- [x] `internal/provider/opencode.go` - OpenCode adapter
   - Binary: `opencode`
-  - Health check
 - [ ] Integration test
 
 ### 2.3 Provider Health Checks
-- [ ] Each provider implements `Health(ctx)` → checks binary exists and is executable
-- [ ] `ListProviders` RPC returns availability status
+- [x] Each provider implements `Health(ctx)` → checks binary exists and is executable
+- [x] `ListProviders` RPC returns availability status
 - [ ] `StartSession` returns typed error if provider is unavailable
-- [ ] Provider startup timeout enforcement (configurable per provider)
+- [x] Provider startup timeout enforcement (configurable per provider)
 
 ---
 
@@ -211,24 +210,23 @@ ai-agent-bridge/
 **Goal**: Production-ready Go client library for consumer integration.
 
 ### 3.1 Client Core
-- [ ] `pkg/bridgeclient/client.go` - Main client type
+- [x] `pkg/bridgeclient/client.go` - Main client type
   - gRPC dial with mTLS credentials
-  - Lazy connection (connect on first call)
   - `Close()` for cleanup
-- [ ] `pkg/bridgeclient/options.go` - Functional options
+- [x] `pkg/bridgeclient/options.go` - Functional options
   - `WithTarget(addr)` - bridge address
   - `WithMTLS(cfg)` - mTLS configuration
   - `WithJWT(cfg)` - JWT signing configuration
-  - `WithRetry(cfg)` - retry policy
   - `WithTimeout(d)` - per-call timeout
-- [ ] `pkg/bridgeclient/auth.go` - Credential management
+- [ ] `WithRetry(cfg)` - retry policy (not yet implemented)
+- [x] `pkg/bridgeclient/auth.go` - Credential management
   - Load mTLS certs → `tls.Config`
   - Load Ed25519 private key → auto-mint JWTs
   - Per-call credential injection via gRPC `PerRPCCredentials`
   - Auto-renewal: mint new JWT before current one expires
 
 ### 3.2 Session Operations
-- [ ] `pkg/bridgeclient/session.go` - Typed wrappers
+- [x] `pkg/bridgeclient/session.go` - Typed wrappers
   - `StartSession(ctx, req)` → response + error
   - `StopSession(ctx, req)` → response + error
   - `GetSession(ctx, req)` → response + error
@@ -236,14 +234,14 @@ ai-agent-bridge/
   - `SendInput(ctx, req)` → response + error
 
 ### 3.3 Event Streaming
-- [ ] `pkg/bridgeclient/events.go` - Event subscription
+- [x] `pkg/bridgeclient/events.go` - Event subscription
   - `StreamEvents(ctx, req)` → typed event stream
   - Automatic reconnect with `after_seq` resume
   - Backoff on reconnect failures
   - Context cancellation support
 
 ### 3.4 Error Handling
-- [ ] `pkg/bridgeclient/errors.go` - Typed errors
+- [x] `pkg/bridgeclient/errors.go` - Typed errors
   - `ErrSessionNotFound`
   - `ErrSessionAlreadyExists`
   - `ErrProviderUnavailable`
@@ -289,8 +287,8 @@ ai-agent-bridge/
 ### 4.5 Input Validation
 - [ ] Validate all string fields for control characters
 - [ ] Enforce max lengths on all string fields
-- [ ] Validate `repo_path` is absolute and under allowed paths
-- [ ] Validate `provider` is a known registered provider
+- [x] Validate `repo_path` is absolute and under allowed paths
+- [x] Validate `provider` is a known registered provider
 - [ ] Validate `session_id` format (UUID)
 
 ---
@@ -312,9 +310,9 @@ ai-agent-bridge/
 - [ ] Example `bridge.yaml` for ndara deployment topology
 
 ### 5.3 Dev Environment
-- [ ] `scripts/dev_certs.sh` - Generate all dev certs for all three projects
+- [x] `scripts/dev_certs.sh` - Generate all dev certs for local testing
 - [ ] `docker-compose.yaml` (optional) - Run bridge + mock agents for integration testing
-- [ ] `Makefile` target: `make dev-setup` - one-command dev environment
+- [x] `Makefile` target: `make dev-setup` - one-command dev environment
 
 ---
 
@@ -323,14 +321,14 @@ ai-agent-bridge/
 **Goal**: Comprehensive test coverage and operational tooling.
 
 ### 6.1 Unit Tests
-- [ ] Session start/stop state transitions
-- [ ] Input routing and write failures
-- [ ] Event sequencing and buffer overflow
-- [ ] Policy enforcement (limits, timeouts, path validation)
-- [ ] Provider registry and adapter selection
-- [ ] JWT mint/verify with Ed25519
-- [ ] mTLS config generation and validation
-- [ ] CA operations (init, issue, cross-sign, bundle)
+- [x] Session start/stop state transitions
+- [x] Input routing and write failures
+- [x] Event sequencing and buffer overflow
+- [x] Policy enforcement (limits, timeouts, path validation)
+- [x] Provider registry and adapter selection
+- [x] JWT mint/verify with Ed25519
+- [x] mTLS config generation and validation
+- [x] CA operations (init, issue, cross-sign, bundle)
 - [ ] Secret redaction patterns
 - [ ] Config loading and validation
 
@@ -352,7 +350,7 @@ ai-agent-bridge/
 - [ ] Concurrent session operations (race condition testing)
 
 ### 6.4 Observability
-- [ ] Structured JSON logging with `slog`
+- [x] Structured JSON logging with `slog`
 - [ ] Metrics (optional): `sessions_active`, `events_total`, `events_dropped`, `rpc_latency_ms`, `auth_failures`
 - [ ] gRPC reflection enabled in dev mode (disabled in production)
 
