@@ -11,9 +11,11 @@ build: proto
 
 proto:
 	protoc \
-		--go_out=. --go_opt=paths=source_relative \
-		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		proto/bridge/v1/bridge.proto
+		--proto_path=proto \
+		--proto_path=/home/linuxbrew/.linuxbrew/include \
+		--go_out=gen --go_opt=paths=source_relative \
+		--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
+		bridge/v1/bridge.proto
 
 test:
 	go test -race -count=1 ./...
