@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -43,7 +44,7 @@ func NewStdioProvider(cfg StdioConfig) *StdioProvider {
 func (p *StdioProvider) ID() string { return p.cfg.ProviderID }
 
 func (p *StdioProvider) Health(ctx context.Context) error {
-	path, err := exec.LookPath(p.cfg.Binary)
+	path, err := resolveBinaryPath(p.cfg.Binary)
 	if err != nil {
 		return fmt.Errorf("binary %q not found: %w", p.cfg.Binary, err)
 	}
@@ -58,6 +59,11 @@ func (p *StdioProvider) Health(ctx context.Context) error {
 }
 
 func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (bridge.SessionHandle, error) {
+	binPath, err := resolveBinaryPath(p.cfg.Binary)
+	if err != nil {
+		return nil, fmt.Errorf("resolve binary %q: %w", p.cfg.Binary, err)
+	}
+
 	args := append([]string(nil), p.cfg.DefaultArgs...)
 	// Merge any provider-specific options as additional args
 	for k, v := range cfg.Options {
@@ -66,7 +72,7 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, p.cfg.Binary, args...)
+	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = cfg.RepoPath
 	// Inherit minimal environment
 	cmd.Env = filterEnv(os.Environ())
@@ -114,6 +120,16 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 	go h.waitForExit()
 
 	return h, nil
+}
+
+func resolveBinaryPath(binary string) (string, error) {
+	if strings.Contains(binary, "/") {
+		if filepath.IsAbs(binary) {
+			return binary, nil
+		}
+		return filepath.Abs(binary)
+	}
+	return exec.LookPath(binary)
 }
 
 func (p *StdioProvider) Send(handle bridge.SessionHandle, text string) error {
