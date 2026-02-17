@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package bridge.v1;
+
+option go_package = "github.com/markcallen/ai-agent-bridge/gen/bridge/v1;bridgev1";
+
+import "google/protobuf/timestamp.proto";
+
+// BridgeService manages AI agent sessions across providers.
+service BridgeService {
+  // Session lifecycle
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc StopSession(StopSessionRequest) returns (StopSessionResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  // Command routing
+  rpc SendInput(SendInputRequest) returns (SendInputResponse);
+
+  // Event streaming
+  rpc StreamEvents(StreamEventsRequest) returns (stream SessionEvent);
+
+  // Health and discovery
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+}
+
+// --- Enums ---
+
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_STARTING = 1;
+  SESSION_STATUS_RUNNING = 2;
+  SESSION_STATUS_STOPPING = 3;
+  SESSION_STATUS_STOPPED = 4;
+  SESSION_STATUS_FAILED = 5;
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_SESSION_STARTED = 1;
+  EVENT_TYPE_SESSION_STOPPED = 2;
+  EVENT_TYPE_SESSION_FAILED = 3;
+  EVENT_TYPE_STDOUT = 4;
+  EVENT_TYPE_STDERR = 5;
+  EVENT_TYPE_INPUT_RECEIVED = 6;
+  EVENT_TYPE_BUFFER_OVERFLOW = 7;
+}
+
+// --- Session lifecycle ---
+
+message StartSessionRequest {
+  string project_id = 1;
+  string session_id = 2;
+  string repo_path = 3;
+  string provider = 4;
+  map<string, string> agent_opts = 5;
+}
+
+message StartSessionResponse {
+  string session_id = 1;
+  SessionStatus status = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message StopSessionRequest {
+  string session_id = 1;
+  bool force = 2;
+}
+
+message StopSessionResponse {
+  SessionStatus status = 1;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  string session_id = 1;
+  string project_id = 2;
+  string provider = 3;
+  SessionStatus status = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp stopped_at = 6;
+  string error = 7;
+}
+
+message ListSessionsRequest {
+  string project_id = 1;  // optional filter
+}
+
+message ListSessionsResponse {
+  repeated GetSessionResponse sessions = 1;
+}
+
+// --- Command routing ---
+
+message SendInputRequest {
+  string session_id = 1;
+  string text = 2;
+  string idempotency_key = 3;
+}
+
+message SendInputResponse {
+  bool accepted = 1;
+  uint64 seq = 2;
+}
+
+// --- Event streaming ---
+
+message StreamEventsRequest {
+  string session_id = 1;
+  uint64 after_seq = 2;
+}
+
+message SessionEvent {
+  uint64 seq = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string session_id = 3;
+  string project_id = 4;
+  string provider = 5;
+  EventType type = 6;
+  string stream = 7;
+  string text = 8;
+  bool done = 9;
+  string error = 10;
+}
+
+// --- Health ---
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  repeated ProviderHealth providers = 2;
+}
+
+message ProviderHealth {
+  string provider = 1;
+  bool available = 2;
+  string error = 3;
+}
+
+// --- Provider discovery ---
+
+message ListProvidersRequest {}
+
+message ListProvidersResponse {
+  repeated ProviderInfo providers = 1;
+}
+
+message ProviderInfo {
+  string provider = 1;
+  bool available = 2;
+  string binary = 3;
+}
