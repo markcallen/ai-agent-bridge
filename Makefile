@@ -33,7 +33,10 @@ clean:
 certs: build
 	$(BRIDGE_CA) init --name ai-agent-bridge --out certs/
 
-dev-setup: certs
+dev-certs: build
+	./scripts/dev_certs.sh
+
+dev-setup: dev-certs
 	@echo "Dev environment ready. Certs in certs/"
 
 fmt:
