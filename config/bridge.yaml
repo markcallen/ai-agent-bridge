@@ -1,0 +1,42 @@
+server:
+  listen: "0.0.0.0:9445"
+
+tls:
+  ca_bundle: "certs/ca-bundle.crt"
+  cert: "certs/bridge.crt"
+  key: "certs/bridge.key"
+
+auth:
+  jwt_public_keys: []
+  jwt_audience: "bridge"
+  jwt_max_ttl: "5m"
+
+sessions:
+  max_per_project: 5
+  max_global: 20
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  event_buffer_size: 10000
+
+input:
+  max_size_bytes: 65536
+
+providers:
+  codex:
+    binary: "codex"
+    args: ["--quiet"]
+    startup_timeout: "30s"
+  claude:
+    binary: "claude"
+    args: ["--print", "--verbose"]
+    startup_timeout: "30s"
+  opencode:
+    binary: "opencode"
+    args: []
+    startup_timeout: "30s"
+
+allowed_paths: []
+
+logging:
+  level: "info"
+  format: "json"
