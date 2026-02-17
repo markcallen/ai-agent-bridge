@@ -1,0 +1,31 @@
+# Binaries
+/bin/
+bridge
+bridge-ca
+*.exe
+
+# Certificates (generated)
+certs/*.key
+certs/*.crt
+certs/*.pem
+certs/*.pub
+
+# Go
+vendor/
+*.test
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+/dist/
