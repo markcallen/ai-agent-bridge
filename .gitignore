@@ -27,5 +27,8 @@ coverage.html
 .DS_Store
 Thumbs.db
 
+# E2E
+e2e/.env
+
 # Build
 /dist/

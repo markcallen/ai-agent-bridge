@@ -1,0 +1,31 @@
+services:
+  bridge:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.bridge
+    env_file:
+      - .env
+    volumes:
+      - certs:/app/certs
+      - repos:/tmp/cache-cleaner
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 30s
+
+  test-client:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.client
+    depends_on:
+      bridge:
+        condition: service_healthy
+    volumes:
+      - certs:/certs:ro
+      - repos:/tmp/cache-cleaner
+
+volumes:
+  certs:
+  repos:

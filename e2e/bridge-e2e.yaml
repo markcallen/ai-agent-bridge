@@ -1,0 +1,37 @@
+server:
+  listen: "0.0.0.0:9445"
+
+tls:
+  ca_bundle: "/app/certs/ca-bundle.crt"
+  cert: "/app/certs/bridge.crt"
+  key: "/app/certs/bridge.key"
+
+auth:
+  jwt_public_keys:
+    - issuer: "e2e"
+      key_path: "/app/certs/jwt-signing.pub"
+  jwt_audience: "bridge"
+  jwt_max_ttl: "5m"
+
+sessions:
+  max_per_project: 5
+  max_global: 20
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  event_buffer_size: 10000
+
+input:
+  max_size_bytes: 65536
+
+providers:
+  claude:
+    binary: "claude-print"
+    args: ["--print", "--dangerously-skip-permissions"]
+    startup_timeout: "120s"
+
+allowed_paths:
+  - "/tmp"
+
+logging:
+  level: "info"
+  format: "json"
