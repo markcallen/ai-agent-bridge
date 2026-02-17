@@ -1,0 +1,14 @@
+package provider
+
+import "time"
+
+// NewClaudeProvider creates a provider adapter for Anthropic Claude CLI.
+func NewClaudeProvider() *StdioProvider {
+	return NewStdioProvider(StdioConfig{
+		ProviderID:     "claude",
+		Binary:         "claude",
+		DefaultArgs:    []string{"--print", "--verbose"},
+		StartupTimeout: 30 * time.Second,
+		StopGrace:      10 * time.Second,
+	})
+}
