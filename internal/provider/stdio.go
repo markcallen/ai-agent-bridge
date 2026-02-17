@@ -98,18 +98,20 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 		projectID: cfg.ProjectID,
 		sessionID: cfg.SessionID,
 		stopGrace: p.cfg.StopGrace,
+		waitDone:  make(chan struct{}),
 	}
 
-	// Start output readers
-	go h.readStream("stdout", stdout)
-	go h.readStream("stderr", stderr)
-	go h.waitForExit()
-
+	// Emit started event before launching goroutines to avoid race with channel close
 	h.emit(bridge.Event{
 		Type:   bridge.EventTypeSessionStarted,
 		Stream: "system",
 		Text:   "session started",
 	})
+
+	// Start output readers and exit watcher
+	go h.readStream("stdout", stdout)
+	go h.readStream("stderr", stderr)
+	go h.waitForExit()
 
 	return h, nil
 }
@@ -150,8 +152,12 @@ type stdioHandle struct {
 	sessionID string
 	stopGrace time.Duration
 
-	mu      sync.Mutex
-	stopped bool
+	mu        sync.Mutex
+	stopped   bool
+	closed    bool
+	closeOnce sync.Once
+	waitDone  chan struct{} // closed when cmd.Wait() completes
+	waitErr   error
 }
 
 func (h *stdioHandle) ID() string { return h.id }
@@ -175,6 +181,8 @@ func (h *stdioHandle) stop() error {
 	h.mu.Lock()
 	if h.stopped {
 		h.mu.Unlock()
+		// Wait for waitForExit goroutine to finish closing the channel
+		<-h.waitDone
 		return nil
 	}
 	h.stopped = true
@@ -187,28 +195,17 @@ func (h *stdioHandle) stop() error {
 		_ = h.cmd.Process.Signal(syscall.SIGTERM)
 	}
 
-	done := make(chan struct{})
-	go func() {
-		_ = h.cmd.Wait()
-		close(done)
-	}()
-
+	// Wait for the waitForExit goroutine (which owns cmd.Wait) to finish
 	select {
-	case <-done:
+	case <-h.waitDone:
 	case <-time.After(h.stopGrace):
+		// Force kill if graceful shutdown timed out
 		if h.cmd.Process != nil {
 			_ = h.cmd.Process.Kill()
 		}
-		<-done
+		<-h.waitDone
 	}
 
-	h.emit(bridge.Event{
-		Type:   bridge.EventTypeSessionStopped,
-		Stream: "system",
-		Text:   "session stopped",
-		Done:   true,
-	})
-	close(h.events)
 	return nil
 }
 
@@ -233,6 +230,8 @@ func (h *stdioHandle) readStream(stream string, r io.Reader) {
 }
 
 func (h *stdioHandle) waitForExit() {
+	defer close(h.waitDone)
+
 	err := h.cmd.Wait()
 
 	h.mu.Lock()
@@ -241,10 +240,14 @@ func (h *stdioHandle) waitForExit() {
 	h.mu.Unlock()
 
 	if wasStopped {
-		return // Already handled by stop()
-	}
-
-	if err != nil {
+		// stop() was called; emit the stopped event
+		h.emit(bridge.Event{
+			Type:   bridge.EventTypeSessionStopped,
+			Stream: "system",
+			Text:   "session stopped",
+			Done:   true,
+		})
+	} else if err != nil {
 		h.emit(bridge.Event{
 			Type:   bridge.EventTypeSessionFailed,
 			Stream: "system",
@@ -260,7 +263,13 @@ func (h *stdioHandle) waitForExit() {
 			Done:   true,
 		})
 	}
-	close(h.events)
+
+	h.closeOnce.Do(func() {
+		h.mu.Lock()
+		h.closed = true
+		h.mu.Unlock()
+		close(h.events)
+	})
 }
 
 func (h *stdioHandle) emit(e bridge.Event) {
@@ -268,6 +277,13 @@ func (h *stdioHandle) emit(e bridge.Event) {
 	e.SessionID = h.sessionID
 	e.ProjectID = h.projectID
 	e.Provider = h.provider
+
+	h.mu.Lock()
+	closed := h.closed
+	h.mu.Unlock()
+	if closed {
+		return
+	}
 
 	select {
 	case h.events <- e:
