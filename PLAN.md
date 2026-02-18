@@ -159,9 +159,9 @@ ai-agent-bridge/
 - [x] `internal/auth/interceptors.go` - Auth interceptors (in auth package, not server)
   - Unary + stream JWT verification
   - Health endpoint exempted from auth
-- [ ] Project-scoped authorization (JWT `project_id` must match request) — partially done in StartSession only
-- [ ] Audit logging interceptor
-- [ ] `internal/server/server_test.go` - Unit tests
+- [x] Project-scoped authorization (JWT `project_id` must match request) on all session-scoped RPCs
+- [x] Audit logging interceptor
+- [x] `internal/server/server_test.go` - Unit tests
 
 ### 1.8 Configuration
 - [x] `internal/config/config.go` - YAML config loading
@@ -200,7 +200,7 @@ ai-agent-bridge/
 ### 2.3 Provider Health Checks
 - [x] Each provider implements `Health(ctx)` → checks binary exists and is executable
 - [x] `ListProviders` RPC returns availability status
-- [ ] `StartSession` returns typed error if provider is unavailable
+- [x] `StartSession` returns typed error if provider is unavailable
 - [x] Provider startup timeout enforcement (configurable per provider)
 
 ---
@@ -311,8 +311,9 @@ ai-agent-bridge/
 
 ### 5.3 Dev Environment
 - [x] `scripts/dev_certs.sh` - Generate all dev certs for local testing
-- [ ] `docker-compose.yaml` (optional) - Run bridge + mock agents for integration testing
+- [x] `docker-compose.yaml` (optional) - Run bridge + mock agents for integration testing
 - [x] `Makefile` target: `make dev-setup` - one-command dev environment
+- [x] `Makefile` target: `make test-e2e` - dockerized end-to-end validation
 
 ---
 
@@ -329,17 +330,19 @@ ai-agent-bridge/
 - [x] JWT mint/verify with Ed25519
 - [x] mTLS config generation and validation
 - [x] CA operations (init, issue, cross-sign, bundle)
+- [x] gRPC server authorization and error mapping (`internal/server/server_test.go`)
+- [x] Provider startup timeout behavior (`internal/provider/stdio_test.go`)
 - [ ] Secret redaction patterns
 - [ ] Config loading and validation
 
 ### 6.2 Integration Tests
-- [ ] End-to-end: start → input → output → stop (with real process)
+- [x] End-to-end: start → input → output → stop (with real process)
 - [ ] Reconnect from `after_seq` (disconnect, reconnect, verify no event loss)
 - [ ] Multi-provider concurrent sessions
 - [ ] mTLS rejection (bad cert, expired cert, wrong CA)
 - [ ] JWT rejection (expired, wrong audience, wrong issuer)
 - [ ] Session limit enforcement
-- [ ] Provider unavailability handling
+- [x] Provider unavailability handling
 - [ ] Graceful shutdown (in-flight sessions drained)
 
 ### 6.3 Failure Tests
