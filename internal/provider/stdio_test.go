@@ -2,8 +2,11 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,6 +152,34 @@ func TestStdioProviderHealth(t *testing.T) {
 
 	if err := bad.Health(context.Background()); err == nil {
 		t.Error("Health for nonexistent binary should fail")
+	}
+}
+
+func TestStdioProviderStartTimeout(t *testing.T) {
+	origStarter := commandStarter
+	commandStarter = func(cmd *exec.Cmd) error {
+		time.Sleep(200 * time.Millisecond)
+		return fmt.Errorf("delayed start")
+	}
+	t.Cleanup(func() { commandStarter = origStarter })
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID:     "timeout",
+		Binary:         "echo",
+		DefaultArgs:    []string{"hello"},
+		StartupTimeout: 10 * time.Millisecond,
+	})
+
+	_, err := p.Start(context.Background(), bridge.SessionConfig{
+		ProjectID: "test-project",
+		SessionID: "timeout-session",
+		RepoPath:  t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected startup timeout error")
+	}
+	if !strings.Contains(err.Error(), "startup timeout") {
+		t.Fatalf("expected startup timeout error, got: %v", err)
 	}
 }
 

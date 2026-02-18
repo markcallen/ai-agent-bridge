@@ -40,6 +40,7 @@ func main() {
 			Binary:         pcfg.Binary,
 			DefaultArgs:    pcfg.Args,
 			StartupTimeout: config.ParseDuration(pcfg.StartupTimeout, 30e9),
+			StopGrace:      config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
 		})
 		if err := registry.Register(p); err != nil {
 			logger.Error("register provider", "provider", name, "error", err)
@@ -99,8 +100,14 @@ func main() {
 	// JWT interceptors (only if keys are configured)
 	if len(verifier.Keys) > 0 {
 		grpcOpts = append(grpcOpts,
-			grpc.UnaryInterceptor(auth.UnaryJWTInterceptor(verifier)),
-			grpc.StreamInterceptor(auth.StreamJWTInterceptor(verifier)),
+			grpc.ChainUnaryInterceptor(
+				auth.UnaryJWTInterceptor(verifier, logger),
+				auth.UnaryAuditInterceptor(logger),
+			),
+			grpc.ChainStreamInterceptor(
+				auth.StreamJWTInterceptor(verifier, logger),
+				auth.StreamAuditInterceptor(logger),
+			),
 		)
 		logger.Info("JWT auth enabled", "issuers", len(verifier.Keys))
 	} else {
@@ -132,4 +139,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

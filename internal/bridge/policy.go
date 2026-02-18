@@ -8,10 +8,10 @@ import (
 
 // Policy defines runtime limits and guards for the bridge.
 type Policy struct {
-	MaxPerProject  int
-	MaxGlobal      int
-	MaxInputBytes  int
-	AllowedPaths   []string // glob patterns for allowed repo_path values
+	MaxPerProject int
+	MaxGlobal     int
+	MaxInputBytes int
+	AllowedPaths  []string // glob patterns for allowed repo_path values
 }
 
 // DefaultPolicy returns sensible defaults.
@@ -31,7 +31,7 @@ func (p *Policy) ValidateRepoPath(repoPath string) error {
 	}
 	abs, err := filepath.Abs(repoPath)
 	if err != nil {
-		return fmt.Errorf("resolve path: %w", err)
+		return fmt.Errorf("%w: resolve path: %v", ErrInvalidArgument, err)
 	}
 	for _, pattern := range p.AllowedPaths {
 		matched, err := filepath.Match(pattern, abs)
@@ -48,13 +48,13 @@ func (p *Policy) ValidateRepoPath(repoPath string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("repo_path %q is not under any allowed path", repoPath)
+	return fmt.Errorf("%w: repo_path %q is not under any allowed path", ErrInvalidArgument, repoPath)
 }
 
 // ValidateInput checks that input text does not exceed the maximum size.
 func (p *Policy) ValidateInput(text string) error {
 	if p.MaxInputBytes > 0 && len(text) > p.MaxInputBytes {
-		return fmt.Errorf("input size %d exceeds max %d bytes", len(text), p.MaxInputBytes)
+		return fmt.Errorf("%w: input size %d exceeds max %d bytes", ErrInputTooLarge, len(text), p.MaxInputBytes)
 	}
 	return nil
 }
@@ -62,10 +62,10 @@ func (p *Policy) ValidateInput(text string) error {
 // CheckSessionLimits verifies that creating a new session would not exceed limits.
 func (p *Policy) CheckSessionLimits(projectCount, globalCount int) error {
 	if p.MaxPerProject > 0 && projectCount >= p.MaxPerProject {
-		return fmt.Errorf("project session limit reached (%d/%d)", projectCount, p.MaxPerProject)
+		return fmt.Errorf("%w: project limit (%d/%d)", ErrSessionLimitReached, projectCount, p.MaxPerProject)
 	}
 	if p.MaxGlobal > 0 && globalCount >= p.MaxGlobal {
-		return fmt.Errorf("global session limit reached (%d/%d)", globalCount, p.MaxGlobal)
+		return fmt.Errorf("%w: global limit (%d/%d)", ErrSessionLimitReached, globalCount, p.MaxGlobal)
 	}
 	return nil
 }

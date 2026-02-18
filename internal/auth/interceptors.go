@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -19,8 +20,13 @@ func ClaimsFromContext(ctx context.Context) (*BridgeClaims, bool) {
 	return c, ok
 }
 
+// ContextWithClaims stores claims in context.
+func ContextWithClaims(ctx context.Context, claims *BridgeClaims) context.Context {
+	return context.WithValue(ctx, ctxKeyClaims{}, claims)
+}
+
 // UnaryJWTInterceptor returns a gRPC unary interceptor that verifies JWTs.
-func UnaryJWTInterceptor(v *JWTVerifier) grpc.UnaryServerInterceptor {
+func UnaryJWTInterceptor(v *JWTVerifier, logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		// Skip auth for health checks
 		if info.FullMethod == "/bridge.v1.BridgeService/Health" {
@@ -28,22 +34,34 @@ func UnaryJWTInterceptor(v *JWTVerifier) grpc.UnaryServerInterceptor {
 		}
 		claims, err := extractAndVerify(ctx, v)
 		if err != nil {
+			if logger != nil {
+				logger.Warn("auth decision", "result", "deny", "rpc_method", info.FullMethod, "reason", err.Error())
+			}
 			return nil, err
 		}
-		return handler(context.WithValue(ctx, ctxKeyClaims{}, claims), req)
+		if logger != nil {
+			logger.Info("auth decision", "result", "allow", "rpc_method", info.FullMethod, "caller_sub", claims.Subject, "project_id", claims.ProjectID)
+		}
+		return handler(ContextWithClaims(ctx, claims), req)
 	}
 }
 
 // StreamJWTInterceptor returns a gRPC stream interceptor that verifies JWTs.
-func StreamJWTInterceptor(v *JWTVerifier) grpc.StreamServerInterceptor {
+func StreamJWTInterceptor(v *JWTVerifier, logger *slog.Logger) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		claims, err := extractAndVerify(ss.Context(), v)
 		if err != nil {
+			if logger != nil {
+				logger.Warn("auth decision", "result", "deny", "rpc_method", info.FullMethod, "reason", err.Error())
+			}
 			return err
+		}
+		if logger != nil {
+			logger.Info("auth decision", "result", "allow", "rpc_method", info.FullMethod, "caller_sub", claims.Subject, "project_id", claims.ProjectID)
 		}
 		wrapped := &wrappedStream{
 			ServerStream: ss,
-			ctx:          context.WithValue(ss.Context(), ctxKeyClaims{}, claims),
+			ctx:          ContextWithClaims(ss.Context(), claims),
 		}
 		return handler(srv, wrapped)
 	}

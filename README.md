@@ -286,6 +286,7 @@ scripts/             Development helper scripts
 |---|---|
 | `make build` | Build both binaries (runs proto generation first) |
 | `make test` | Run all tests with race detection |
+| `make test-e2e` | Run dockerized end-to-end test suite |
 | `make test-cover` | Run tests with coverage report |
 | `make proto` | Regenerate protobuf Go code |
 | `make lint` | Run golangci-lint |
@@ -293,6 +294,14 @@ scripts/             Development helper scripts
 | `make certs` | Initialize a bridge CA in `certs/` |
 | `make dev-setup` | Build + generate dev certs |
 | `make clean` | Remove build artifacts |
+
+### Dockerized E2E Test
+
+```bash
+make test-e2e
+```
+
+This builds `bridge` and `test-client` containers, starts the bridge with mTLS+JWT enabled, and runs the e2e client scenario against it.
 
 ## bridge-ca Commands
 

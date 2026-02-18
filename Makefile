@@ -1,4 +1,4 @@
-.PHONY: build proto test lint clean certs dev-setup
+.PHONY: build proto test test-e2e lint clean certs dev-setup
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
@@ -19,6 +19,13 @@ proto:
 
 test:
 	go test -race -count=1 ./...
+
+test-e2e:
+	@set +e; \
+	docker compose -f e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-client; \
+	rc=$$?; \
+	docker compose -f e2e/docker-compose.yml down -v; \
+	exit $$rc
 
 test-cover:
 	go test -race -coverprofile=coverage.out ./...

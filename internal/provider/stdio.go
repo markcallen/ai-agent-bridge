@@ -30,6 +30,8 @@ type StdioProvider struct {
 	cfg StdioConfig
 }
 
+var commandStarter = func(cmd *exec.Cmd) error { return cmd.Start() }
+
 // NewStdioProvider creates a new stdio-based provider.
 func NewStdioProvider(cfg StdioConfig) *StdioProvider {
 	if cfg.StartupTimeout == 0 {
@@ -61,7 +63,7 @@ func (p *StdioProvider) Health(ctx context.Context) error {
 func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (bridge.SessionHandle, error) {
 	binPath, err := resolveBinaryPath(p.cfg.Binary)
 	if err != nil {
-		return nil, fmt.Errorf("resolve binary %q: %w", p.cfg.Binary, err)
+		return nil, fmt.Errorf("%w: resolve binary %q: %v", bridge.ErrProviderUnavailable, p.cfg.Binary, err)
 	}
 
 	args := append([]string(nil), p.cfg.DefaultArgs...)
@@ -90,8 +92,23 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 		return nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start %s: %w", p.cfg.Binary, err)
+	startErr := make(chan error, 1)
+	go func() {
+		startErr <- commandStarter(cmd)
+	}()
+
+	select {
+	case err := <-startErr:
+		if err != nil {
+			return nil, fmt.Errorf("%w: start %s: %v", bridge.ErrProviderUnavailable, p.cfg.Binary, err)
+		}
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(p.cfg.StartupTimeout):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return nil, fmt.Errorf("%w: startup timeout after %s", bridge.ErrProviderUnavailable, p.cfg.StartupTimeout)
 	}
 
 	h := &stdioHandle{

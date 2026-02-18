@@ -35,7 +35,7 @@ func (r *Registry) Get(id string) (Provider, error) {
 	defer r.mu.RUnlock()
 	p, ok := r.providers[id]
 	if !ok {
-		return nil, fmt.Errorf("unknown provider: %q", id)
+		return nil, fmt.Errorf("%w: %q", ErrProviderUnavailable, id)
 	}
 	return p, nil
 }

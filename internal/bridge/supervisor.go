@@ -62,13 +62,13 @@ func NewSupervisor(registry *Registry, policy Policy, eventBufSize int) *Supervi
 // Start creates and starts a new agent session.
 func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo, error) {
 	if cfg.SessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
+		return nil, fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
 	}
 	if cfg.ProjectID == "" {
-		return nil, fmt.Errorf("project_id is required")
+		return nil, fmt.Errorf("%w: project_id is required", ErrInvalidArgument)
 	}
 	if cfg.RepoPath == "" {
-		return nil, fmt.Errorf("repo_path is required")
+		return nil, fmt.Errorf("%w: repo_path is required", ErrInvalidArgument)
 	}
 
 	// Validate repo path
@@ -80,7 +80,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	// Check for duplicate
 	if _, exists := s.sessions[cfg.SessionID]; exists {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("session %q already exists", cfg.SessionID)
+		return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
 	}
 
 	// Check limits
@@ -104,6 +104,9 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	provider, err := s.registry.Get(cfg.Options["provider"])
 	if err != nil {
 		return nil, err
+	}
+	if err := provider.Health(ctx); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
 
 	sessionCtx, cancel := context.WithCancel(context.Background())
@@ -137,7 +140,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		s.mu.Unlock()
 		cancel()
 		_ = provider.Stop(handle)
-		return nil, fmt.Errorf("session %q already exists", cfg.SessionID)
+		return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
 	}
 	s.sessions[cfg.SessionID] = ms
 	s.mu.Unlock()
@@ -154,7 +157,7 @@ func (s *Supervisor) Stop(sessionID string, force bool) error {
 	ms, ok := s.sessions[sessionID]
 	if !ok {
 		s.mu.Unlock()
-		return fmt.Errorf("session %q not found", sessionID)
+		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	if ms.info.State == SessionStateStopped || ms.info.State == SessionStateFailed {
 		s.mu.Unlock()
@@ -191,10 +194,10 @@ func (s *Supervisor) Send(sessionID, text string) (uint64, error) {
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
-		return 0, fmt.Errorf("session %q not found", sessionID)
+		return 0, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	if ms.info.State != SessionStateRunning {
-		return 0, fmt.Errorf("session %q is not running (state=%d)", sessionID, ms.info.State)
+		return 0, fmt.Errorf("%w: %q (state=%d)", ErrSessionNotRunning, sessionID, ms.info.State)
 	}
 
 	provider, err := s.registry.Get(ms.info.Provider)
@@ -225,7 +228,7 @@ func (s *Supervisor) Get(sessionID string) (*SessionInfo, error) {
 	defer s.mu.RUnlock()
 	ms, ok := s.sessions[sessionID]
 	if !ok {
-		return nil, fmt.Errorf("session %q not found", sessionID)
+		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	info := ms.info // copy
 	return &info, nil
@@ -250,7 +253,7 @@ func (s *Supervisor) EventBuffer(sessionID string) (*EventBuffer, error) {
 	defer s.mu.RUnlock()
 	ms, ok := s.sessions[sessionID]
 	if !ok {
-		return nil, fmt.Errorf("session %q not found", sessionID)
+		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	return ms.buf, nil
 }

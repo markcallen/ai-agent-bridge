@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
@@ -31,9 +32,9 @@ func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.
 }
 
 func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSessionRequest) (*bridgev1.StartSessionResponse, error) {
-	claims, ok := auth.ClaimsFromContext(ctx)
-	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "missing claims")
+	claims, err := mustClaims(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if req.ProjectId == "" || req.SessionId == "" || req.RepoPath == "" || req.Provider == "" {
@@ -41,8 +42,8 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 	}
 
 	// Authorization: JWT project_id must match request
-	if claims.ProjectID != "" && claims.ProjectID != req.ProjectId {
-		return nil, status.Errorf(codes.PermissionDenied, "token project_id %q does not match request %q", claims.ProjectID, req.ProjectId)
+	if err := authorizeProject(claims, req.ProjectId); err != nil {
+		return nil, err
 	}
 
 	opts := map[string]string{"provider": req.Provider}
@@ -58,7 +59,7 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 	})
 	if err != nil {
 		s.logger.Error("start session failed", "session_id", req.SessionId, "error", err)
-		return nil, status.Errorf(codes.Internal, "start session: %v", err)
+		return nil, mapBridgeError(err, "start session")
 	}
 
 	s.logger.Info("session started",
@@ -76,16 +77,21 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 }
 
 func (s *BridgeServer) StopSession(ctx context.Context, req *bridgev1.StopSessionRequest) (*bridgev1.StopSessionResponse, error) {
-	if _, ok := auth.ClaimsFromContext(ctx); !ok {
-		return nil, status.Error(codes.Unauthenticated, "missing claims")
+	claims, err := mustClaims(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if req.SessionId == "" {
 		return nil, status.Error(codes.InvalidArgument, "session_id is required")
 	}
 
+	if err := s.authorizeSession(claims, req.SessionId); err != nil {
+		return nil, err
+	}
+
 	if err := s.supervisor.Stop(req.SessionId, req.Force); err != nil {
-		return nil, status.Errorf(codes.Internal, "stop session: %v", err)
+		return nil, mapBridgeError(err, "stop session")
 	}
 
 	s.logger.Info("session stopped", "session_id", req.SessionId)
@@ -95,28 +101,40 @@ func (s *BridgeServer) StopSession(ctx context.Context, req *bridgev1.StopSessio
 }
 
 func (s *BridgeServer) GetSession(ctx context.Context, req *bridgev1.GetSessionRequest) (*bridgev1.GetSessionResponse, error) {
-	if _, ok := auth.ClaimsFromContext(ctx); !ok {
-		return nil, status.Error(codes.Unauthenticated, "missing claims")
+	claims, err := mustClaims(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if req.SessionId == "" {
 		return nil, status.Error(codes.InvalidArgument, "session_id is required")
 	}
 
+	if err := s.authorizeSession(claims, req.SessionId); err != nil {
+		return nil, err
+	}
+
 	info, err := s.supervisor.Get(req.SessionId)
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "%v", err)
+		return nil, mapBridgeError(err, "get session")
 	}
 
 	return sessionInfoToProto(info), nil
 }
 
 func (s *BridgeServer) ListSessions(ctx context.Context, req *bridgev1.ListSessionsRequest) (*bridgev1.ListSessionsResponse, error) {
-	if _, ok := auth.ClaimsFromContext(ctx); !ok {
-		return nil, status.Error(codes.Unauthenticated, "missing claims")
+	claims, err := mustClaims(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	sessions := s.supervisor.List(req.ProjectId)
+	projectID := req.ProjectId
+	if claims.ProjectID != "" {
+		if projectID != "" && projectID != claims.ProjectID {
+			return nil, status.Errorf(codes.PermissionDenied, "token project_id %q does not match request %q", claims.ProjectID, projectID)
+		}
+		projectID = claims.ProjectID
+	}
+	sessions := s.supervisor.List(projectID)
 	resp := &bridgev1.ListSessionsResponse{
 		Sessions: make([]*bridgev1.GetSessionResponse, 0, len(sessions)),
 	}
@@ -127,17 +145,22 @@ func (s *BridgeServer) ListSessions(ctx context.Context, req *bridgev1.ListSessi
 }
 
 func (s *BridgeServer) SendInput(ctx context.Context, req *bridgev1.SendInputRequest) (*bridgev1.SendInputResponse, error) {
-	if _, ok := auth.ClaimsFromContext(ctx); !ok {
-		return nil, status.Error(codes.Unauthenticated, "missing claims")
+	claims, err := mustClaims(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	if req.SessionId == "" || req.Text == "" {
 		return nil, status.Error(codes.InvalidArgument, "session_id and text are required")
 	}
 
+	if err := s.authorizeSession(claims, req.SessionId); err != nil {
+		return nil, err
+	}
+
 	seq, err := s.supervisor.Send(req.SessionId, req.Text)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "send input: %v", err)
+		return nil, mapBridgeError(err, "send input")
 	}
 
 	return &bridgev1.SendInputResponse{
@@ -147,19 +170,22 @@ func (s *BridgeServer) SendInput(ctx context.Context, req *bridgev1.SendInputReq
 }
 
 func (s *BridgeServer) StreamEvents(req *bridgev1.StreamEventsRequest, stream bridgev1.BridgeService_StreamEventsServer) error {
-	claims, ok := auth.ClaimsFromContext(stream.Context())
-	if !ok {
-		return status.Error(codes.Unauthenticated, "missing claims")
+	claims, err := mustClaims(stream.Context())
+	if err != nil {
+		return err
 	}
-	_ = claims
 
 	if req.SessionId == "" {
 		return status.Error(codes.InvalidArgument, "session_id is required")
 	}
 
+	if err := s.authorizeSession(claims, req.SessionId); err != nil {
+		return err
+	}
+
 	buf, err := s.supervisor.EventBuffer(req.SessionId)
 	if err != nil {
-		return status.Errorf(codes.NotFound, "%v", err)
+		return mapBridgeError(err, "stream events")
 	}
 
 	// Replay buffered events
@@ -195,6 +221,46 @@ func (s *BridgeServer) StreamEvents(req *bridgev1.StreamEventsRequest, stream br
 				return err
 			}
 		}
+	}
+}
+
+func mustClaims(ctx context.Context) (*auth.BridgeClaims, error) {
+	claims, ok := auth.ClaimsFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "missing claims")
+	}
+	return claims, nil
+}
+
+func authorizeProject(claims *auth.BridgeClaims, projectID string) error {
+	if claims.ProjectID != "" && claims.ProjectID != projectID {
+		return status.Errorf(codes.PermissionDenied, "token project_id %q does not match request %q", claims.ProjectID, projectID)
+	}
+	return nil
+}
+
+func (s *BridgeServer) authorizeSession(claims *auth.BridgeClaims, sessionID string) error {
+	info, err := s.supervisor.Get(sessionID)
+	if err != nil {
+		return mapBridgeError(err, "authorize session")
+	}
+	return authorizeProject(claims, info.ProjectID)
+}
+
+func mapBridgeError(err error, op string) error {
+	switch {
+	case errors.Is(err, bridge.ErrInvalidArgument), errors.Is(err, bridge.ErrSessionNotRunning):
+		return status.Errorf(codes.InvalidArgument, "%s: %v", op, err)
+	case errors.Is(err, bridge.ErrSessionNotFound):
+		return status.Errorf(codes.NotFound, "%s: %v", op, err)
+	case errors.Is(err, bridge.ErrSessionAlreadyExists):
+		return status.Errorf(codes.AlreadyExists, "%s: %v", op, err)
+	case errors.Is(err, bridge.ErrProviderUnavailable):
+		return status.Errorf(codes.Unavailable, "%s: %v", op, err)
+	case errors.Is(err, bridge.ErrSessionLimitReached), errors.Is(err, bridge.ErrInputTooLarge):
+		return status.Errorf(codes.ResourceExhausted, "%s: %v", op, err)
+	default:
+		return status.Errorf(codes.Internal, "%s: %v", op, err)
 	}
 }
 
@@ -304,4 +370,3 @@ func seqEventToProto(se bridge.SequencedEvent) *bridgev1.SessionEvent {
 		Error:     se.Error,
 	}
 }
-
