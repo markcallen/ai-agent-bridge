@@ -38,6 +38,7 @@ Items tracked here are out of scope for the current implementation but planned f
 - [ ] Prometheus metrics: `sessions_active`, `events_total`, `events_dropped`, `rpc_latency_ms`, `auth_failures`
 - [ ] OpenTelemetry trace spans on RPC calls
 - [ ] Structured audit log with `project_id`, `session_id`, `caller_cn`, `caller_sub` (partial: `caller_cn` not yet wired)
+- [ ] Agent introspection API: inspect live session state (current action, pending input, last output/error, heartbeat)
 - [ ] gRPC reflection (dev mode only)
 - [ ] Health endpoint with detailed provider diagnostics
 

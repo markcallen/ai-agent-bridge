@@ -42,6 +42,7 @@ The bridge replaces direct in-process agent management with a networked, provide
 - Implement zero-trust security using per-project CAs with cross-signing, mTLS, and JWTs.
 - Support both local and remote agent communication from day one.
 - Ship a Go SDK (`bridgeclient`) for integration by consumer projects.
+- Provide durable per-session pub/sub replay so SDK clients can reconnect and receive events they missed while disconnected (while bridge process is alive).
 - Provide a CLI tool for CA/cert management (`bridge-ca`).
 
 ---
@@ -399,6 +400,15 @@ type Event struct {
 - `StreamEvents` with `after_seq` replays from buffer, then switches to live streaming.
 - Buffer is released when session is removed (after stop + configurable retention period).
 
+### 10.3 Durable SDK Replay Requirement
+
+- The bridge must maintain a per-session outbound event queue that continues to enqueue agent events even when no SDK stream is connected.
+- Delivery semantics are at-least-once per `(project_id, session_id, subscriber_id)`.
+- The SDK must identify itself with a stable `subscriber_id` and resume using last acknowledged sequence.
+- On reconnect, the bridge replays all queued events with `seq > ack_seq` in order, then switches to live tailing.
+- If queued events exceed retention capacity, bridge emits `BUFFER_OVERFLOW` and resumes from the earliest retained sequence.
+- Scope: guaranteed replay is required while the bridge daemon remains running and session is active; restart durability remains out of scope for this phase.
+
 ---
 
 ## 11. Go SDK (`bridgeclient`)
@@ -465,6 +475,7 @@ for {
 - JWT auto-renewal before expiry.
 - Connection keepalive and health checking.
 - Configurable timeouts per operation.
+- Subscriber cursor tracking (`subscriber_id`, `ack_seq`) for reconnect + missed-event replay.
 
 ---
 
@@ -613,6 +624,7 @@ Changes required:
 5. Cross-signed CA trust enables secure communication between independently managed projects.
 6. Session limits and policy guards are enforced.
 7. Provider unavailability is detected and reported gracefully.
+8. SDK reconnect receives all unseen queued session events in order (or explicit overflow signal if retention is exceeded).
 
 ---
 

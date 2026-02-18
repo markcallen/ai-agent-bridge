@@ -1,10 +1,14 @@
-.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup fmt run dev-run
+.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup fmt run dev-run chat-example
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
 BRIDGE_CA := $(BIN_DIR)/bridge-ca
 CONFIG ?= config/bridge.yaml
 DEV_CONFIG ?= config/bridge-dev.yaml
+CHAT_TARGET ?= 127.0.0.1:9445
+CHAT_PROVIDER ?= claude-chat
+CHAT_PROJECT ?= dev
+CHAT_REPO ?= $(PWD)
 
 build: proto
 	@mkdir -p $(BIN_DIR)
@@ -57,3 +61,16 @@ run: build
 
 dev-run: dev-setup
 	$(BRIDGE) --config $(DEV_CONFIG)
+
+chat-example:
+	go run ./examples/chat \
+		-target $(CHAT_TARGET) \
+		-provider $(CHAT_PROVIDER) \
+		-project $(CHAT_PROJECT) \
+		-cacert certs/ca-bundle.crt \
+		-cert certs/dev-client.crt \
+		-key certs/dev-client.key \
+		-jwt-key certs/jwt-signing.key \
+		-jwt-issuer dev \
+		-timeout 2m \
+		$(CHAT_REPO)

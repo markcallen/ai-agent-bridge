@@ -41,6 +41,7 @@ func main() {
 			DefaultArgs:    pcfg.Args,
 			StartupTimeout: config.ParseDuration(pcfg.StartupTimeout, 30e9),
 			StopGrace:      config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
+			UsePTY:         pcfg.PTY,
 		})
 		if err := registry.Register(p); err != nil {
 			logger.Error("register provider", "provider", name, "error", err)

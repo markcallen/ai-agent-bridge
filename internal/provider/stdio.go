@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/markcallen/ai-agent-bridge/internal/bridge"
 )
 
@@ -23,6 +24,7 @@ type StdioConfig struct {
 	DefaultArgs    []string
 	StartupTimeout time.Duration
 	StopGrace      time.Duration
+	UsePTY         bool
 }
 
 // StdioProvider manages agent sessions via subprocess stdio.
@@ -76,6 +78,10 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 		if strings.HasPrefix(k, "arg:") {
 			args = append(args, v)
 		}
+	}
+
+	if p.cfg.UsePTY {
+		return p.startPTY(ctx, cfg, binPath, args)
 	}
 
 	cmd := exec.CommandContext(ctx, binPath, args...)
@@ -142,6 +148,63 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 	// Start output readers and exit watcher
 	go h.readStream("stdout", stdout)
 	go h.readStream("stderr", stderr)
+	go h.waitForExit()
+
+	return h, nil
+}
+
+func (p *StdioProvider) startPTY(ctx context.Context, cfg bridge.SessionConfig, binPath string, args []string) (bridge.SessionHandle, error) {
+	cmd := exec.CommandContext(ctx, binPath, args...)
+	cmd.Dir = cfg.RepoPath
+	cmd.Env = filterEnv(os.Environ())
+
+	type ptyStart struct {
+		file *os.File
+		err  error
+	}
+
+	startCh := make(chan ptyStart, 1)
+	go func() {
+		f, err := pty.Start(cmd)
+		startCh <- ptyStart{file: f, err: err}
+	}()
+
+	var ptmx *os.File
+	select {
+	case res := <-startCh:
+		if res.err != nil {
+			return nil, fmt.Errorf("%w: start %s: %v", bridge.ErrProviderUnavailable, p.cfg.Binary, res.err)
+		}
+		ptmx = res.file
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(p.cfg.StartupTimeout):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return nil, fmt.Errorf("%w: startup timeout after %s", bridge.ErrProviderUnavailable, p.cfg.StartupTimeout)
+	}
+
+	h := &stdioHandle{
+		id:        cfg.SessionID,
+		pid:       cmd.Process.Pid,
+		cmd:       cmd,
+		stdin:     ptmx,
+		events:    make(chan bridge.Event, 256),
+		provider:  p.cfg.ProviderID,
+		projectID: cfg.ProjectID,
+		sessionID: cfg.SessionID,
+		stopGrace: p.cfg.StopGrace,
+		waitDone:  make(chan struct{}),
+	}
+
+	h.emit(bridge.Event{
+		Type:   bridge.EventTypeSessionStarted,
+		Stream: "system",
+		Text:   "session started",
+	})
+
+	go h.readStream("stdout", ptmx)
 	go h.waitForExit()
 
 	return h, nil

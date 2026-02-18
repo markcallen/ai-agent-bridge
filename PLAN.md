@@ -146,6 +146,17 @@ ai-agent-bridge/
   - Overflow detection and `BUFFER_OVERFLOW` event emission
 - [x] Unit tests for supervisor, policy, and event buffer
 
+### 1.7 Session Pub/Sub Queueing
+- [ ] Introduce per-session subscriber queue/cursor manager (`internal/bridge/subscriberbuf.go`)
+  - Track subscribers by `(project_id, session_id, subscriber_id)`
+  - Track `ack_seq` and deliver `seq > ack_seq` on reconnect
+  - Preserve strict in-order delivery guarantees per subscriber
+  - Keep enqueueing provider events while subscribers are disconnected
+  - Emit `BUFFER_OVERFLOW` when retention is exceeded
+- [ ] Extend supervisor/server integration to route events through subscriber queue manager
+- [ ] Add configuration for queue retention limits and subscriber TTL cleanup
+- [ ] Unit tests: reconnect replay, ack progression, overflow behavior, multi-subscriber fanout
+
 ### 1.7 gRPC Server
 - [x] `internal/server/server.go` - Implement `BridgeService`
   - Wire supervisor, registry, and event buffer
@@ -239,6 +250,11 @@ ai-agent-bridge/
   - Automatic reconnect with `after_seq` resume
   - Backoff on reconnect failures
   - Context cancellation support
+- [ ] Add SDK subscriber identity + cursor persistence
+  - Stable `subscriber_id` per consumer/session stream
+  - Persist/update `last_ack_seq` after callback processing
+  - Reconnect using subscriber cursor semantics (unseen queued events first, then live tail)
+  - At-least-once handling guidance for idempotent consumer callbacks
 
 ### 3.4 Error Handling
 - [x] `pkg/bridgeclient/errors.go` - Typed errors
@@ -338,6 +354,7 @@ ai-agent-bridge/
 ### 6.2 Integration Tests
 - [x] End-to-end: start → input → output → stop (with real process)
 - [ ] Reconnect from `after_seq` (disconnect, reconnect, verify no event loss)
+- [ ] Reconnect from subscriber cursor (`subscriber_id` + `ack_seq`) with queued replay validation
 - [ ] Multi-provider concurrent sessions
 - [x] mTLS rejection (bad cert, expired cert, wrong CA)
 - [x] JWT rejection (expired, wrong audience, wrong issuer)
@@ -349,6 +366,7 @@ ai-agent-bridge/
 - [ ] Agent process crash → `SESSION_FAILED` event emitted
 - [ ] Bridge daemon restart → all sessions marked failed
 - [ ] Network partition simulation (client disconnect/reconnect)
+- [ ] Disconnect while agent continues producing events; reconnect receives unseen queue contents in order
 - [ ] Invalid input handling (oversized, malformed)
 - [ ] Concurrent session operations (race condition testing)
 

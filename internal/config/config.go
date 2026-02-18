@@ -10,14 +10,14 @@ import (
 
 // Config is the top-level bridge daemon configuration.
 type Config struct {
-	Server   ServerConfig              `yaml:"server"`
-	TLS      TLSConfig                 `yaml:"tls"`
-	Auth     AuthConfig                `yaml:"auth"`
-	Sessions SessionsConfig            `yaml:"sessions"`
-	Input    InputConfig               `yaml:"input"`
-	Providers map[string]ProviderConfig `yaml:"providers"`
-	AllowedPaths []string              `yaml:"allowed_paths"`
-	Logging  LoggingConfig             `yaml:"logging"`
+	Server       ServerConfig              `yaml:"server"`
+	TLS          TLSConfig                 `yaml:"tls"`
+	Auth         AuthConfig                `yaml:"auth"`
+	Sessions     SessionsConfig            `yaml:"sessions"`
+	Input        InputConfig               `yaml:"input"`
+	Providers    map[string]ProviderConfig `yaml:"providers"`
+	AllowedPaths []string                  `yaml:"allowed_paths"`
+	Logging      LoggingConfig             `yaml:"logging"`
 }
 
 type ServerConfig struct {
@@ -57,6 +57,7 @@ type ProviderConfig struct {
 	Binary         string   `yaml:"binary"`
 	Args           []string `yaml:"args"`
 	StartupTimeout string   `yaml:"startup_timeout"`
+	PTY            bool     `yaml:"pty"`
 }
 
 type LoggingConfig struct {

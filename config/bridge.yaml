@@ -34,6 +34,11 @@ providers:
     binary: "opencode"
     args: []
     startup_timeout: "30s"
+  claude-chat:
+    binary: "claude"
+    args: []
+    startup_timeout: "30s"
+    pty: true
 
 allowed_paths: []
 
