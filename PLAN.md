@@ -339,8 +339,8 @@ ai-agent-bridge/
 - [x] End-to-end: start → input → output → stop (with real process)
 - [ ] Reconnect from `after_seq` (disconnect, reconnect, verify no event loss)
 - [ ] Multi-provider concurrent sessions
-- [ ] mTLS rejection (bad cert, expired cert, wrong CA)
-- [ ] JWT rejection (expired, wrong audience, wrong issuer)
+- [x] mTLS rejection (bad cert, expired cert, wrong CA)
+- [x] JWT rejection (expired, wrong audience, wrong issuer)
 - [ ] Session limit enforcement
 - [x] Provider unavailability handling
 - [ ] Graceful shutdown (in-flight sessions drained)

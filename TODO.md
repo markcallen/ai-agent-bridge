@@ -62,8 +62,8 @@ Items tracked here are out of scope for the current implementation but planned f
 ## Testing
 
 - [x] Integration tests: full gRPC round-trip (start → input → events → stop)
-- [ ] Integration tests: mTLS rejection (bad cert, expired, wrong CA)
-- [ ] Integration tests: JWT rejection (expired, wrong audience, wrong issuer)
+- [x] Integration tests: mTLS rejection (bad cert, expired, wrong CA)
+- [x] Integration tests: JWT rejection (expired, wrong audience, wrong issuer)
 - [ ] Integration tests: reconnect/replay with after_seq
 - [ ] Failure tests: agent process crash detection
 - [ ] Failure tests: bridge daemon restart (session cleanup)
