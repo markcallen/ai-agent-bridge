@@ -31,31 +31,56 @@ type SessionInfo struct {
 
 // Supervisor manages the lifecycle of agent sessions.
 type Supervisor struct {
-	registry *Registry
-	policy   Policy
-	bufSize  int
+	registry  *Registry
+	policy    Policy
+	bufSize   int
+	subConfig SubscriberConfig
 
 	mu       sync.RWMutex
 	sessions map[string]*managedSession // keyed by session_id
+
+	done chan struct{} // closed by Close to stop background goroutines
 }
 
 type managedSession struct {
 	info   SessionInfo
 	handle SessionHandle
 	buf    *EventBuffer
+	subMgr *SubscriberManager
 	cancel context.CancelFunc
 }
 
 // NewSupervisor creates a new session supervisor.
-func NewSupervisor(registry *Registry, policy Policy, eventBufSize int) *Supervisor {
+func NewSupervisor(registry *Registry, policy Policy, eventBufSize int, subConfig SubscriberConfig) *Supervisor {
 	if eventBufSize <= 0 {
 		eventBufSize = 10000
 	}
-	return &Supervisor{
-		registry: registry,
-		policy:   policy,
-		bufSize:  eventBufSize,
-		sessions: make(map[string]*managedSession),
+	s := &Supervisor{
+		registry:  registry,
+		policy:    policy,
+		bufSize:   eventBufSize,
+		subConfig: subConfig,
+		sessions:  make(map[string]*managedSession),
+		done:      make(chan struct{}),
+	}
+	go s.cleanupLoop()
+	return s
+}
+
+func (s *Supervisor) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+			s.mu.RLock()
+			for _, ms := range s.sessions {
+				ms.subMgr.CleanupExpired()
+			}
+			s.mu.RUnlock()
+		}
 	}
 }
 
@@ -118,6 +143,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	}
 
 	buf := NewEventBuffer(s.bufSize)
+	subMgr := NewSubscriberManager(buf, s.subConfig)
 	now := time.Now().UTC()
 	info := SessionInfo{
 		SessionID: cfg.SessionID,
@@ -131,6 +157,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		info:   info,
 		handle: handle,
 		buf:    buf,
+		subMgr: subMgr,
 		cancel: cancel,
 	}
 
@@ -258,6 +285,17 @@ func (s *Supervisor) EventBuffer(sessionID string) (*EventBuffer, error) {
 	return ms.buf, nil
 }
 
+// SubscriberManager returns the subscriber manager for a session.
+func (s *Supervisor) SubscriberManager(sessionID string) (*SubscriberManager, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ms, ok := s.sessions[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+	}
+	return ms.subMgr, nil
+}
+
 // ActiveCount returns the number of running sessions globally and for a project.
 func (s *Supervisor) ActiveCount(projectID string) (project, global int) {
 	s.mu.RLock()
@@ -273,8 +311,16 @@ func (s *Supervisor) ActiveCount(projectID string) (project, global int) {
 	return
 }
 
-// Close stops all running sessions.
+// Close stops all running sessions and background goroutines.
 func (s *Supervisor) Close() {
+	// Signal cleanup goroutine to stop.
+	select {
+	case <-s.done:
+		// Already closed.
+	default:
+		close(s.done)
+	}
+
 	s.mu.Lock()
 	sessions := make(map[string]*managedSession, len(s.sessions))
 	for k, v := range s.sessions {

@@ -17,6 +17,8 @@ sessions:
   idle_timeout: "30m"
   stop_grace_period: "10s"
   event_buffer_size: 10000
+  max_subscribers_per_session: 10
+  subscriber_ttl: "30m"
 
 input:
   max_size_bytes: 65536

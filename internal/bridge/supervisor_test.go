@@ -64,7 +64,7 @@ func TestSupervisorStartGetStop(t *testing.T) {
 	mp := newMockProvider("test")
 	reg.Register(mp)
 
-	sup := NewSupervisor(reg, DefaultPolicy(), 100)
+	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig())
 	defer sup.Close()
 
 	info, err := sup.Start(context.Background(), SessionConfig{
@@ -118,7 +118,7 @@ func TestSupervisorStartGetStop(t *testing.T) {
 func TestSupervisorDuplicateSession(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(newMockProvider("test"))
-	sup := NewSupervisor(reg, DefaultPolicy(), 100)
+	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig())
 	defer sup.Close()
 
 	_, err := sup.Start(context.Background(), SessionConfig{
@@ -150,7 +150,7 @@ func TestSupervisorSessionLimits(t *testing.T) {
 	policy.MaxPerProject = 2
 	policy.MaxGlobal = 3
 
-	sup := NewSupervisor(reg, policy, 100)
+	sup := NewSupervisor(reg, policy, 100, DefaultSubscriberConfig())
 	defer sup.Close()
 
 	for i := 0; i < 2; i++ {
@@ -202,7 +202,7 @@ func TestSupervisorSessionLimits(t *testing.T) {
 func TestSupervisorEventBuffer(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(newMockProvider("test"))
-	sup := NewSupervisor(reg, DefaultPolicy(), 100)
+	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig())
 	defer sup.Close()
 
 	_, err := sup.Start(context.Background(), SessionConfig{

@@ -112,6 +112,7 @@ message SendInputResponse {
 message StreamEventsRequest {
   string session_id = 1;
   uint64 after_seq = 2;
+  string subscriber_id = 3;
 }
 
 message SessionEvent {

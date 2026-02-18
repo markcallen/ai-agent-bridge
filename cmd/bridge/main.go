@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/auth"
@@ -58,8 +59,17 @@ func main() {
 		AllowedPaths:  cfg.AllowedPaths,
 	}
 
+	// Set up subscriber config
+	subConfig := bridge.SubscriberConfig{
+		MaxSubscribersPerSession: cfg.Sessions.MaxSubscribersPerSession,
+		SubscriberTTL:            config.ParseDuration(cfg.Sessions.SubscriberTTL, 30*time.Minute),
+	}
+	if subConfig.MaxSubscribersPerSession == 0 {
+		subConfig.MaxSubscribersPerSession = 10
+	}
+
 	// Set up supervisor
-	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize)
+	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, subConfig)
 	defer sup.Close()
 
 	// Set up JWT verifier

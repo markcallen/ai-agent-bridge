@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
@@ -12,6 +14,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+func generateID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
 
 // BridgeServer implements the bridge.v1.BridgeService gRPC service.
 type BridgeServer struct {
@@ -183,43 +191,64 @@ func (s *BridgeServer) StreamEvents(req *bridgev1.StreamEventsRequest, stream br
 		return err
 	}
 
-	buf, err := s.supervisor.EventBuffer(req.SessionId)
+	subMgr, err := s.supervisor.SubscriberManager(req.SessionId)
 	if err != nil {
 		return mapBridgeError(err, "stream events")
 	}
 
-	// Replay buffered events
-	replayed := buf.After(req.AfterSeq)
-	for _, se := range replayed {
-		if err := stream.Send(seqEventToProto(se)); err != nil {
+	// Default subscriber_id to a UUID for backward compatibility.
+	subscriberID := req.SubscriberId
+	if subscriberID == "" {
+		subscriberID = generateID()
+	}
+
+	result, err := subMgr.Attach(subscriberID, req.AfterSeq)
+	if err != nil {
+		if errors.Is(err, bridge.ErrSubscriberLimitReached) {
+			return status.Errorf(codes.ResourceExhausted, "stream events: %v", err)
+		}
+		return mapBridgeError(err, "stream events")
+	}
+	defer subMgr.Detach(subscriberID, result.Live)
+
+	// If the subscriber fell behind the buffer, send an overflow marker.
+	if result.Overflow {
+		overflow := &bridgev1.SessionEvent{
+			SessionId: req.SessionId,
+			Type:      bridgev1.EventType_EVENT_TYPE_BUFFER_OVERFLOW,
+		}
+		if err := stream.Send(overflow); err != nil {
 			return err
 		}
 	}
 
-	// Switch to live streaming
-	sub := buf.Subscribe()
-	defer buf.Unsubscribe(sub)
-
+	// Send replay events.
 	lastSeq := req.AfterSeq
-	if len(replayed) > 0 {
-		lastSeq = replayed[len(replayed)-1].Seq
+	for _, se := range result.Replay {
+		if err := stream.Send(seqEventToProto(se)); err != nil {
+			return err
+		}
+		lastSeq = se.Seq
+		subMgr.Ack(subscriberID, se.Seq)
 	}
 
+	// Switch to live streaming.
 	for {
 		select {
 		case <-stream.Context().Done():
 			return nil
-		case se, ok := <-sub:
+		case se, ok := <-result.Live:
 			if !ok {
-				return nil // channel closed
+				return nil
 			}
 			if se.Seq <= lastSeq {
-				continue // skip duplicates from replay
+				continue
 			}
 			lastSeq = se.Seq
 			if err := stream.Send(seqEventToProto(se)); err != nil {
 				return err
 			}
+			subMgr.Ack(subscriberID, se.Seq)
 		}
 	}
 }

@@ -101,9 +101,11 @@ func main() {
 	streamCtx, streamCancel := context.WithCancel(context.Background())
 	defer streamCancel()
 
+	subscriberID := "chat-" + sessionID
 	stream, err := client.StreamEvents(streamCtx, &bridgev1.StreamEventsRequest{
-		SessionId: sessionID,
-		AfterSeq:  0,
+		SessionId:    sessionID,
+		SubscriberId: subscriberID,
+		AfterSeq:     0,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stream events: %v\n", err)

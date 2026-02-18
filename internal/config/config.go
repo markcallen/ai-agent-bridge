@@ -42,11 +42,13 @@ type JWTKeyConfig struct {
 }
 
 type SessionsConfig struct {
-	MaxPerProject   int    `yaml:"max_per_project"`
-	MaxGlobal       int    `yaml:"max_global"`
-	IdleTimeout     string `yaml:"idle_timeout"`
-	StopGracePeriod string `yaml:"stop_grace_period"`
-	EventBufferSize int    `yaml:"event_buffer_size"`
+	MaxPerProject            int    `yaml:"max_per_project"`
+	MaxGlobal                int    `yaml:"max_global"`
+	IdleTimeout              string `yaml:"idle_timeout"`
+	StopGracePeriod          string `yaml:"stop_grace_period"`
+	EventBufferSize          int    `yaml:"event_buffer_size"`
+	MaxSubscribersPerSession int    `yaml:"max_subscribers_per_session"`
+	SubscriberTTL            string `yaml:"subscriber_ttl"`
 }
 
 type InputConfig struct {
@@ -118,6 +120,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Sessions.IdleTimeout == "" {
 		cfg.Sessions.IdleTimeout = "30m"
+	}
+	if cfg.Sessions.MaxSubscribersPerSession == 0 {
+		cfg.Sessions.MaxSubscribersPerSession = 10
+	}
+	if cfg.Sessions.SubscriberTTL == "" {
+		cfg.Sessions.SubscriberTTL = "30m"
 	}
 	if cfg.Input.MaxSizeBytes == 0 {
 		cfg.Input.MaxSizeBytes = 65536

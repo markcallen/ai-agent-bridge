@@ -91,7 +91,7 @@ func newTestServer(t *testing.T, policy bridge.Policy) *BridgeServer {
 	if err := reg.Register(&testProvider{id: "test"}); err != nil {
 		t.Fatalf("register provider: %v", err)
 	}
-	sup := bridge.NewSupervisor(reg, policy, 64)
+	sup := bridge.NewSupervisor(reg, policy, 64, bridge.DefaultSubscriberConfig())
 	t.Cleanup(func() { sup.Close() })
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return New(sup, reg, logger)

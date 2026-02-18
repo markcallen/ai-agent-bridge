@@ -120,6 +120,16 @@ func (b *EventBuffer) Len() int {
 	return b.count
 }
 
+// OldestSeq returns the sequence number of the oldest event in the buffer, or 0 if empty.
+func (b *EventBuffer) OldestSeq() uint64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.count == 0 {
+		return 0
+	}
+	return b.buf[b.head].Seq
+}
+
 // LastSeq returns the sequence number of the most recently appended event.
 func (b *EventBuffer) LastSeq() uint64 {
 	b.mu.RLock()

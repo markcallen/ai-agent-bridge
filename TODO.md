@@ -52,10 +52,8 @@ Items tracked here are out of scope for the current implementation but planned f
 
 ## Integration
 
-- [ ] Detailed migration guide for prd-manager-control-plane
-- [ ] Detailed migration guide for ndara-ai-orchestrator
-- [ ] Event type mapping: bridge events → `agent.Event` (prd-manager)
-- [ ] Event type mapping: bridge events → `orch.v1.Event` (ndara)
+- [ ] Consumer application integration guide
+- [ ] Event type mapping examples for common consumer patterns
 - [ ] Feature flag for gradual rollout (in-process fallback)
 - [x] Docker Compose setup for integration testing
 - [x] `make dev-setup` one-command dev environment with all certs
@@ -65,7 +63,8 @@ Items tracked here are out of scope for the current implementation but planned f
 - [x] Integration tests: full gRPC round-trip (start → input → events → stop)
 - [x] Integration tests: mTLS rejection (bad cert, expired, wrong CA)
 - [x] Integration tests: JWT rejection (expired, wrong audience, wrong issuer)
-- [ ] Integration tests: reconnect/replay with after_seq
+- [x] Unit tests: subscriber reconnect/replay with ack_seq (subscribermgr_test.go)
+- [ ] Integration tests: reconnect/replay with after_seq (e2e)
 - [ ] Failure tests: agent process crash detection
 - [ ] Failure tests: bridge daemon restart (session cleanup)
 - [ ] Failure tests: concurrent session operations (race detection)

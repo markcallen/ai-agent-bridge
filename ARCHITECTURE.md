@@ -6,28 +6,19 @@ The AI Agent Bridge is a standalone gRPC daemon and Go SDK that provides a secur
 
 ## System Context
 
+The AI Agent Bridge sits between consumer applications and AI agent processes. Consumer applications (orchestrators, control planes, CLI tools, web services) connect via gRPC with mTLS + JWT authentication. Each consumer project gets its own CA and JWT signing key, with cross-signing enabling multi-tenant trust.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         User Interfaces                              │
-│   Slack    Discord    CLI (WebSocket)    Web UI (future)             │
-└─────┬────────┬──────────┬───────────────────────────────────────────┘
-      │        │          │
-      ▼        ▼          ▼
-┌──────────────────────────────────┐    ┌──────────────────────────────┐
-│   prd-manager-control-plane      │    │   ndara-ai-orchestrator      │
-│                                  │    │                              │
-│   Go HTTP API + SQLite           │    │   Go gRPC + mTLS + JWT       │
-│   - Project/session management   │    │   - Multi-machine dispatch   │
-│   - Slack/CLI fan-out            │    │   - Agent registry           │
-│   - PRD workflows                │    │   - Chat (Slack/Discord)     │
-│                                  │    │   - OpenCode-based planner   │
-│   Uses: bridgeclient (Go SDK)   │    │   Uses: bridgeclient (Go SDK)│
-└──────────────┬───────────────────┘    └──────────────┬───────────────┘
-               │                                       │
-               │  gRPC + mTLS + JWT                    │  gRPC + mTLS + JWT
-               │  (per-project CA                      │  (per-project CA
-               │   cross-signing)                      │   cross-signing)
-               ▼                                       ▼
+│                       Consumer Applications                          │
+│   Orchestrators    Control Planes    CLI Tools    Web Services        │
+│                                                                      │
+│   Connect via: bridgeclient (Go SDK) or any gRPC client              │
+│   Auth: mTLS (per-project CA + cross-signing) + JWT (Ed25519)        │
+└──────────────────────────┬───────────────────────────────────────────┘
+                           │
+                           │  gRPC + mTLS + JWT
+                           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                      AI Agent Bridge Daemon                          │
 │                      (cmd/bridge)                                    │
@@ -42,6 +33,7 @@ The AI Agent Bridge is a standalone gRPC daemon and Go SDK that provides a secur
 │  │  - Start/Stop/Send/Get/List                                    │  │
 │  │  - Policy enforcement (limits, path validation)                │  │
 │  │  - Event forwarding to per-session ring buffers                │  │
+│  │  - Per-subscriber cursor tracking (SubscriberManager)          │  │
 │  └─────┬──────────────────────────────────────────────────────────┘  │
 │        │                                                             │
 │  ┌─────▼──────────────────────────────────────────────────────────┐  │
@@ -109,6 +101,15 @@ Implements `bridge.v1.BridgeService`:
 - Monotonic sequence numbers for ordering
 - Subscribe/unsubscribe for live streaming
 - `After(seq)` for replay from any point
+
+**SubscriberManager** (`subscribermgr.go`)
+- Per-subscriber cursor tracking on top of EventBuffer
+- `Attach(subscriberID, afterSeq)` — subscribe to live first, then replay, closing the replay-to-live gap
+- `Detach(subscriberID, ch)` — unsubscribe live channel but preserve cursor for reconnect
+- `Ack(subscriberID, seq)` — advance per-subscriber acknowledged sequence
+- `CleanupExpired()` — remove subscribers idle beyond configurable TTL
+- Overflow detection when subscriber falls behind buffer retention
+- Configurable max subscribers per session and subscriber TTL
 
 **Provider Interface** (`provider.go`)
 - `Start(ctx, config) → SessionHandle`
@@ -182,9 +183,11 @@ Public API for consumer integration:
 
 ### Zero-Trust Model
 
+Each consumer project runs its own CA. The bridge cross-signs consumer CAs to build a unified trust bundle, enabling multi-tenant mTLS without sharing private keys.
+
 ```
 ┌─────────────┐         ┌─────────────┐         ┌─────────────┐
-│ prd-manager │         │   bridge    │         │   ndara     │
+│ Project A   │         │   bridge    │         │ Project B   │
 │     CA      │         │     CA      │         │     CA      │
 └──────┬──────┘         └──────┬──────┘         └──────┬──────┘
        │                       │                       │
@@ -192,7 +195,7 @@ Public API for consumer integration:
        │                       │                       │
        ▼                       ▼                       ▼
 ┌──────────────┐        ┌──────────────┐        ┌──────────────┐
-│ prd-manager  │  mTLS  │   bridge     │  mTLS  │   ndara      │
+│ Project A    │  mTLS  │   bridge     │  mTLS  │ Project B    │
 │ client cert  │───────►│ server cert  │◄───────│ client cert  │
 └──────────────┘  JWT   └──────────────┘  JWT   └──────────────┘
 ```
@@ -203,41 +206,34 @@ Public API for consumer integration:
 2. **JWT Verification**: Client sends `authorization: Bearer <token>` in gRPC metadata. Bridge verifies Ed25519 signature, audience, issuer, expiry, and max TTL.
 3. **Authorization**: Bridge checks JWT `project_id` claim matches the requested session's project.
 
-### Certificate Setup (3-project example)
+### Certificate Setup (multi-project example)
 
 ```bash
 # 1. Each project initializes its own CA
-bridge-ca init --name prd-manager --out prd-manager/certs/
+bridge-ca init --name my-app --out my-app/certs/
 bridge-ca init --name ai-agent-bridge --out bridge/certs/
-bridge-ca init --name ndara --out ndara/certs/
 
 # 2. Bridge cross-signs consumer CAs
 bridge-ca cross-sign \
   --signer-ca bridge/certs/ca.crt --signer-key bridge/certs/ca.key \
-  --target-ca prd-manager/certs/ca.crt \
-  --out bridge/certs/prd-manager-cross.crt
-
-bridge-ca cross-sign \
-  --signer-ca bridge/certs/ca.crt --signer-key bridge/certs/ca.key \
-  --target-ca ndara/certs/ca.crt \
-  --out bridge/certs/ndara-cross.crt
+  --target-ca my-app/certs/ca.crt \
+  --out bridge/certs/my-app-cross.crt
 
 # 3. Build trust bundle
 bridge-ca bundle --out bridge/certs/ca-bundle.crt \
   bridge/certs/ca.crt \
-  bridge/certs/prd-manager-cross.crt \
-  bridge/certs/ndara-cross.crt
+  bridge/certs/my-app-cross.crt
 
 # 4. Issue certs
 bridge-ca issue --type server --cn bridge.local --san "bridge.local,127.0.0.1" \
   --ca bridge/certs/ca.crt --ca-key bridge/certs/ca.key --out bridge/certs/
 
-bridge-ca issue --type client --cn prd-manager \
-  --ca prd-manager/certs/ca.crt --ca-key prd-manager/certs/ca.key \
-  --out prd-manager/certs/
+bridge-ca issue --type client --cn my-app \
+  --ca my-app/certs/ca.crt --ca-key my-app/certs/ca.key \
+  --out my-app/certs/
 
 # 5. Generate JWT keys
-bridge-ca jwt-keygen --out prd-manager/certs/jwt-signing
+bridge-ca jwt-keygen --out my-app/certs/jwt-signing
 ```
 
 ## Data Flow
@@ -272,16 +268,22 @@ Consumer                    Bridge Daemon                Provider Process
 ### Event Replay + Live Streaming
 
 ```
-Client reconnects with after_seq=42:
+Client reconnects with subscriber_id="sdk-1", after_seq=42:
+
+SubscriberManager looks up cursor for "sdk-1":
+  - Stored ack_seq=42 (from previous connection)
+  - If ack_seq > client after_seq, uses ack_seq
 
 EventBuffer: [seq:38, seq:39, seq:40, seq:41, seq:42, seq:43, seq:44]
                                                        ▲
                                               replay starts here
 
-1. Replay: seq:43, seq:44 sent immediately
-2. Subscribe to live channel
-3. New events (seq:45, 46, ...) streamed as they arrive
-4. Duplicate detection: skip any seq <= last sent
+1. Subscribe to live channel first (gap-free handoff)
+2. Replay: seq:43, seq:44 sent immediately, Ack() called for each
+3. Switch to live channel
+4. New events (seq:45, 46, ...) streamed as they arrive, Ack() each
+5. Duplicate detection: skip any seq <= last sent
+6. On disconnect: Detach() preserves cursor for next reconnect
 ```
 
 ## Configuration
@@ -297,10 +299,10 @@ tls:
 
 auth:
   jwt_public_keys:                  # One per consumer project
-    - issuer: "prd-manager"
-      key_path: "certs/prd-manager-jwt.pub"
-    - issuer: "ndara-orchestrator"
-      key_path: "certs/ndara-jwt.pub"
+    - issuer: "project-a"
+      key_path: "certs/project-a-jwt.pub"
+    - issuer: "project-b"
+      key_path: "certs/project-b-jwt.pub"
   jwt_audience: "bridge"
   jwt_max_ttl: "5m"
 
@@ -310,6 +312,8 @@ sessions:
   idle_timeout: "30m"
   stop_grace_period: "10s"
   event_buffer_size: 10000
+  max_subscribers_per_session: 10
+  subscriber_ttl: "30m"
 
 providers:
   codex:
@@ -325,52 +329,43 @@ providers:
 
 ## Integration Points
 
-### prd-manager-control-plane
+### Consumer Application Integration
 
-Replace `internal/agent/Manager` with `bridgeclient.Client`:
+Any application can integrate with the bridge using the Go SDK (`pkg/bridgeclient`) or any gRPC client:
 
 ```go
-// Before: in-process subprocess management
-agentManager.Start(projectID, sessionID, repoPath)
-agentManager.Send(projectID, sessionID, text)
-agentManager.Stop(projectID, sessionID)
+// Create a bridge-backed client with mTLS + JWT
+client, _ := bridgeclient.New(
+    bridgeclient.WithTarget("bridge.local:9445"),
+    bridgeclient.WithMTLS(bridgeclient.MTLSConfig{...}),
+    bridgeclient.WithJWT(bridgeclient.JWTConfig{...}),
+)
 
-// After: bridge-backed remote management
-bridgeClient.StartSession(ctx, &bridgev1.StartSessionRequest{
+// Manage agent sessions remotely
+client.StartSession(ctx, &bridgev1.StartSessionRequest{
     ProjectId: projectID,
     SessionId: sessionID,
     RepoPath:  repoPath,
-    Provider:  "codex",
+    Provider:  "claude",
 })
-bridgeClient.SendInput(ctx, &bridgev1.SendInputRequest{
+client.SendInput(ctx, &bridgev1.SendInputRequest{
     SessionId: sessionID,
-    Text:      text,
+    Text:      prompt,
 })
-bridgeClient.StopSession(ctx, &bridgev1.StopSessionRequest{
+
+// Stream events with durable subscriber-based resume
+stream, _ := client.StreamEvents(ctx, &bridgev1.StreamEventsRequest{
+    SessionId:    sessionID,
+    SubscriberId: "my-subscriber",
+})
+stream.RecvAll(ctx, func(ev *bridgev1.SessionEvent) error {
+    // Process event; cursor is tracked server-side per subscriber_id
+    return nil
+})
+
+client.StopSession(ctx, &bridgev1.StopSessionRequest{
     SessionId: sessionID,
 })
-```
-
-### ndara-ai-orchestrator
-
-Wire `bridgeclient.Client` into `agentd` to replace stub handlers:
-
-```go
-// RunTask → bridge StartSession + SendInput
-func (s *server) RunTask(ctx context.Context, req *orchv1.RunTaskRequest) {
-    bridgeClient.StartSession(ctx, &bridgev1.StartSessionRequest{
-        ProjectId: req.ProjectId,
-        SessionId: req.RunId,
-        RepoPath:  repoPathForRepo(req.RepoId),
-        Provider:  "codex",
-    })
-    bridgeClient.SendInput(ctx, &bridgev1.SendInputRequest{
-        SessionId: req.RunId,
-        Text:      req.TaskText,
-    })
-}
-
-// StreamEvents → bridge StreamEvents mapped to orch.v1.Event
 ```
 
 ## Directory Structure

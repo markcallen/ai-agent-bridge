@@ -147,15 +147,15 @@ ai-agent-bridge/
 - [x] Unit tests for supervisor, policy, and event buffer
 
 ### 1.7 Session Pub/Sub Queueing
-- [ ] Introduce per-session subscriber queue/cursor manager (`internal/bridge/subscriberbuf.go`)
+- [x] Introduce per-session subscriber cursor manager (`internal/bridge/subscribermgr.go`)
   - Track subscribers by `(project_id, session_id, subscriber_id)`
   - Track `ack_seq` and deliver `seq > ack_seq` on reconnect
   - Preserve strict in-order delivery guarantees per subscriber
   - Keep enqueueing provider events while subscribers are disconnected
   - Emit `BUFFER_OVERFLOW` when retention is exceeded
-- [ ] Extend supervisor/server integration to route events through subscriber queue manager
-- [ ] Add configuration for queue retention limits and subscriber TTL cleanup
-- [ ] Unit tests: reconnect replay, ack progression, overflow behavior, multi-subscriber fanout
+- [x] Extend supervisor/server integration to route events through subscriber manager
+- [x] Add configuration for subscriber limits and TTL cleanup
+- [x] Unit tests: reconnect replay, ack progression, overflow behavior, multi-subscriber fanout
 
 ### 1.7 gRPC Server
 - [x] `internal/server/server.go` - Implement `BridgeService`
@@ -250,11 +250,13 @@ ai-agent-bridge/
   - Automatic reconnect with `after_seq` resume
   - Backoff on reconnect failures
   - Context cancellation support
-- [ ] Add SDK subscriber identity + cursor persistence
+- [x] Add SDK subscriber identity support
   - Stable `subscriber_id` per consumer/session stream
-  - Persist/update `last_ack_seq` after callback processing
-  - Reconnect using subscriber cursor semantics (unseen queued events first, then live tail)
-  - At-least-once handling guidance for idempotent consumer callbacks
+  - Pass `subscriber_id` through on connect and reconnect
+  - Server-side cursor tracking with `ack_seq` per subscriber
+  - Reconnect replays unseen queued events first, then live tail
+- [ ] Persist `last_ack_seq` client-side for cross-process resume
+- [ ] At-least-once handling guidance for idempotent consumer callbacks
 
 ### 3.4 Error Handling
 - [x] `pkg/bridgeclient/errors.go` - Typed errors
@@ -313,17 +315,12 @@ ai-agent-bridge/
 
 **Goal**: Detailed integration guides and helper code for both consumer projects.
 
-### 5.1 prd-manager-control-plane Integration
-- [ ] Write integration guide: step-by-step migration from `agent.Manager` to `bridgeclient`
+### 5.1 Consumer Application Integration
+- [ ] Write integration guide: step-by-step setup of `bridgeclient` in a consumer app
 - [ ] Provide example config additions for `bridge_target`, cert paths
 - [ ] Document certificate setup: generate certs, cross-sign, build bundle
-- [ ] Provide adapter code mapping `bridgeclient` events → `agent.Event`
-
-### 5.2 ndara-ai-orchestrator Integration
-- [ ] Write integration guide: replacing stub `agentd` handlers with bridge-backed handlers
-- [ ] Provide event mapping: `bridge.v1.SessionEvent` → `orch.v1.Event`
-- [ ] Document dual-trust setup (ndara mTLS ↔ agentd mTLS, plus agentd ↔ bridge mTLS)
-- [ ] Example `bridge.yaml` for ndara deployment topology
+- [ ] Provide adapter code mapping `bridgeclient` events to application-specific event types
+- [ ] Document multi-tenant trust setup for multiple consumer projects
 
 ### 5.3 Dev Environment
 - [x] `scripts/dev_certs.sh` - Generate all dev certs for local testing
@@ -354,7 +351,7 @@ ai-agent-bridge/
 ### 6.2 Integration Tests
 - [x] End-to-end: start → input → output → stop (with real process)
 - [ ] Reconnect from `after_seq` (disconnect, reconnect, verify no event loss)
-- [ ] Reconnect from subscriber cursor (`subscriber_id` + `ack_seq`) with queued replay validation
+- [x] Reconnect from subscriber cursor (`subscriber_id` + `ack_seq`) with queued replay validation (unit tests)
 - [ ] Multi-provider concurrent sessions
 - [x] mTLS rejection (bad cert, expired cert, wrong CA)
 - [x] JWT rejection (expired, wrong audience, wrong issuer)
@@ -382,7 +379,7 @@ ai-agent-bridge/
 ### Direct Dependencies
 - `google.golang.org/grpc` - gRPC framework
 - `google.golang.org/protobuf` - Protobuf runtime
-- `github.com/golang-jwt/jwt/v5` - JWT library (matches ndara-orchestrator)
+- `github.com/golang-jwt/jwt/v5` - JWT library
 - `golang.org/x/crypto` - Ed25519 support
 - `gopkg.in/yaml.v3` - Configuration parsing
 

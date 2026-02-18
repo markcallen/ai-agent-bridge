@@ -11,20 +11,22 @@ import (
 
 // EventStream wraps a gRPC stream with automatic reconnection support.
 type EventStream struct {
-	client    *Client
-	sessionID string
-	afterSeq  uint64
-	logger    *slog.Logger
+	client       *Client
+	sessionID    string
+	subscriberID string
+	afterSeq     uint64
+	logger       *slog.Logger
 }
 
 // StreamEvents opens an event stream for a session with automatic reconnect.
 // The returned EventStream supports Recv() which handles reconnection transparently.
 func (c *Client) StreamEvents(ctx context.Context, req *bridgev1.StreamEventsRequest) (*EventStream, error) {
 	return &EventStream{
-		client:    c,
-		sessionID: req.SessionId,
-		afterSeq:  req.AfterSeq,
-		logger:    slog.Default(),
+		client:       c,
+		sessionID:    req.SessionId,
+		subscriberID: req.SubscriberId,
+		afterSeq:     req.AfterSeq,
+		logger:       slog.Default(),
 	}, nil
 }
 
@@ -63,8 +65,9 @@ func (es *EventStream) RecvAll(ctx context.Context, callback func(*bridgev1.Sess
 
 func (es *EventStream) recvOnce(ctx context.Context, callback func(*bridgev1.SessionEvent) error) error {
 	stream, err := es.client.rpc.StreamEvents(ctx, &bridgev1.StreamEventsRequest{
-		SessionId: es.sessionID,
-		AfterSeq:  es.afterSeq,
+		SessionId:    es.sessionID,
+		SubscriberId: es.subscriberID,
+		AfterSeq:     es.afterSeq,
 	})
 	if err != nil {
 		return mapError(err)

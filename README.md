@@ -60,6 +60,8 @@ sessions:
   idle_timeout: "30m"
   stop_grace_period: "10s"
   event_buffer_size: 10000
+  max_subscribers_per_session: 10
+  subscriber_ttl: "30m"
 
 input:
   max_size_bytes: 65536
@@ -173,9 +175,10 @@ func main() {
 	}
 	fmt.Printf("Input accepted: %v (seq=%d)\n", input.Accepted, input.Seq)
 
-	// Stream events from the session
+	// Stream events from the session (subscriber_id enables cursor-based resume on reconnect)
 	stream, err := client.StreamEvents(ctx, &bridgev1.StreamEventsRequest{
-		SessionId: "session-001",
+		SessionId:    "session-001",
+		SubscriberId: "my-subscriber-1",
 	})
 	if err != nil {
 		log.Fatal(err)

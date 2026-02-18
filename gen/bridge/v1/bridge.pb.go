@@ -716,6 +716,7 @@ type StreamEventsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	AfterSeq      uint64                 `protobuf:"varint,2,opt,name=after_seq,json=afterSeq,proto3" json:"after_seq,omitempty"`
+	SubscriberId  string                 `protobuf:"bytes,3,opt,name=subscriber_id,json=subscriberId,proto3" json:"subscriber_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -762,6 +763,13 @@ func (x *StreamEventsRequest) GetAfterSeq() uint64 {
 		return x.AfterSeq
 	}
 	return 0
+}
+
+func (x *StreamEventsRequest) GetSubscriberId() string {
+	if x != nil {
+		return x.SubscriberId
+	}
+	return ""
 }
 
 type SessionEvent struct {
@@ -1224,11 +1232,12 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x0fidempotency_key\x18\x03 \x01(\tR\x0eidempotencyKey\"A\n" +
 	"\x11SendInputResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x10\n" +
-	"\x03seq\x18\x02 \x01(\x04R\x03seq\"Q\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\"v\n" +
 	"\x13StreamEventsRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
-	"\tafter_seq\x18\x02 \x01(\x04R\bafterSeq\"\xb4\x02\n" +
+	"\tafter_seq\x18\x02 \x01(\x04R\bafterSeq\x12#\n" +
+	"\rsubscriber_id\x18\x03 \x01(\tR\fsubscriberId\"\xb4\x02\n" +
 	"\fSessionEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x128\n" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x1d\n" +
