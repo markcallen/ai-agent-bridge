@@ -156,19 +156,16 @@ func TestStdioProviderHealth(t *testing.T) {
 }
 
 func TestStdioProviderStartTimeout(t *testing.T) {
-	origStarter := commandStarter
-	commandStarter = func(cmd *exec.Cmd) error {
-		time.Sleep(200 * time.Millisecond)
-		return fmt.Errorf("delayed start")
-	}
-	t.Cleanup(func() { commandStarter = origStarter })
-
 	p := NewStdioProvider(StdioConfig{
 		ProviderID:     "timeout",
 		Binary:         "echo",
 		DefaultArgs:    []string{"hello"},
 		StartupTimeout: 10 * time.Millisecond,
 	})
+	p.starter = func(cmd *exec.Cmd) error {
+		time.Sleep(200 * time.Millisecond)
+		return fmt.Errorf("delayed start")
+	}
 
 	_, err := p.Start(context.Background(), bridge.SessionConfig{
 		ProjectID: "test-project",

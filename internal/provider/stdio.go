@@ -27,10 +27,11 @@ type StdioConfig struct {
 
 // StdioProvider manages agent sessions via subprocess stdio.
 type StdioProvider struct {
-	cfg StdioConfig
+	cfg     StdioConfig
+	starter func(*exec.Cmd) error
 }
 
-var commandStarter = func(cmd *exec.Cmd) error { return cmd.Start() }
+var defaultCommandStarter = func(cmd *exec.Cmd) error { return cmd.Start() }
 
 // NewStdioProvider creates a new stdio-based provider.
 func NewStdioProvider(cfg StdioConfig) *StdioProvider {
@@ -40,7 +41,10 @@ func NewStdioProvider(cfg StdioConfig) *StdioProvider {
 	if cfg.StopGrace == 0 {
 		cfg.StopGrace = 10 * time.Second
 	}
-	return &StdioProvider{cfg: cfg}
+	return &StdioProvider{
+		cfg:     cfg,
+		starter: defaultCommandStarter,
+	}
 }
 
 func (p *StdioProvider) ID() string { return p.cfg.ProviderID }
@@ -93,8 +97,12 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 	}
 
 	startErr := make(chan error, 1)
+	starter := p.starter
+	if starter == nil {
+		starter = defaultCommandStarter
+	}
 	go func() {
-		startErr <- commandStarter(cmd)
+		startErr <- starter(cmd)
 	}()
 
 	select {
