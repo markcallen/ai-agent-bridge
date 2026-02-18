@@ -3,6 +3,7 @@ package provider
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +26,23 @@ type StdioConfig struct {
 	StartupTimeout time.Duration
 	StopGrace      time.Duration
 	UsePTY         bool
+	StreamJSON     bool
+}
+
+// stream-json parse structs for Claude Code's --output-format stream-json
+type streamEvent struct {
+	Type  string      `json:"type"`
+	Event streamInner `json:"event"`
+}
+
+type streamInner struct {
+	Type  string      `json:"type"`
+	Delta streamDelta `json:"delta"`
+}
+
+type streamDelta struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 // StdioProvider manages agent sessions via subprocess stdio.
@@ -126,16 +144,17 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 	}
 
 	h := &stdioHandle{
-		id:        cfg.SessionID,
-		pid:       cmd.Process.Pid,
-		cmd:       cmd,
-		stdin:     stdin,
-		events:    make(chan bridge.Event, 256),
-		provider:  p.cfg.ProviderID,
-		projectID: cfg.ProjectID,
-		sessionID: cfg.SessionID,
-		stopGrace: p.cfg.StopGrace,
-		waitDone:  make(chan struct{}),
+		id:         cfg.SessionID,
+		pid:        cmd.Process.Pid,
+		cmd:        cmd,
+		stdin:      stdin,
+		events:     make(chan bridge.Event, 256),
+		provider:   p.cfg.ProviderID,
+		projectID:  cfg.ProjectID,
+		sessionID:  cfg.SessionID,
+		stopGrace:  p.cfg.StopGrace,
+		streamJSON: p.cfg.StreamJSON,
+		waitDone:   make(chan struct{}),
 	}
 
 	// Emit started event before launching goroutines to avoid race with channel close
@@ -186,16 +205,17 @@ func (p *StdioProvider) startPTY(ctx context.Context, cfg bridge.SessionConfig, 
 	}
 
 	h := &stdioHandle{
-		id:        cfg.SessionID,
-		pid:       cmd.Process.Pid,
-		cmd:       cmd,
-		stdin:     ptmx,
-		events:    make(chan bridge.Event, 256),
-		provider:  p.cfg.ProviderID,
-		projectID: cfg.ProjectID,
-		sessionID: cfg.SessionID,
-		stopGrace: p.cfg.StopGrace,
-		waitDone:  make(chan struct{}),
+		id:         cfg.SessionID,
+		pid:        cmd.Process.Pid,
+		cmd:        cmd,
+		stdin:      ptmx,
+		events:     make(chan bridge.Event, 256),
+		provider:   p.cfg.ProviderID,
+		projectID:  cfg.ProjectID,
+		sessionID:  cfg.SessionID,
+		stopGrace:  p.cfg.StopGrace,
+		streamJSON: p.cfg.StreamJSON,
+		waitDone:   make(chan struct{}),
 	}
 
 	h.emit(bridge.Event{
@@ -246,15 +266,16 @@ func (p *StdioProvider) Events(handle bridge.SessionHandle) <-chan bridge.Event 
 
 // stdioHandle represents a running subprocess session.
 type stdioHandle struct {
-	id        string
-	pid       int
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	events    chan bridge.Event
-	provider  string
-	projectID string
-	sessionID string
-	stopGrace time.Duration
+	id         string
+	pid        int
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	events     chan bridge.Event
+	provider   string
+	projectID  string
+	sessionID  string
+	stopGrace  time.Duration
+	streamJSON bool
 
 	mu        sync.Mutex
 	stopped   bool
@@ -276,6 +297,18 @@ func (h *stdioHandle) send(text string) error {
 	line := strings.TrimSpace(text)
 	if line == "" {
 		return fmt.Errorf("empty input")
+	}
+	if h.streamJSON {
+		msg := struct {
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		}{Type: "user", Content: line}
+		data, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("marshal stream-json input: %w", err)
+		}
+		_, err = h.stdin.Write(append(data, '\n'))
+		return err
 	}
 	_, err := io.WriteString(h.stdin, line+"\n")
 	return err
@@ -323,6 +356,21 @@ func (h *stdioHandle) readStream(stream string, r io.Reader) {
 	for sc.Scan() {
 		line := sc.Text()
 		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if h.streamJSON && stream == "stdout" {
+			var ev streamEvent
+			if err := json.Unmarshal([]byte(line), &ev); err != nil {
+				continue // skip unparseable lines
+			}
+			if ev.Event.Type != "content_block_delta" || ev.Event.Delta.Type != "text_delta" {
+				continue
+			}
+			h.emit(bridge.Event{
+				Type:   evType,
+				Stream: stream,
+				Text:   ev.Event.Delta.Text,
+			})
 			continue
 		}
 		h.emit(bridge.Event{

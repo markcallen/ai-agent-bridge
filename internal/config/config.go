@@ -60,6 +60,7 @@ type ProviderConfig struct {
 	Args           []string `yaml:"args"`
 	StartupTimeout string   `yaml:"startup_timeout"`
 	PTY            bool     `yaml:"pty"`
+	StreamJSON     bool     `yaml:"stream_json"`
 }
 
 type LoggingConfig struct {

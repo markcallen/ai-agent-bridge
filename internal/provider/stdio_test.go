@@ -180,6 +180,71 @@ func TestStdioProviderStartTimeout(t *testing.T) {
 	}
 }
 
+func TestStreamJSONParsing(t *testing.T) {
+	// Create a shell script that outputs stream-json lines
+	tmp := t.TempDir()
+	scriptPath := filepath.Join(tmp, "stream-json-provider.sh")
+	script := `#!/usr/bin/env sh
+echo '{"type":"event","event":{"type":"message_start","message":{}}}'
+echo '{"type":"event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}'
+echo '{"type":"event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}}'
+echo '{"type":"event","event":{"type":"content_block_stop"}}'
+echo '{"type":"event","event":{"type":"message_stop"}}'
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID:     "test-stream-json",
+		Binary:         scriptPath,
+		StartupTimeout: 5 * time.Second,
+		StopGrace:      2 * time.Second,
+		StreamJSON:     true,
+	})
+
+	handle, err := p.Start(context.Background(), bridge.SessionConfig{
+		ProjectID: "test-project",
+		SessionID: "test-stream-json-session",
+		RepoPath:  tmp,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	events := p.Events(handle)
+	var texts []string
+	timeout := time.After(5 * time.Second)
+loop:
+	for {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				break loop
+			}
+			if e.Type == bridge.EventTypeStdout {
+				texts = append(texts, e.Text)
+			}
+			if e.Done {
+				break loop
+			}
+		case <-timeout:
+			t.Fatal("timeout waiting for events")
+		}
+	}
+
+	// Should only get text_delta events, not message_start/stop etc.
+	if len(texts) != 2 {
+		t.Fatalf("got %d text events %v, want 2", len(texts), texts)
+	}
+	if texts[0] != "Hello" {
+		t.Errorf("texts[0] = %q, want %q", texts[0], "Hello")
+	}
+	if texts[1] != " world" {
+		t.Errorf("texts[1] = %q, want %q", texts[1], " world")
+	}
+}
+
 func TestResolveBinaryPathRelativeSlash(t *testing.T) {
 	oldWD, err := os.Getwd()
 	if err != nil {
