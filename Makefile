@@ -1,8 +1,10 @@
-.PHONY: build proto test test-e2e lint clean certs dev-setup
+.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup fmt run dev-run
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
 BRIDGE_CA := $(BIN_DIR)/bridge-ca
+CONFIG ?= config/bridge.yaml
+DEV_CONFIG ?= config/bridge-dev.yaml
 
 build: proto
 	@mkdir -p $(BIN_DIR)
@@ -49,3 +51,9 @@ dev-setup: dev-certs
 fmt:
 	gofmt -s -w .
 	goimports -w .
+
+run: build
+	$(BRIDGE) --config $(CONFIG)
+
+dev-run: dev-setup
+	$(BRIDGE) --config $(DEV_CONFIG)
