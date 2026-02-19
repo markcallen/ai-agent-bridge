@@ -6,7 +6,7 @@ BRIDGE_CA := $(BIN_DIR)/bridge-ca
 CONFIG ?= config/bridge.yaml
 DEV_CONFIG ?= config/bridge-dev.yaml
 CHAT_TARGET ?= 127.0.0.1:9445
-CHAT_PROVIDER ?= claude-chat
+CHAT_PROVIDER ?= claude
 CHAT_PROJECT ?= dev
 CHAT_REPO ?= $(PWD)
 
@@ -72,5 +72,5 @@ chat-example:
 		-key certs/dev-client.key \
 		-jwt-key certs/jwt-signing.key \
 		-jwt-issuer dev \
-		-timeout 2m \
+		-timeout 5m \
 		$(CHAT_REPO)
