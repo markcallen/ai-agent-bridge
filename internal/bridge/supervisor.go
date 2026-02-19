@@ -35,6 +35,7 @@ type Supervisor struct {
 	policy    Policy
 	bufSize   int
 	subConfig SubscriberConfig
+	redact    func(string) string
 
 	mu       sync.RWMutex
 	sessions map[string]*managedSession // keyed by session_id
@@ -65,6 +66,13 @@ func NewSupervisor(registry *Registry, policy Policy, eventBufSize int, subConfi
 	}
 	go s.cleanupLoop()
 	return s
+}
+
+// SetRedactor configures a redaction function for buffered event text/error.
+func (s *Supervisor) SetRedactor(fn func(string) string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.redact = fn
 }
 
 func (s *Supervisor) cleanupLoop() {
@@ -243,7 +251,7 @@ func (s *Supervisor) Send(sessionID, text string) (uint64, error) {
 		Provider:  ms.info.Provider,
 		Type:      EventTypeInputReceived,
 		Stream:    "system",
-		Text:      text,
+		Text:      s.redactString(text),
 	})
 
 	return seq, nil
@@ -339,6 +347,8 @@ func (s *Supervisor) forwardEvents(sessionID string, provider Provider, handle S
 		return
 	}
 	for e := range events {
+		e.Text = s.redactString(e.Text)
+		e.Error = s.redactString(e.Error)
 		buf.Append(e)
 
 		// Update session state on terminal events
@@ -356,4 +366,14 @@ func (s *Supervisor) forwardEvents(sessionID string, provider Provider, handle S
 			s.mu.Unlock()
 		}
 	}
+}
+
+func (s *Supervisor) redactString(text string) string {
+	s.mu.RLock()
+	fn := s.redact
+	s.mu.RUnlock()
+	if fn == nil {
+		return text
+	}
+	return fn(text)
 }

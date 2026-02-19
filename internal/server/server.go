@@ -28,25 +28,70 @@ type BridgeServer struct {
 	supervisor *bridge.Supervisor
 	registry   *bridge.Registry
 	logger     *slog.Logger
+	globalRL   *keyedLimiter
+	startRL    *keyedLimiter
+	sendRL     *keyedLimiter
+}
+
+// RateLimitConfig controls RPC throttling behavior.
+type RateLimitConfig struct {
+	GlobalRPS                  float64
+	GlobalBurst                int
+	StartSessionPerClientRPS   float64
+	StartSessionPerClientBurst int
+	SendInputPerSessionRPS     float64
+	SendInputPerSessionBurst   int
 }
 
 // New creates a new BridgeServer.
-func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger) *BridgeServer {
+func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger, rl RateLimitConfig) *BridgeServer {
 	return &BridgeServer{
 		supervisor: supervisor,
 		registry:   registry,
 		logger:     logger,
+		globalRL:   newKeyedLimiter(rl.GlobalRPS, rl.GlobalBurst),
+		startRL:    newKeyedLimiter(rl.StartSessionPerClientRPS, rl.StartSessionPerClientBurst),
+		sendRL:     newKeyedLimiter(rl.SendInputPerSessionRPS, rl.SendInputPerSessionBurst),
 	}
 }
 
 func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSessionRequest) (*bridgev1.StartSessionResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+
 	claims, err := mustClaims(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if req.ProjectId == "" || req.SessionId == "" || req.RepoPath == "" || req.Provider == "" {
-		return nil, status.Error(codes.InvalidArgument, "project_id, session_id, repo_path, and provider are required")
+	if err := validateStringField("project_id", req.ProjectId, maxProjectIDLen, false); err != nil {
+		return nil, err
+	}
+	if err := validateUUIDField("session_id", req.SessionId); err != nil {
+		return nil, err
+	}
+	if err := validateStringField("repo_path", req.RepoPath, maxRepoPathLen, false); err != nil {
+		return nil, err
+	}
+	if err := validateStringField("provider", req.Provider, maxProviderLen, false); err != nil {
+		return nil, err
+	}
+	for key, value := range req.AgentOpts {
+		if err := validateStringField("agent_opts key", key, maxAgentOptKey, false); err != nil {
+			return nil, err
+		}
+		if err := validateOptionalStringField("agent_opts value", value, maxAgentOptValue, true); err != nil {
+			return nil, err
+		}
+	}
+
+	clientID := claims.Subject
+	if clientID == "" {
+		clientID = claims.ProjectID
+	}
+	if !s.startRL.allow(clientID) {
+		return nil, status.Error(codes.ResourceExhausted, "start session rate limit exceeded for client")
 	}
 
 	// Authorization: JWT project_id must match request
@@ -85,13 +130,17 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 }
 
 func (s *BridgeServer) StopSession(ctx context.Context, req *bridgev1.StopSessionRequest) (*bridgev1.StopSessionResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+
 	claims, err := mustClaims(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if req.SessionId == "" {
-		return nil, status.Error(codes.InvalidArgument, "session_id is required")
+	if err := validateUUIDField("session_id", req.SessionId); err != nil {
+		return nil, err
 	}
 
 	if err := s.authorizeSession(claims, req.SessionId); err != nil {
@@ -109,13 +158,17 @@ func (s *BridgeServer) StopSession(ctx context.Context, req *bridgev1.StopSessio
 }
 
 func (s *BridgeServer) GetSession(ctx context.Context, req *bridgev1.GetSessionRequest) (*bridgev1.GetSessionResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+
 	claims, err := mustClaims(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if req.SessionId == "" {
-		return nil, status.Error(codes.InvalidArgument, "session_id is required")
+	if err := validateUUIDField("session_id", req.SessionId); err != nil {
+		return nil, err
 	}
 
 	if err := s.authorizeSession(claims, req.SessionId); err != nil {
@@ -131,8 +184,15 @@ func (s *BridgeServer) GetSession(ctx context.Context, req *bridgev1.GetSessionR
 }
 
 func (s *BridgeServer) ListSessions(ctx context.Context, req *bridgev1.ListSessionsRequest) (*bridgev1.ListSessionsResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+
 	claims, err := mustClaims(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateOptionalStringField("project_id", req.ProjectId, maxListProjectID, false); err != nil {
 		return nil, err
 	}
 	projectID := req.ProjectId
@@ -153,13 +213,24 @@ func (s *BridgeServer) ListSessions(ctx context.Context, req *bridgev1.ListSessi
 }
 
 func (s *BridgeServer) SendInput(ctx context.Context, req *bridgev1.SendInputRequest) (*bridgev1.SendInputResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+
 	claims, err := mustClaims(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if req.SessionId == "" || req.Text == "" {
-		return nil, status.Error(codes.InvalidArgument, "session_id and text are required")
+	if err := validateUUIDField("session_id", req.SessionId); err != nil {
+		return nil, err
+	}
+	if err := validateStringField("text", req.Text, 1<<20, true); err != nil {
+		return nil, err
+	}
+
+	if !s.sendRL.allow(req.SessionId) {
+		return nil, status.Error(codes.ResourceExhausted, "send input rate limit exceeded for session")
 	}
 
 	if err := s.authorizeSession(claims, req.SessionId); err != nil {
@@ -178,13 +249,20 @@ func (s *BridgeServer) SendInput(ctx context.Context, req *bridgev1.SendInputReq
 }
 
 func (s *BridgeServer) StreamEvents(req *bridgev1.StreamEventsRequest, stream bridgev1.BridgeService_StreamEventsServer) error {
+	if !s.globalRL.allow("global") {
+		return status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+
 	claims, err := mustClaims(stream.Context())
 	if err != nil {
 		return err
 	}
 
-	if req.SessionId == "" {
-		return status.Error(codes.InvalidArgument, "session_id is required")
+	if err := validateUUIDField("session_id", req.SessionId); err != nil {
+		return err
+	}
+	if err := validateOptionalStringField("subscriber_id", req.SubscriberId, maxSessionIDLen, false); err != nil {
+		return err
 	}
 
 	if err := s.authorizeSession(claims, req.SessionId); err != nil {
@@ -294,6 +372,10 @@ func mapBridgeError(err error, op string) error {
 }
 
 func (s *BridgeServer) Health(ctx context.Context, req *bridgev1.HealthRequest) (*bridgev1.HealthResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+
 	results := s.registry.HealthAll(ctx)
 
 	providers := make([]*bridgev1.ProviderHealth, 0, len(results))
@@ -315,6 +397,10 @@ func (s *BridgeServer) Health(ctx context.Context, req *bridgev1.HealthRequest) 
 }
 
 func (s *BridgeServer) ListProviders(ctx context.Context, req *bridgev1.ListProvidersRequest) (*bridgev1.ListProvidersResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+
 	ids := s.registry.List()
 	results := s.registry.HealthAll(ctx)
 

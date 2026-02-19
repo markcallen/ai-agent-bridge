@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -230,5 +231,46 @@ func TestSupervisorEventBuffer(t *testing.T) {
 	events := buf.After(0)
 	if events[0].Type != EventTypeSessionStarted {
 		t.Errorf("first event type = %d, want SessionStarted", events[0].Type)
+	}
+}
+
+func TestSupervisorRedactsBufferedEvents(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(newMockProvider("test"))
+	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig())
+	sup.SetRedactor(func(text string) string {
+		return strings.ReplaceAll(text, "secret=abc", "[REDACTED]")
+	})
+	defer sup.Close()
+
+	_, err := sup.Start(context.Background(), SessionConfig{
+		SessionID: "ev2",
+		ProjectID: "p1",
+		RepoPath:  "/tmp",
+		Options:   map[string]string{"provider": "test"},
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	_, err = sup.Send("ev2", "secret=abc\n")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	buf, err := sup.EventBuffer("ev2")
+	if err != nil {
+		t.Fatalf("EventBuffer: %v", err)
+	}
+	events := buf.After(0)
+	foundRedactedInput := false
+	for _, event := range events {
+		if event.Type == EventTypeInputReceived && strings.Contains(event.Text, "[REDACTED]") {
+			foundRedactedInput = true
+		}
+	}
+	if !foundRedactedInput {
+		t.Fatalf("did not find redacted input event in %+v", events)
 	}
 }

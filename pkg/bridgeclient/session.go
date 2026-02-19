@@ -8,60 +8,80 @@ import (
 
 // StartSession creates and starts a new agent session.
 func (c *Client) StartSession(ctx context.Context, req *bridgev1.StartSessionRequest) (*bridgev1.StartSessionResponse, error) {
-	ctx, cancel := c.ctx(ctx)
-	defer cancel()
-
 	// Auto-set JWT project scope
 	c.SetProject(req.ProjectId)
 
-	resp, err := c.rpc.StartSession(ctx, req)
-	return resp, mapError(err)
+	var resp *bridgev1.StartSessionResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.StartSession(callCtx, req)
+		return callErr
+	})
+	return resp, err
 }
 
 // StopSession terminates an agent session.
 func (c *Client) StopSession(ctx context.Context, req *bridgev1.StopSessionRequest) (*bridgev1.StopSessionResponse, error) {
-	ctx, cancel := c.ctx(ctx)
-	defer cancel()
-	resp, err := c.rpc.StopSession(ctx, req)
-	return resp, mapError(err)
+	var resp *bridgev1.StopSessionResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.StopSession(callCtx, req)
+		return callErr
+	})
+	return resp, err
 }
 
 // GetSession returns information about a session.
 func (c *Client) GetSession(ctx context.Context, req *bridgev1.GetSessionRequest) (*bridgev1.GetSessionResponse, error) {
-	ctx, cancel := c.ctx(ctx)
-	defer cancel()
-	resp, err := c.rpc.GetSession(ctx, req)
-	return resp, mapError(err)
+	var resp *bridgev1.GetSessionResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.GetSession(callCtx, req)
+		return callErr
+	})
+	return resp, err
 }
 
 // ListSessions returns all sessions, optionally filtered by project.
 func (c *Client) ListSessions(ctx context.Context, req *bridgev1.ListSessionsRequest) (*bridgev1.ListSessionsResponse, error) {
-	ctx, cancel := c.ctx(ctx)
-	defer cancel()
-	resp, err := c.rpc.ListSessions(ctx, req)
-	return resp, mapError(err)
+	var resp *bridgev1.ListSessionsResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.ListSessions(callCtx, req)
+		return callErr
+	})
+	return resp, err
 }
 
 // SendInput sends text input to a running session.
 func (c *Client) SendInput(ctx context.Context, req *bridgev1.SendInputRequest) (*bridgev1.SendInputResponse, error) {
-	ctx, cancel := c.ctx(ctx)
-	defer cancel()
-	resp, err := c.rpc.SendInput(ctx, req)
-	return resp, mapError(err)
+	var resp *bridgev1.SendInputResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.SendInput(callCtx, req)
+		return callErr
+	})
+	return resp, err
 }
 
 // Health checks the bridge daemon health.
 func (c *Client) Health(ctx context.Context) (*bridgev1.HealthResponse, error) {
-	ctx, cancel := c.ctx(ctx)
-	defer cancel()
-	resp, err := c.rpc.Health(ctx, &bridgev1.HealthRequest{})
-	return resp, mapError(err)
+	var resp *bridgev1.HealthResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.Health(callCtx, &bridgev1.HealthRequest{})
+		return callErr
+	})
+	return resp, err
 }
 
 // ListProviders returns available providers.
 func (c *Client) ListProviders(ctx context.Context) (*bridgev1.ListProvidersResponse, error) {
-	ctx, cancel := c.ctx(ctx)
-	defer cancel()
-	resp, err := c.rpc.ListProviders(ctx, &bridgev1.ListProvidersRequest{})
-	return resp, mapError(err)
+	var resp *bridgev1.ListProvidersResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.ListProviders(callCtx, &bridgev1.ListProvidersRequest{})
+		return callErr
+	})
+	return resp, err
 }

@@ -21,11 +21,18 @@ type EventStream struct {
 // StreamEvents opens an event stream for a session with automatic reconnect.
 // The returned EventStream supports Recv() which handles reconnection transparently.
 func (c *Client) StreamEvents(ctx context.Context, req *bridgev1.StreamEventsRequest) (*EventStream, error) {
+	afterSeq := req.AfterSeq
+	if afterSeq == 0 && req.SubscriberId != "" && c.cursors != nil {
+		saved, err := c.cursors.LoadCursor(ctx, req.SessionId, req.SubscriberId)
+		if err == nil && saved > 0 {
+			afterSeq = saved
+		}
+	}
 	return &EventStream{
 		client:       c,
 		sessionID:    req.SessionId,
 		subscriberID: req.SubscriberId,
-		afterSeq:     req.AfterSeq,
+		afterSeq:     afterSeq,
 		logger:       slog.Default(),
 	}, nil
 }
@@ -84,6 +91,16 @@ func (es *EventStream) recvOnce(ctx context.Context, callback func(*bridgev1.Ses
 
 		if event.Seq > es.afterSeq {
 			es.afterSeq = event.Seq
+			if es.subscriberID != "" && es.client.cursors != nil {
+				if err := es.client.cursors.SaveCursor(ctx, es.sessionID, es.subscriberID, es.afterSeq); err != nil {
+					es.logger.Warn("failed to persist event cursor",
+						"session_id", es.sessionID,
+						"subscriber_id", es.subscriberID,
+						"seq", es.afterSeq,
+						"error", err,
+					)
+				}
+			}
 		}
 
 		if err := callback(event); err != nil {

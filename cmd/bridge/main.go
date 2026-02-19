@@ -16,6 +16,7 @@ import (
 	"github.com/markcallen/ai-agent-bridge/internal/config"
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/internal/provider"
+	"github.com/markcallen/ai-agent-bridge/internal/redact"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -25,13 +26,19 @@ func main() {
 	configPath := flag.String("config", "config/bridge.yaml", "Path to configuration file")
 	flag.Parse()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	bootstrapLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		logger.Error("failed to load config", "error", err)
+		bootstrapLogger.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+	redactor, err := redact.New(cfg.Logging.RedactPatterns)
+	if err != nil {
+		bootstrapLogger.Error("failed to compile redact patterns", "error", err)
+		os.Exit(1)
+	}
+	logger := newLogger(cfg, redactor)
 
 	// Set up provider registry
 	registry := bridge.NewRegistry()
@@ -71,6 +78,7 @@ func main() {
 
 	// Set up supervisor
 	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, subConfig)
+	sup.SetRedactor(redactor.Redact)
 	defer sup.Close()
 
 	// Set up JWT verifier
@@ -127,7 +135,14 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(grpcOpts...)
-	bridgeServer := server.New(sup, registry, logger)
+	bridgeServer := server.New(sup, registry, logger, server.RateLimitConfig{
+		GlobalRPS:                  cfg.RateLimits.GlobalRPS,
+		GlobalBurst:                cfg.RateLimits.GlobalBurst,
+		StartSessionPerClientRPS:   cfg.RateLimits.StartSessionPerClientRPS,
+		StartSessionPerClientBurst: cfg.RateLimits.StartSessionPerClientBurst,
+		SendInputPerSessionRPS:     cfg.RateLimits.SendInputPerSessionRPS,
+		SendInputPerSessionBurst:   cfg.RateLimits.SendInputPerSessionBurst,
+	})
 	bridgev1.RegisterBridgeServiceServer(grpcServer, bridgeServer)
 
 	ln, err := net.Listen("tcp", cfg.Server.Listen)
@@ -150,4 +165,29 @@ func main() {
 		logger.Error("serve", "error", err)
 		os.Exit(1)
 	}
+}
+
+func newLogger(cfg *config.Config, redactor *redact.Redactor) *slog.Logger {
+	level := slog.LevelInfo
+	switch cfg.Logging.Level {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	options := &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Value.Kind() == slog.KindString {
+				a.Value = slog.StringValue(redactor.Redact(a.Value.String()))
+			}
+			return a
+		},
+	}
+	if cfg.Logging.Format == "text" {
+		return slog.New(slog.NewTextHandler(os.Stdout, options))
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, options))
 }

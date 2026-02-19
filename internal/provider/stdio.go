@@ -164,7 +164,8 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 		Text:   "session started",
 	})
 
-	// Start output readers and exit watcher
+	// Start output readers and exit watcher.
+	h.streamWG.Add(2)
 	go h.readStream("stdout", stdout)
 	go h.readStream("stderr", stderr)
 	go h.waitForExit()
@@ -224,6 +225,7 @@ func (p *StdioProvider) startPTY(ctx context.Context, cfg bridge.SessionConfig, 
 		Text:   "session started",
 	})
 
+	h.streamWG.Add(1)
 	go h.readStream("stdout", ptmx)
 	go h.waitForExit()
 
@@ -283,6 +285,7 @@ type stdioHandle struct {
 	closeOnce sync.Once
 	waitDone  chan struct{} // closed when cmd.Wait() completes
 	waitErr   error
+	streamWG  sync.WaitGroup
 }
 
 func (h *stdioHandle) ID() string { return h.id }
@@ -358,6 +361,8 @@ func (h *stdioHandle) stop() error {
 }
 
 func (h *stdioHandle) readStream(stream string, r io.Reader) {
+	defer h.streamWG.Done()
+
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024) // up to 1MB lines
 	evType := bridge.EventTypeStdout
@@ -426,6 +431,9 @@ func (h *stdioHandle) waitForExit() {
 			Done:   true,
 		})
 	}
+
+	// Drain remaining stdout/stderr lines before channel close.
+	h.streamWG.Wait()
 
 	h.closeOnce.Do(func() {
 		h.mu.Lock()

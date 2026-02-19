@@ -25,6 +25,14 @@ sessions:
 input:
   max_size_bytes: 65536
 
+rate_limits:
+  global_rps: 200
+  global_burst: 400
+  start_session_per_client_rps: 10
+  start_session_per_client_burst: 20
+  send_input_per_session_rps: 20
+  send_input_per_session_burst: 50
+
 providers:
   claude:
     binary: "claude-print"
@@ -41,3 +49,5 @@ allowed_paths:
 logging:
   level: "info"
   format: "json"
+  redact_patterns:
+    - "(?i)(api[_-]?key|token|secret|password)\\s*[:=]\\s*\\S+"

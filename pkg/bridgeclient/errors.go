@@ -2,6 +2,7 @@ package bridgeclient
 
 import (
 	"errors"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,6 +16,7 @@ var (
 	ErrPermissionDenied     = errors.New("permission denied")
 	ErrInputTooLarge        = errors.New("input too large")
 	ErrSessionLimitReached  = errors.New("session limit reached")
+	ErrRateLimited          = errors.New("rate limited")
 )
 
 // mapError converts gRPC status errors to typed SDK errors.
@@ -36,6 +38,10 @@ func mapError(err error) error {
 	case codes.PermissionDenied:
 		return ErrPermissionDenied
 	case codes.ResourceExhausted:
+		msg := strings.ToLower(st.Message())
+		if strings.Contains(msg, "rate limit") {
+			return ErrRateLimited
+		}
 		return ErrSessionLimitReached
 	case codes.Unavailable:
 		return ErrProviderUnavailable

@@ -29,6 +29,7 @@ func UnaryAuditInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 			"rpc_method", info.FullMethod,
 			"project_id", projectID,
 			"session_id", sessionID,
+			"caller_cn", callerCommonName(ctx),
 		}
 		if claims != nil {
 			fields = append(fields, "caller_sub", claims.Subject)
@@ -54,7 +55,7 @@ func StreamAuditInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor {
 			return err
 		}
 		claims, _ := ClaimsFromContext(ss.Context())
-		fields := []any{"rpc_method", info.FullMethod}
+		fields := []any{"rpc_method", info.FullMethod, "caller_cn", callerCommonName(ss.Context())}
 		if claims != nil {
 			fields = append(fields, "caller_sub", claims.Subject, "project_id", claims.ProjectID)
 		}

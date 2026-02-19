@@ -4,18 +4,18 @@ Items tracked here are out of scope for the current implementation but planned f
 
 ## Security Hardening
 
-- [ ] Secret redaction in event streams (configurable regex patterns)
-- [ ] Secret redaction in log output
-- [ ] Per-client rate limiting on StartSession (token bucket)
-- [ ] Per-session rate limiting on SendInput
-- [ ] Global RPC rate limiting with RESOURCE_EXHAUSTED responses
+- [x] Secret redaction in event streams (configurable regex patterns)
+- [x] Secret redaction in log output
+- [x] Per-client rate limiting on StartSession (token bucket)
+- [x] Per-session rate limiting on SendInput
+- [x] Global RPC rate limiting with RESOURCE_EXHAUSTED responses
 - [x] Audit logging of all auth decisions (success and failure)
 - [ ] Certificate file watching with hot-reload (no daemon restart)
 - [ ] SDK client cert file watching and auto-reconnect
 - [ ] CRL distribution point served by bridge daemon
 - [ ] OCSP stapling support
-- [ ] Input validation for control characters in string fields
-- [ ] UUID format validation for session_id
+- [x] Input validation for control characters in string fields
+- [x] UUID format validation for session_id
 
 ## Provider Enhancements
 
@@ -44,11 +44,11 @@ Items tracked here are out of scope for the current implementation but planned f
 
 ## SDK (bridgeclient)
 
-- [ ] Configurable retry policy with exponential backoff
+- [x] Configurable retry policy with exponential backoff
 - [ ] Connection keepalive configuration
 - [ ] SDK-level context propagation (trace IDs)
 - [ ] Example integration test with real bridge daemon
-- [ ] GoDoc examples (`example_test.go`)
+- [x] GoDoc examples (`example_test.go`)
 
 ## Integration
 

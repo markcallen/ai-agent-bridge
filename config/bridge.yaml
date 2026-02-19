@@ -23,6 +23,14 @@ sessions:
 input:
   max_size_bytes: 65536
 
+rate_limits:
+  global_rps: 50
+  global_burst: 100
+  start_session_per_client_rps: 1
+  start_session_per_client_burst: 3
+  send_input_per_session_rps: 5
+  send_input_per_session_burst: 20
+
 providers:
   codex:
     binary: "codex"
@@ -47,3 +55,5 @@ allowed_paths: []
 logging:
   level: "info"
   format: "json"
+  redact_patterns:
+    - "(?i)(api[_-]?key|token|secret|password)\\s*[:=]\\s*\\S+"

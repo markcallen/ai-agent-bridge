@@ -21,11 +21,20 @@ type JWTConfig struct {
 // Option configures a Client.
 type Option func(*clientConfig)
 
+// RetryConfig controls retry behavior for unary RPC methods.
+type RetryConfig struct {
+	MaxAttempts    int
+	InitialBackoff time.Duration
+	MaxBackoff     time.Duration
+}
+
 type clientConfig struct {
-	target  string
-	mtls    *MTLSConfig
-	jwt     *JWTConfig
-	timeout time.Duration
+	target      string
+	mtls        *MTLSConfig
+	jwt         *JWTConfig
+	timeout     time.Duration
+	retry       RetryConfig
+	cursorStore CursorStore
 }
 
 // WithTarget sets the bridge daemon address (host:port).
@@ -46,4 +55,14 @@ func WithJWT(cfg JWTConfig) Option {
 // WithTimeout sets the default per-call timeout.
 func WithTimeout(d time.Duration) Option {
 	return func(c *clientConfig) { c.timeout = d }
+}
+
+// WithRetry sets retry behavior for unary operations.
+func WithRetry(cfg RetryConfig) Option {
+	return func(c *clientConfig) { c.retry = cfg }
+}
+
+// WithCursorStore sets persistent storage for stream cursor checkpoints.
+func WithCursorStore(store CursorStore) Option {
+	return func(c *clientConfig) { c.cursorStore = store }
 }

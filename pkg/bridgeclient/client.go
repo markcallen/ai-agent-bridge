@@ -15,16 +15,36 @@ type Client struct {
 	conn    *grpc.ClientConn
 	rpc     bridgev1.BridgeServiceClient
 	timeout time.Duration
+	retry   RetryConfig
 	jwtCred *jwtCredentials
+	cursors CursorStore
 }
 
 // New creates a new bridge client with the given options.
 func New(opts ...Option) (*Client, error) {
 	cfg := &clientConfig{
 		timeout: 30 * time.Second,
+		retry: RetryConfig{
+			MaxAttempts:    1,
+			InitialBackoff: 100 * time.Millisecond,
+			MaxBackoff:     2 * time.Second,
+		},
+		cursorStore: NewMemoryCursorStore(),
 	}
 	for _, o := range opts {
 		o(cfg)
+	}
+	if cfg.retry.MaxAttempts <= 0 {
+		cfg.retry.MaxAttempts = 1
+	}
+	if cfg.retry.InitialBackoff <= 0 {
+		cfg.retry.InitialBackoff = 100 * time.Millisecond
+	}
+	if cfg.retry.MaxBackoff <= 0 {
+		cfg.retry.MaxBackoff = 2 * time.Second
+	}
+	if cfg.cursorStore == nil {
+		cfg.cursorStore = NewMemoryCursorStore()
 	}
 
 	if cfg.target == "" {
@@ -64,7 +84,9 @@ func New(opts ...Option) (*Client, error) {
 		conn:    conn,
 		rpc:     bridgev1.NewBridgeServiceClient(conn),
 		timeout: cfg.timeout,
+		retry:   cfg.retry,
 		jwtCred: jwtCred,
+		cursors: cfg.cursorStore,
 	}, nil
 }
 

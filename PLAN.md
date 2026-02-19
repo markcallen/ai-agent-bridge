@@ -229,7 +229,7 @@ ai-agent-bridge/
   - `WithMTLS(cfg)` - mTLS configuration
   - `WithJWT(cfg)` - JWT signing configuration
   - `WithTimeout(d)` - per-call timeout
-- [ ] `WithRetry(cfg)` - retry policy (not yet implemented)
+- [x] `WithRetry(cfg)` - retry policy (not yet implemented)
 - [x] `pkg/bridgeclient/auth.go` - Credential management
   - Load mTLS certs → `tls.Config`
   - Load Ed25519 private key → auto-mint JWTs
@@ -271,7 +271,7 @@ ai-agent-bridge/
 
 ### 3.5 Documentation
 - [ ] GoDoc comments on all exported types and functions
-- [ ] Example code in `pkg/bridgeclient/example_test.go`
+- [x] Example code in `pkg/bridgeclient/example_test.go`
 
 ---
 
@@ -280,22 +280,22 @@ ai-agent-bridge/
 **Goal**: Production-grade security controls.
 
 ### 4.1 Secret Redaction
-- [ ] Configurable regex patterns for secret detection
-- [ ] Apply redaction to all event text before buffering
-- [ ] Apply redaction to all log output
+- [x] Configurable regex patterns for secret detection
+- [x] Apply redaction to all event text before buffering
+- [x] Apply redaction to all log output
 - [ ] Never log JWT tokens, TLS private keys, or provider API keys
 
 ### 4.2 Rate Limiting
-- [ ] Per-client rate limiting on `StartSession` (token bucket)
-- [ ] Per-session rate limiting on `SendInput`
-- [ ] Global rate limiting on total RPC calls
-- [ ] Return `RESOURCE_EXHAUSTED` gRPC status on limit hit
+- [x] Per-client rate limiting on `StartSession` (token bucket)
+- [x] Per-session rate limiting on `SendInput`
+- [x] Global rate limiting on total RPC calls
+- [x] Return `RESOURCE_EXHAUSTED` gRPC status on limit hit
 
 ### 4.3 Audit Logging
 - [ ] Log all auth decisions (success and failure) with structured fields
 - [ ] Log session lifecycle events (start, stop, crash)
 - [ ] Log policy enforcement decisions (limit reached, path denied)
-- [ ] Include `project_id`, `session_id`, `caller_cn`, `caller_sub` in all audit entries
+- [x] Include `project_id`, `session_id`, `caller_cn`, `caller_sub` in all audit entries
 
 ### 4.4 Certificate Rotation
 - [ ] `bridge-ca renew` command for certificate renewal
@@ -303,11 +303,11 @@ ai-agent-bridge/
 - [ ] SDK client supports cert file watching and reconnect
 
 ### 4.5 Input Validation
-- [ ] Validate all string fields for control characters
+- [x] Validate all string fields for control characters
 - [ ] Enforce max lengths on all string fields
 - [x] Validate `repo_path` is absolute and under allowed paths
 - [x] Validate `provider` is a known registered provider
-- [ ] Validate `session_id` format (UUID)
+- [x] Validate `session_id` format (UUID)
 
 ---
 
@@ -345,8 +345,8 @@ ai-agent-bridge/
 - [x] CA operations (init, issue, cross-sign, bundle)
 - [x] gRPC server authorization and error mapping (`internal/server/server_test.go`)
 - [x] Provider startup timeout behavior (`internal/provider/stdio_test.go`)
-- [ ] Secret redaction patterns
-- [ ] Config loading and validation
+- [x] Secret redaction patterns
+- [x] Config loading and validation
 
 ### 6.2 Integration Tests
 - [x] End-to-end: start → input → output → stop (with real process)
@@ -364,7 +364,7 @@ ai-agent-bridge/
 - [ ] Bridge daemon restart → all sessions marked failed
 - [ ] Network partition simulation (client disconnect/reconnect)
 - [ ] Disconnect while agent continues producing events; reconnect receives unseen queue contents in order
-- [ ] Invalid input handling (oversized, malformed)
+- [x] Invalid input handling (oversized, malformed)
 - [ ] Concurrent session operations (race condition testing)
 
 ### 6.4 Observability

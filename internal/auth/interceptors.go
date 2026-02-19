@@ -35,12 +35,12 @@ func UnaryJWTInterceptor(v *JWTVerifier, logger *slog.Logger) grpc.UnaryServerIn
 		claims, err := extractAndVerify(ctx, v)
 		if err != nil {
 			if logger != nil {
-				logger.Warn("auth decision", "result", "deny", "rpc_method", info.FullMethod, "reason", err.Error())
+				logger.Warn("auth decision", "result", "deny", "rpc_method", info.FullMethod, "reason", err.Error(), "caller_cn", callerCommonName(ctx))
 			}
 			return nil, err
 		}
 		if logger != nil {
-			logger.Info("auth decision", "result", "allow", "rpc_method", info.FullMethod, "caller_sub", claims.Subject, "project_id", claims.ProjectID)
+			logger.Info("auth decision", "result", "allow", "rpc_method", info.FullMethod, "caller_sub", claims.Subject, "project_id", claims.ProjectID, "caller_cn", callerCommonName(ctx))
 		}
 		return handler(ContextWithClaims(ctx, claims), req)
 	}
@@ -52,12 +52,12 @@ func StreamJWTInterceptor(v *JWTVerifier, logger *slog.Logger) grpc.StreamServer
 		claims, err := extractAndVerify(ss.Context(), v)
 		if err != nil {
 			if logger != nil {
-				logger.Warn("auth decision", "result", "deny", "rpc_method", info.FullMethod, "reason", err.Error())
+				logger.Warn("auth decision", "result", "deny", "rpc_method", info.FullMethod, "reason", err.Error(), "caller_cn", callerCommonName(ss.Context()))
 			}
 			return err
 		}
 		if logger != nil {
-			logger.Info("auth decision", "result", "allow", "rpc_method", info.FullMethod, "caller_sub", claims.Subject, "project_id", claims.ProjectID)
+			logger.Info("auth decision", "result", "allow", "rpc_method", info.FullMethod, "caller_sub", claims.Subject, "project_id", claims.ProjectID, "caller_cn", callerCommonName(ss.Context()))
 		}
 		wrapped := &wrappedStream{
 			ServerStream: ss,

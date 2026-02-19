@@ -15,6 +15,7 @@ type Config struct {
 	Auth         AuthConfig                `yaml:"auth"`
 	Sessions     SessionsConfig            `yaml:"sessions"`
 	Input        InputConfig               `yaml:"input"`
+	RateLimits   RateLimitsConfig          `yaml:"rate_limits"`
 	Providers    map[string]ProviderConfig `yaml:"providers"`
 	AllowedPaths []string                  `yaml:"allowed_paths"`
 	Logging      LoggingConfig             `yaml:"logging"`
@@ -55,6 +56,15 @@ type InputConfig struct {
 	MaxSizeBytes int `yaml:"max_size_bytes"`
 }
 
+type RateLimitsConfig struct {
+	GlobalRPS                  float64 `yaml:"global_rps"`
+	GlobalBurst                int     `yaml:"global_burst"`
+	StartSessionPerClientRPS   float64 `yaml:"start_session_per_client_rps"`
+	StartSessionPerClientBurst int     `yaml:"start_session_per_client_burst"`
+	SendInputPerSessionRPS     float64 `yaml:"send_input_per_session_rps"`
+	SendInputPerSessionBurst   int     `yaml:"send_input_per_session_burst"`
+}
+
 type ProviderConfig struct {
 	Binary         string   `yaml:"binary"`
 	Args           []string `yaml:"args"`
@@ -82,6 +92,9 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyDefaults(cfg)
+	if err := validate(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -131,10 +144,78 @@ func applyDefaults(cfg *Config) {
 	if cfg.Input.MaxSizeBytes == 0 {
 		cfg.Input.MaxSizeBytes = 65536
 	}
+	if cfg.RateLimits.GlobalRPS == 0 {
+		cfg.RateLimits.GlobalRPS = 50
+	}
+	if cfg.RateLimits.GlobalBurst == 0 {
+		cfg.RateLimits.GlobalBurst = 100
+	}
+	if cfg.RateLimits.StartSessionPerClientRPS == 0 {
+		cfg.RateLimits.StartSessionPerClientRPS = 1
+	}
+	if cfg.RateLimits.StartSessionPerClientBurst == 0 {
+		cfg.RateLimits.StartSessionPerClientBurst = 3
+	}
+	if cfg.RateLimits.SendInputPerSessionRPS == 0 {
+		cfg.RateLimits.SendInputPerSessionRPS = 5
+	}
+	if cfg.RateLimits.SendInputPerSessionBurst == 0 {
+		cfg.RateLimits.SendInputPerSessionBurst = 20
+	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"
 	}
 	if cfg.Logging.Format == "" {
 		cfg.Logging.Format = "json"
 	}
+}
+
+func validate(cfg *Config) error {
+	if cfg.Server.Listen == "" {
+		return fmt.Errorf("config: server.listen is required")
+	}
+	if cfg.Input.MaxSizeBytes <= 0 {
+		return fmt.Errorf("config: input.max_size_bytes must be > 0")
+	}
+	if cfg.Sessions.MaxPerProject < 0 || cfg.Sessions.MaxGlobal < 0 {
+		return fmt.Errorf("config: session limits must be >= 0")
+	}
+	if cfg.Sessions.EventBufferSize <= 0 {
+		return fmt.Errorf("config: sessions.event_buffer_size must be > 0")
+	}
+	if cfg.Sessions.MaxSubscribersPerSession <= 0 {
+		return fmt.Errorf("config: sessions.max_subscribers_per_session must be > 0")
+	}
+	if cfg.RateLimits.GlobalRPS <= 0 || cfg.RateLimits.GlobalBurst <= 0 {
+		return fmt.Errorf("config: rate_limits.global_rps/global_burst must be > 0")
+	}
+	if cfg.RateLimits.StartSessionPerClientRPS <= 0 || cfg.RateLimits.StartSessionPerClientBurst <= 0 {
+		return fmt.Errorf("config: rate_limits.start_session_per_client_rps/start_session_per_client_burst must be > 0")
+	}
+	if cfg.RateLimits.SendInputPerSessionRPS <= 0 || cfg.RateLimits.SendInputPerSessionBurst <= 0 {
+		return fmt.Errorf("config: rate_limits.send_input_per_session_rps/send_input_per_session_burst must be > 0")
+	}
+	if _, err := time.ParseDuration(cfg.Auth.JWTMaxTTL); err != nil {
+		return fmt.Errorf("config: auth.jwt_max_ttl: %w", err)
+	}
+	if _, err := time.ParseDuration(cfg.Sessions.IdleTimeout); err != nil {
+		return fmt.Errorf("config: sessions.idle_timeout: %w", err)
+	}
+	if _, err := time.ParseDuration(cfg.Sessions.StopGracePeriod); err != nil {
+		return fmt.Errorf("config: sessions.stop_grace_period: %w", err)
+	}
+	if _, err := time.ParseDuration(cfg.Sessions.SubscriberTTL); err != nil {
+		return fmt.Errorf("config: sessions.subscriber_ttl: %w", err)
+	}
+	for name, provider := range cfg.Providers {
+		if provider.Binary == "" {
+			return fmt.Errorf("config: providers.%s.binary is required", name)
+		}
+		if provider.StartupTimeout != "" {
+			if _, err := time.ParseDuration(provider.StartupTimeout); err != nil {
+				return fmt.Errorf("config: providers.%s.startup_timeout: %w", name, err)
+			}
+		}
+	}
+	return nil
 }
