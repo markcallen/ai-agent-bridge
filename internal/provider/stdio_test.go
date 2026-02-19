@@ -185,11 +185,11 @@ func TestStreamJSONParsing(t *testing.T) {
 	tmp := t.TempDir()
 	scriptPath := filepath.Join(tmp, "stream-json-provider.sh")
 	script := `#!/usr/bin/env sh
-echo '{"type":"event","event":{"type":"message_start","message":{}}}'
-echo '{"type":"event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}'
-echo '{"type":"event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}}'
-echo '{"type":"event","event":{"type":"content_block_stop"}}'
-echo '{"type":"event","event":{"type":"message_stop"}}'
+echo '{"type":"stream_event","event":{"type":"message_start","message":{}}}'
+echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}'
+echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}}'
+echo '{"type":"stream_event","event":{"type":"content_block_stop"}}'
+echo '{"type":"stream_event","event":{"type":"message_stop"}}'
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("WriteFile: %v", err)

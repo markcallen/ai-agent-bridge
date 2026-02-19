@@ -301,8 +301,19 @@ func (h *stdioHandle) send(text string) error {
 	if h.streamJSON {
 		msg := struct {
 			Type    string `json:"type"`
-			Content string `json:"content"`
-		}{Type: "user", Content: line}
+			Message struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"message"`
+			SessionID       string  `json:"session_id"`
+			ParentToolUseID *string `json:"parent_tool_use_id"`
+		}{
+			Type:            "user",
+			SessionID:       "default",
+			ParentToolUseID: nil,
+		}
+		msg.Message.Role = "user"
+		msg.Message.Content = line
 		data, err := json.Marshal(msg)
 		if err != nil {
 			return fmt.Errorf("marshal stream-json input: %w", err)
