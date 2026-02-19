@@ -30,6 +30,10 @@ providers:
     binary: "claude-print"
     args: ["--print", "--dangerously-skip-permissions"]
     startup_timeout: "120s"
+  echo:
+    binary: "cat"
+    args: []
+    startup_timeout: "5s"
 
 allowed_paths:
   - "/tmp"

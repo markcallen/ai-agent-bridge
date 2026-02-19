@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -79,9 +80,25 @@ func run(target, cacert, cert, key, jwtKey, jwtIssuer, repo string, timeout time
 	}
 	defer client.Close()
 
-	sessionID := uuid.NewString()
 	project := "e2e"
 	client.SetProject(project)
+
+	if err := runChatExampleTest(ctx, client, repo); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: chat example test: %v\n", err)
+		return 1
+	}
+
+	if err := runMultiInputTest(ctx, client, repo); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: multi-input test: %v\n", err)
+		return 1
+	}
+
+	if err := runDisconnectReconnectTest(ctx, client, repo); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: disconnect/reconnect test: %v\n", err)
+		return 1
+	}
+
+	sessionID := uuid.NewString()
 
 	fmt.Printf("Starting session %s (repo=%s)...\n", sessionID, repo)
 
@@ -150,6 +167,371 @@ func run(target, cacert, cert, key, jwtKey, jwtIssuer, repo string, timeout time
 		fmt.Fprintf(os.Stderr, "ERROR: timed out after %s\n", timeout)
 		return 1
 	}
+}
+
+// runChatExampleTest exercises the same flow as examples/chat:
+// start a session, open an event stream, send a message, receive the echoed
+// output, then stop the session. This validates the SDK usage shown in the
+// example actually works end-to-end.
+func runChatExampleTest(ctx context.Context, client *bridgeclient.Client, repo string) error {
+	fmt.Println("Running chat example test...")
+
+	// Step 1: Start a new session (using the echo provider so we get
+	// deterministic output without needing a real AI).
+	sessionID := uuid.NewString()
+	_, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId: "e2e",
+		SessionId: sessionID,
+		RepoPath:  repo,
+		Provider:  "echo",
+	})
+	if err != nil {
+		return fmt.Errorf("start session: %w", err)
+	}
+	fmt.Printf("  Started session %s\n", sessionID)
+
+	// Step 2: Open an event stream.
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
+
+	stream, err := client.StreamEvents(streamCtx, &bridgev1.StreamEventsRequest{
+		SessionId:    sessionID,
+		SubscriberId: "chat-example-test",
+		AfterSeq:     0,
+	})
+	if err != nil {
+		return fmt.Errorf("stream events: %w", err)
+	}
+
+	// Step 3: Receive events in the background, collecting stdout output.
+	var mu sync.Mutex
+	var collected string
+	recvDone := make(chan error, 1)
+	go func() {
+		recvDone <- stream.RecvAll(streamCtx, func(ev *bridgev1.SessionEvent) error {
+			if ev.Type == bridgev1.EventType_EVENT_TYPE_STDOUT {
+				mu.Lock()
+				collected += ev.Text
+				mu.Unlock()
+			}
+			return nil
+		})
+	}()
+
+	// Step 4: Send a message (like a user typing into the readline prompt).
+	message := "hello from the chat example"
+	_, err = client.SendInput(ctx, &bridgev1.SendInputRequest{
+		SessionId: sessionID,
+		Text:      message + "\n",
+	})
+	if err != nil {
+		return fmt.Errorf("send input: %w", err)
+	}
+	fmt.Printf("  Sent: %q\n", message)
+
+	// Step 5: Wait for the echoed response.
+	deadline := time.After(10 * time.Second)
+	for {
+		mu.Lock()
+		got := collected
+		mu.Unlock()
+		if strings.Contains(got, message) {
+			break
+		}
+		select {
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for echoed output")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	fmt.Println("  Received echoed response")
+
+	// Step 6: Stop the session.
+	streamCancel()
+	<-recvDone
+
+	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{SessionId: sessionID})
+	if err != nil {
+		return fmt.Errorf("stop session: %w", err)
+	}
+	fmt.Println("  Session stopped")
+	fmt.Println("Chat example test passed.")
+	return nil
+}
+
+func runMultiInputTest(ctx context.Context, client *bridgeclient.Client, repo string) error {
+	fmt.Println("Running multi-input pub/sub test...")
+
+	sessionID := uuid.NewString()
+	_, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId: "e2e",
+		SessionId: sessionID,
+		RepoPath:  repo,
+		Provider:  "echo",
+	})
+	if err != nil {
+		return fmt.Errorf("start session: %w", err)
+	}
+
+	stream, err := client.StreamEvents(ctx, &bridgev1.StreamEventsRequest{
+		SessionId:    sessionID,
+		SubscriberId: "multi-input-sub",
+		AfterSeq:     0,
+	})
+	if err != nil {
+		return fmt.Errorf("stream events: %w", err)
+	}
+
+	// Collect STDOUT events in background.
+	var mu sync.Mutex
+	var outputs []string
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	defer streamCancel()
+
+	recvDone := make(chan error, 1)
+	go func() {
+		recvDone <- stream.RecvAll(streamCtx, func(ev *bridgev1.SessionEvent) error {
+			if ev.Type == bridgev1.EventType_EVENT_TYPE_STDOUT {
+				mu.Lock()
+				outputs = append(outputs, strings.TrimSpace(ev.Text))
+				mu.Unlock()
+			}
+			return nil
+		})
+	}()
+
+	inputs := []string{"hello-1", "hello-2", "hello-3"}
+	for i, msg := range inputs {
+		time.Sleep(200 * time.Millisecond)
+		_, err := client.SendInput(ctx, &bridgev1.SendInputRequest{
+			SessionId: sessionID,
+			Text:      msg + "\n",
+		})
+		if err != nil {
+			return fmt.Errorf("send input %d: %w", i+1, err)
+		}
+		fmt.Printf("  Sent input %d: %q\n", i+1, msg)
+	}
+
+	// Wait for all 3 echoed outputs.
+	deadline := time.After(10 * time.Second)
+	for {
+		mu.Lock()
+		got := len(outputs)
+		mu.Unlock()
+		if got >= 3 {
+			break
+		}
+		select {
+		case <-deadline:
+			mu.Lock()
+			defer mu.Unlock()
+			return fmt.Errorf("timed out waiting for echoed outputs, got %d: %v", len(outputs), outputs)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+
+	streamCancel()
+	<-recvDone
+
+	// Stop session.
+	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{SessionId: sessionID})
+	if err != nil {
+		return fmt.Errorf("stop session: %w", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for i, expected := range inputs {
+		found := false
+		for _, o := range outputs {
+			if strings.Contains(o, expected) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("expected output %d (%q) not found in %v", i+1, expected, outputs)
+		}
+	}
+
+	fmt.Println("  OK: received all 3 echoed outputs")
+	fmt.Println("Multi-input pub/sub test passed.")
+	return nil
+}
+
+func runDisconnectReconnectTest(ctx context.Context, client *bridgeclient.Client, repo string) error {
+	fmt.Println("Running disconnect/reconnect pub/sub test...")
+
+	sessionID := uuid.NewString()
+	subscriberID := "reconnect-sub"
+
+	_, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId: "e2e",
+		SessionId: sessionID,
+		RepoPath:  repo,
+		Provider:  "echo",
+	})
+	if err != nil {
+		return fmt.Errorf("start session: %w", err)
+	}
+
+	// Phase 1: connect and send first input.
+	fmt.Println("  Phase 1: connect and send first input")
+	stream1, err := client.StreamEvents(ctx, &bridgev1.StreamEventsRequest{
+		SessionId:    sessionID,
+		SubscriberId: subscriberID,
+		AfterSeq:     0,
+	})
+	if err != nil {
+		return fmt.Errorf("stream events phase 1: %w", err)
+	}
+
+	var lastSeq uint64
+	phase1Ctx, phase1Cancel := context.WithCancel(ctx)
+	defer phase1Cancel()
+	recv1Done := make(chan error, 1)
+	var phase1Output string
+	var phase1Mu sync.Mutex
+
+	go func() {
+		recv1Done <- stream1.RecvAll(phase1Ctx, func(ev *bridgev1.SessionEvent) error {
+			if ev.Seq > lastSeq {
+				lastSeq = ev.Seq
+			}
+			if ev.Type == bridgev1.EventType_EVENT_TYPE_STDOUT {
+				phase1Mu.Lock()
+				phase1Output += ev.Text
+				phase1Mu.Unlock()
+			}
+			return nil
+		})
+	}()
+
+	_, err = client.SendInput(ctx, &bridgev1.SendInputRequest{
+		SessionId: sessionID,
+		Text:      "before disconnect\n",
+	})
+	if err != nil {
+		return fmt.Errorf("send 'before disconnect': %w", err)
+	}
+
+	// Wait for the echo.
+	deadline := time.After(10 * time.Second)
+	for {
+		phase1Mu.Lock()
+		got := phase1Output
+		phase1Mu.Unlock()
+		if strings.Contains(got, "before disconnect") {
+			break
+		}
+		select {
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for 'before disconnect' echo")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+
+	// Phase 2: disconnect.
+	fmt.Println("  Phase 2: disconnect")
+	phase1Cancel()
+	<-recv1Done
+
+	// Phase 3: send input while disconnected.
+	fmt.Println("  Phase 3: send input while disconnected")
+	time.Sleep(200 * time.Millisecond)
+	_, err = client.SendInput(ctx, &bridgev1.SendInputRequest{
+		SessionId: sessionID,
+		Text:      "during disconnect\n",
+	})
+	if err != nil {
+		return fmt.Errorf("send 'during disconnect': %w", err)
+	}
+
+	// Give the echo time to be buffered.
+	time.Sleep(500 * time.Millisecond)
+
+	// Phase 4: reconnect with afterSeq.
+	fmt.Printf("  Phase 4: reconnect with afterSeq=%d\n", lastSeq)
+	stream2, err := client.StreamEvents(ctx, &bridgev1.StreamEventsRequest{
+		SessionId:    sessionID,
+		SubscriberId: subscriberID,
+		AfterSeq:     lastSeq,
+	})
+	if err != nil {
+		return fmt.Errorf("stream events phase 4: %w", err)
+	}
+
+	phase4Ctx, phase4Cancel := context.WithCancel(ctx)
+	defer phase4Cancel()
+	recv2Done := make(chan error, 1)
+	var phase4Output string
+	var phase4Mu sync.Mutex
+
+	go func() {
+		recv2Done <- stream2.RecvAll(phase4Ctx, func(ev *bridgev1.SessionEvent) error {
+			if ev.Type == bridgev1.EventType_EVENT_TYPE_STDOUT {
+				phase4Mu.Lock()
+				phase4Output += ev.Text
+				phase4Mu.Unlock()
+			}
+			return nil
+		})
+	}()
+
+	// Wait for the replayed "during disconnect" event.
+	deadline = time.After(10 * time.Second)
+	for {
+		phase4Mu.Lock()
+		got := phase4Output
+		phase4Mu.Unlock()
+		if strings.Contains(got, "during disconnect") {
+			break
+		}
+		select {
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for replayed 'during disconnect' event")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	fmt.Println("  OK: received missed event via replay")
+
+	// Send another input to verify live streaming works after reconnect.
+	_, err = client.SendInput(ctx, &bridgev1.SendInputRequest{
+		SessionId: sessionID,
+		Text:      "after reconnect\n",
+	})
+	if err != nil {
+		return fmt.Errorf("send 'after reconnect': %w", err)
+	}
+
+	deadline = time.After(10 * time.Second)
+	for {
+		phase4Mu.Lock()
+		got := phase4Output
+		phase4Mu.Unlock()
+		if strings.Contains(got, "after reconnect") {
+			break
+		}
+		select {
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for 'after reconnect' echo")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	fmt.Println("  OK: received live event after reconnect")
+
+	phase4Cancel()
+	<-recv2Done
+
+	// Stop session.
+	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{SessionId: sessionID})
+	if err != nil {
+		return fmt.Errorf("stop session: %w", err)
+	}
+
+	fmt.Println("Disconnect/reconnect pub/sub test passed.")
+	return nil
 }
 
 func runMTLSRejectionScenarios(
