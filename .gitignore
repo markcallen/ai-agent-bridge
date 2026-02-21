@@ -4,7 +4,11 @@
 /bridge-ca
 /chat
 /e2e-test
+/runprompt
 *.exe
+
+# Local environment (secrets — use .env.example as template)
+.env
 
 # Certificates (generated)
 certs/*.key
