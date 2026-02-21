@@ -91,6 +91,10 @@ const (
 	EventType_EVENT_TYPE_STDERR          EventType = 5
 	EventType_EVENT_TYPE_INPUT_RECEIVED  EventType = 6
 	EventType_EVENT_TYPE_BUFFER_OVERFLOW EventType = 7
+	// Agent is ready and waiting for the first input.
+	EventType_EVENT_TYPE_AGENT_READY EventType = 8
+	// Agent has finished responding to the last input; safe to prompt again.
+	EventType_EVENT_TYPE_RESPONSE_COMPLETE EventType = 9
 )
 
 // Enum value maps for EventType.
@@ -104,16 +108,20 @@ var (
 		5: "EVENT_TYPE_STDERR",
 		6: "EVENT_TYPE_INPUT_RECEIVED",
 		7: "EVENT_TYPE_BUFFER_OVERFLOW",
+		8: "EVENT_TYPE_AGENT_READY",
+		9: "EVENT_TYPE_RESPONSE_COMPLETE",
 	}
 	EventType_value = map[string]int32{
-		"EVENT_TYPE_UNSPECIFIED":     0,
-		"EVENT_TYPE_SESSION_STARTED": 1,
-		"EVENT_TYPE_SESSION_STOPPED": 2,
-		"EVENT_TYPE_SESSION_FAILED":  3,
-		"EVENT_TYPE_STDOUT":          4,
-		"EVENT_TYPE_STDERR":          5,
-		"EVENT_TYPE_INPUT_RECEIVED":  6,
-		"EVENT_TYPE_BUFFER_OVERFLOW": 7,
+		"EVENT_TYPE_UNSPECIFIED":       0,
+		"EVENT_TYPE_SESSION_STARTED":   1,
+		"EVENT_TYPE_SESSION_STOPPED":   2,
+		"EVENT_TYPE_SESSION_FAILED":    3,
+		"EVENT_TYPE_STDOUT":            4,
+		"EVENT_TYPE_STDERR":            5,
+		"EVENT_TYPE_INPUT_RECEIVED":    6,
+		"EVENT_TYPE_BUFFER_OVERFLOW":   7,
+		"EVENT_TYPE_AGENT_READY":       8,
+		"EVENT_TYPE_RESPONSE_COMPLETE": 9,
 	}
 )
 
@@ -1273,7 +1281,7 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x16SESSION_STATUS_RUNNING\x10\x02\x12\x1b\n" +
 	"\x17SESSION_STATUS_STOPPING\x10\x03\x12\x1a\n" +
 	"\x16SESSION_STATUS_STOPPED\x10\x04\x12\x19\n" +
-	"\x15SESSION_STATUS_FAILED\x10\x05*\xf3\x01\n" +
+	"\x15SESSION_STATUS_FAILED\x10\x05*\xb1\x02\n" +
 	"\tEventType\x12\x1a\n" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aEVENT_TYPE_SESSION_STARTED\x10\x01\x12\x1e\n" +
@@ -1282,7 +1290,9 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x11EVENT_TYPE_STDOUT\x10\x04\x12\x15\n" +
 	"\x11EVENT_TYPE_STDERR\x10\x05\x12\x1d\n" +
 	"\x19EVENT_TYPE_INPUT_RECEIVED\x10\x06\x12\x1e\n" +
-	"\x1aEVENT_TYPE_BUFFER_OVERFLOW\x10\a2\xf0\x04\n" +
+	"\x1aEVENT_TYPE_BUFFER_OVERFLOW\x10\a\x12\x1a\n" +
+	"\x16EVENT_TYPE_AGENT_READY\x10\b\x12 \n" +
+	"\x1cEVENT_TYPE_RESPONSE_COMPLETE\x10\t2\xf0\x04\n" +
 	"\rBridgeService\x12O\n" +
 	"\fStartSession\x12\x1e.bridge.v1.StartSessionRequest\x1a\x1f.bridge.v1.StartSessionResponse\x12L\n" +
 	"\vStopSession\x12\x1d.bridge.v1.StopSessionRequest\x1a\x1e.bridge.v1.StopSessionResponse\x12I\n" +

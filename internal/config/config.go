@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -69,8 +70,13 @@ type ProviderConfig struct {
 	Binary         string   `yaml:"binary"`
 	Args           []string `yaml:"args"`
 	StartupTimeout string   `yaml:"startup_timeout"`
+	RequiredEnv    []string `yaml:"required_env"`
 	PTY            bool     `yaml:"pty"`
 	StreamJSON     bool     `yaml:"stream_json"`
+	// PromptPattern is a regex matched against PTY output lines. When it
+	// matches the first time, AGENT_READY is emitted; on subsequent matches
+	// after output, RESPONSE_COMPLETE is emitted.
+	PromptPattern string `yaml:"prompt_pattern"`
 }
 
 type LoggingConfig struct {
@@ -214,6 +220,11 @@ func validate(cfg *Config) error {
 		if provider.StartupTimeout != "" {
 			if _, err := time.ParseDuration(provider.StartupTimeout); err != nil {
 				return fmt.Errorf("config: providers.%s.startup_timeout: %w", name, err)
+			}
+		}
+		for i, envName := range provider.RequiredEnv {
+			if strings.TrimSpace(envName) == "" {
+				return fmt.Errorf("config: providers.%s.required_env[%d] must not be empty", name, i)
 			}
 		}
 	}

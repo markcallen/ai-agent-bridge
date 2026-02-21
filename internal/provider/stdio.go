@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,28 +28,35 @@ type StdioConfig struct {
 	StopGrace      time.Duration
 	UsePTY         bool
 	StreamJSON     bool
+	// PromptPattern is a regex matched against each output line for PTY-based
+	// providers. The first match emits AGENT_READY; subsequent matches after
+	// output has been seen emit RESPONSE_COMPLETE.
+	PromptPattern string
 }
 
-// stream-json parse structs for Claude Code's --output-format stream-json
-type streamEvent struct {
-	Type  string      `json:"type"`
-	Event streamInner `json:"event"`
+// stream-json parse structs for Claude Code CLI's --output-format stream-json.
+// Claude Code emits NDJSON where each line is one of these events.
+// We extract text from "assistant" events and use "system"/"result" for signals.
+type claudeStreamEvent struct {
+	Type    string         `json:"type"`    // "system", "user", "assistant", "result"
+	Subtype string         `json:"subtype"` // "init" for system events, "success"/"error" for result
+	Message *claudeMessage `json:"message"` // present when type == "assistant"
 }
 
-type streamInner struct {
-	Type  string      `json:"type"`
-	Delta streamDelta `json:"delta"`
+type claudeMessage struct {
+	Content []claudeContent `json:"content"`
 }
 
-type streamDelta struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+type claudeContent struct {
+	Type string `json:"type"` // "text", "tool_use", etc.
+	Text string `json:"text"` // non-empty when type == "text"
 }
 
 // StdioProvider manages agent sessions via subprocess stdio.
 type StdioProvider struct {
-	cfg     StdioConfig
-	starter func(*exec.Cmd) error
+	cfg      StdioConfig
+	promptRe *regexp.Regexp
+	starter  func(*exec.Cmd) error
 }
 
 var defaultCommandStarter = func(cmd *exec.Cmd) error { return cmd.Start() }
@@ -61,10 +69,14 @@ func NewStdioProvider(cfg StdioConfig) *StdioProvider {
 	if cfg.StopGrace == 0 {
 		cfg.StopGrace = 10 * time.Second
 	}
-	return &StdioProvider{
+	p := &StdioProvider{
 		cfg:     cfg,
 		starter: defaultCommandStarter,
 	}
+	if cfg.PromptPattern != "" {
+		p.promptRe = regexp.MustCompile(cfg.PromptPattern)
+	}
+	return p
 }
 
 func (p *StdioProvider) ID() string { return p.cfg.ProviderID }
@@ -106,6 +118,9 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 	cmd.Dir = cfg.RepoPath
 	// Inherit minimal environment
 	cmd.Env = filterEnv(os.Environ())
+	// Run in its own process group so SIGTERM/SIGKILL sent by the agent's
+	// process tree cannot propagate back to the bridge process.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -154,6 +169,7 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 		sessionID:  cfg.SessionID,
 		stopGrace:  p.cfg.StopGrace,
 		streamJSON: p.cfg.StreamJSON,
+		promptRe:   p.promptRe,
 		waitDone:   make(chan struct{}),
 	}
 
@@ -163,6 +179,16 @@ func (p *StdioProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (br
 		Stream: "system",
 		Text:   "session started",
 	})
+
+	// For stream-json providers, the process reads from stdin and is immediately
+	// ready; emit AGENT_READY now rather than waiting for a prompt pattern.
+	if p.cfg.StreamJSON {
+		h.emit(bridge.Event{
+			Type:   bridge.EventTypeAgentReady,
+			Stream: "system",
+			Text:   "agent ready",
+		})
+	}
 
 	// Start output readers and exit watcher.
 	h.streamWG.Add(2)
@@ -216,6 +242,7 @@ func (p *StdioProvider) startPTY(ctx context.Context, cfg bridge.SessionConfig, 
 		sessionID:  cfg.SessionID,
 		stopGrace:  p.cfg.StopGrace,
 		streamJSON: p.cfg.StreamJSON,
+		promptRe:   p.promptRe,
 		waitDone:   make(chan struct{}),
 	}
 
@@ -278,6 +305,7 @@ type stdioHandle struct {
 	sessionID  string
 	stopGrace  time.Duration
 	streamJSON bool
+	promptRe   *regexp.Regexp // non-nil for PTY providers with a prompt pattern
 
 	mu        sync.Mutex
 	stopped   bool
@@ -341,8 +369,13 @@ func (h *stdioHandle) stop() error {
 
 	_ = h.stdin.Close()
 
-	// Try graceful SIGTERM
-	if h.cmd.Process != nil {
+	// SIGTERM the process group so child processes (e.g. Node.js workers
+	// spawned by Claude Code) are also signalled. When Setpgid was set, the
+	// child's PID equals its PGID. Fall back to the individual process signal
+	// if the PID is not yet available.
+	if h.pid > 0 {
+		_ = syscall.Kill(-h.pid, syscall.SIGTERM)
+	} else if h.cmd.Process != nil {
 		_ = h.cmd.Process.Signal(syscall.SIGTERM)
 	}
 
@@ -351,7 +384,9 @@ func (h *stdioHandle) stop() error {
 	case <-h.waitDone:
 	case <-time.After(h.stopGrace):
 		// Force kill if graceful shutdown timed out
-		if h.cmd.Process != nil {
+		if h.pid > 0 {
+			_ = syscall.Kill(-h.pid, syscall.SIGKILL)
+		} else if h.cmd.Process != nil {
 			_ = h.cmd.Process.Kill()
 		}
 		<-h.waitDone
@@ -369,25 +404,76 @@ func (h *stdioHandle) readStream(stream string, r io.Reader) {
 	if stream == "stderr" {
 		evType = bridge.EventTypeStderr
 	}
+
+	// State for PTY prompt detection.
+	promptReady := false // true after AGENT_READY has been emitted
+	sawOutput := false   // true after non-prompt output since last prompt match
+
 	for sc.Scan() {
-		line := sc.Text()
+		// PTY output has \r\n line endings; strip the carriage return.
+		line := strings.TrimRight(sc.Text(), "\r")
+
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+
+		// --- stream-json mode (Claude Code SDK output) ---
 		if h.streamJSON && stream == "stdout" {
-			var ev streamEvent
+			var ev claudeStreamEvent
 			if err := json.Unmarshal([]byte(line), &ev); err != nil {
 				continue // skip unparseable lines
 			}
-			if ev.Event.Type != "content_block_delta" || ev.Event.Delta.Type != "text_delta" {
-				continue
+			switch ev.Type {
+			case "assistant":
+				// Extract text content and stream it.
+				if ev.Message != nil {
+					for _, c := range ev.Message.Content {
+						if c.Type == "text" && c.Text != "" {
+							h.emit(bridge.Event{
+								Type:   evType,
+								Stream: stream,
+								Text:   c.Text,
+							})
+						}
+					}
+				}
+			case "result":
+				// Claude has finished responding to the last input.
+				h.emit(bridge.Event{
+					Type:   bridge.EventTypeResponseComplete,
+					Stream: "system",
+					Text:   "response complete",
+				})
 			}
-			h.emit(bridge.Event{
-				Type:   evType,
-				Stream: stream,
-				Text:   ev.Event.Delta.Text,
-			})
 			continue
+		}
+
+		// --- PTY prompt-pattern mode ---
+		if h.promptRe != nil && stream == "stdout" && h.promptRe.MatchString(line) {
+			if !promptReady {
+				// First prompt appearance: agent has initialised.
+				promptReady = true
+				h.emit(bridge.Event{
+					Type:   bridge.EventTypeAgentReady,
+					Stream: "system",
+					Text:   "agent ready",
+				})
+			} else if sawOutput {
+				// Prompt returned after output: response is complete.
+				sawOutput = false
+				h.emit(bridge.Event{
+					Type:   bridge.EventTypeResponseComplete,
+					Stream: "system",
+					Text:   "response complete",
+				})
+			}
+			// Do not emit the raw prompt line as stdout.
+			continue
+		}
+
+		// --- regular output ---
+		if h.promptRe != nil && stream == "stdout" {
+			sawOutput = true
 		}
 		h.emit(bridge.Event{
 			Type:   evType,

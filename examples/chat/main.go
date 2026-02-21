@@ -1,5 +1,5 @@
-// Command chat is an interactive prompt loop that sends each input to the
-// bridge as a new claude --print session and streams the response back.
+// Command chat is an interactive prompt loop that keeps a single bridge
+// session alive and sends each input to that same session.
 //
 // Usage:
 //
@@ -8,7 +8,7 @@
 // Example:
 //
 //	go run ./examples/chat -target 127.0.0.1:9445 \
-//	  -provider claude \
+//	  -provider claude-chat \
 //	  /path/to/repo
 package main
 
@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chzyer/readline"
@@ -30,10 +31,134 @@ import (
 	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
 
+var errWaitCancelled = errors.New("wait cancelled")
+
+type responseTracker struct {
+	mu            sync.Mutex
+	lastOutputSeq uint64
+	waiter        *promptWaiter
+}
+
+type promptWaiter struct {
+	minSeq    uint64
+	done      chan error
+	timer     *time.Timer
+	sawOutput bool
+}
+
+func newResponseTracker() *responseTracker {
+	return &responseTracker{}
+}
+
+func (t *responseTracker) begin(minSeq uint64, timeout, idle time.Duration) (<-chan error, func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.waiter != nil {
+		t.waiter.timer.Stop()
+		t.waiter.done <- errors.New("internal error: previous prompt still pending")
+	}
+
+	w := &promptWaiter{
+		minSeq: minSeq,
+		done:   make(chan error, 1),
+	}
+	initialWait := timeout
+	if t.lastOutputSeq > minSeq {
+		w.sawOutput = true
+		initialWait = idle
+	}
+	w.timer = time.AfterFunc(initialWait, func() {
+		t.mu.Lock()
+		current := t.waiter == w
+		sawOutput := w.sawOutput
+		t.mu.Unlock()
+		if !current {
+			return
+		}
+		if sawOutput {
+			t.complete(w, nil)
+			return
+		}
+		t.complete(w, fmt.Errorf("timed out waiting for response after %s", timeout))
+	})
+	t.waiter = w
+
+	// Keep idle in signature for caller clarity; callback behavior above relies on
+	// sawOutput toggled by onOutput after first streamed token.
+	_ = idle
+	return w.done, func() {
+		t.complete(w, errWaitCancelled)
+	}
+}
+
+func (t *responseTracker) onOutput(ev *bridgev1.SessionEvent, idle time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if ev.Seq > t.lastOutputSeq {
+		t.lastOutputSeq = ev.Seq
+	}
+	w := t.waiter
+	if w == nil || ev.Seq <= w.minSeq {
+		return
+	}
+	w.sawOutput = true
+	if !w.timer.Stop() {
+		// Timer may already be firing; callback guards on pointer equality in complete().
+	}
+	w.timer.Reset(idle)
+}
+
+// onResponseComplete immediately completes the active waiter when the agent
+// signals it has finished responding. This replaces the idle-timer path when
+// the provider emits EVENT_TYPE_RESPONSE_COMPLETE.
+func (t *responseTracker) onResponseComplete() {
+	t.mu.Lock()
+	w := t.waiter
+	t.mu.Unlock()
+	if w == nil {
+		return
+	}
+	if w.timer != nil {
+		w.timer.Stop()
+	}
+	t.complete(w, nil)
+}
+
+func (t *responseTracker) onTerminal(ev *bridgev1.SessionEvent) {
+	switch ev.Type {
+	case bridgev1.EventType_EVENT_TYPE_SESSION_FAILED:
+		t.completeCurrent(fmt.Errorf("session failed: %s", ev.Error))
+	case bridgev1.EventType_EVENT_TYPE_SESSION_STOPPED:
+		t.completeCurrent(errors.New("session stopped"))
+	}
+}
+
+func (t *responseTracker) completeCurrent(err error) {
+	t.mu.Lock()
+	w := t.waiter
+	t.mu.Unlock()
+	if w == nil {
+		return
+	}
+	t.complete(w, err)
+}
+
+func (t *responseTracker) complete(w *promptWaiter, err error) {
+	t.mu.Lock()
+	if t.waiter != w {
+		t.mu.Unlock()
+		return
+	}
+	t.waiter = nil
+	t.mu.Unlock()
+	w.done <- err
+}
+
 func main() {
 	target := flag.String("target", "127.0.0.1:9445", "bridge gRPC address")
 	project := flag.String("project", "dev", "project ID")
-	provider := flag.String("provider", "claude", "provider name (e.g. echo, claude)")
+	provider := flag.String("provider", "claude-chat", "provider name (must support interactive stdin, e.g. codex, opencode, claude-chat)")
 	timeout := flag.Duration("timeout", 5*time.Minute, "per-prompt timeout")
 
 	cacert := flag.String("cacert", "", "path to CA bundle")
@@ -101,14 +226,91 @@ func main() {
 		<-sigCh
 		fmt.Fprintln(os.Stderr, "\nGoodbye!")
 		rl.Close()
-		os.Exit(0)
+	}()
+
+	sessionID := uuid.NewString()
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	_, err = client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId: *project,
+		SessionId: sessionID,
+		RepoPath:  repoPath,
+		Provider:  *provider,
+	})
+	cancel()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to start session: %v\n", err)
+		os.Exit(1)
+	}
+
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	var streamWG sync.WaitGroup
+	sessionDone := make(chan struct{})
+	tracker := newResponseTracker()
+	const responseIdle = 800 * time.Millisecond
+	streamWG.Add(1)
+	go func() {
+		defer streamWG.Done()
+		stream, err := client.StreamEvents(streamCtx, &bridgev1.StreamEventsRequest{
+			SessionId: sessionID,
+			AfterSeq:  0,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to open event stream: %v\n", err)
+			close(sessionDone)
+			return
+		}
+		err = stream.RecvAll(streamCtx, func(ev *bridgev1.SessionEvent) error {
+			switch ev.Type {
+			case bridgev1.EventType_EVENT_TYPE_STDOUT:
+				fmt.Print(ev.Text)
+				tracker.onOutput(ev, responseIdle)
+			case bridgev1.EventType_EVENT_TYPE_STDERR:
+				fmt.Fprint(os.Stderr, ev.Text)
+			case bridgev1.EventType_EVENT_TYPE_RESPONSE_COMPLETE:
+				// Agent explicitly signaled it finished — complete immediately
+				// rather than waiting for the idle timer.
+				tracker.onResponseComplete()
+			case bridgev1.EventType_EVENT_TYPE_AGENT_READY:
+				// Nothing to do in the loop; the readline prompt is already shown.
+			case bridgev1.EventType_EVENT_TYPE_SESSION_FAILED:
+				fmt.Fprintf(os.Stderr, "\nSession FAILED: %s\n", ev.Error)
+				tracker.onTerminal(ev)
+				select {
+				case <-sessionDone:
+				default:
+					close(sessionDone)
+				}
+			case bridgev1.EventType_EVENT_TYPE_SESSION_STOPPED:
+				tracker.onTerminal(ev)
+				select {
+				case <-sessionDone:
+				default:
+					close(sessionDone)
+				}
+			}
+			return nil
+		})
+		if err != nil && streamCtx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "stream error: %v\n", err)
+			select {
+			case <-sessionDone:
+			default:
+				close(sessionDone)
+			}
+		}
 	}()
 
 	fmt.Fprintln(os.Stderr, "Type a prompt and press Enter. Type /quit to exit.")
-	fmt.Fprintln(os.Stderr, "Each prompt starts a new agent session.")
+	fmt.Fprintf(os.Stderr, "Using session: %s\n", sessionID)
 	fmt.Fprintln(os.Stderr, "---")
 
 	for {
+		select {
+		case <-sessionDone:
+			goto shutdown
+		default:
+		}
+
 		line, err := rl.Readline()
 		if err != nil {
 			if errors.Is(err, readline.ErrInterrupt) || errors.Is(err, io.EOF) {
@@ -126,86 +328,51 @@ func main() {
 			break
 		}
 
-		code := runPrompt(client, *project, *provider, repoPath, prompt, *timeout)
-		fmt.Println() // blank line after response
-		if code != 0 {
-			fmt.Fprintln(os.Stderr, "(session returned an error)")
+		select {
+		case <-sessionDone:
+			fmt.Fprintln(os.Stderr, "session ended; exiting chat")
+			goto shutdown
+		default:
+		}
+
+		if err := sendPrompt(client, sessionID, prompt, *timeout, tracker, responseIdle); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to send input: %v\n", err)
 		}
 	}
+
+shutdown:
+	streamCancel()
+	streamWG.Wait()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	_, _ = client.StopSession(stopCtx, &bridgev1.StopSessionRequest{SessionId: sessionID})
+	stopCancel()
 
 	fmt.Fprintln(os.Stderr, "Goodbye!")
 }
 
-// runPrompt starts a new session with the given prompt, streams the response,
-// and returns 0 on success or 1 on failure.
-func runPrompt(client *bridgeclient.Client, project, provider, repoPath, prompt string, timeout time.Duration) int {
+func sendPrompt(client *bridgeclient.Client, sessionID, prompt string, timeout time.Duration, tracker *responseTracker, idle time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-
-	sessionID := uuid.NewString()
-
-	_, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
-		ProjectId: project,
+	resp, err := client.SendInput(ctx, &bridgev1.SendInputRequest{
 		SessionId: sessionID,
-		RepoPath:  repoPath,
-		Provider:  provider,
-		AgentOpts: map[string]string{
-			"arg:prompt": prompt,
-		},
+		Text:      prompt,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to start session: %v\n", err)
-		return 1
+		return err
 	}
-
-	stream, err := client.StreamEvents(ctx, &bridgev1.StreamEventsRequest{
-		SessionId: sessionID,
-		AfterSeq:  0,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open event stream: %v\n", err)
-		return 1
-	}
-
-	var stdout strings.Builder
-	done := make(chan int, 1)
-
-	go func() {
-		err := stream.RecvAll(ctx, func(ev *bridgev1.SessionEvent) error {
-			switch ev.Type {
-			case bridgev1.EventType_EVENT_TYPE_STDOUT:
-				fmt.Print(ev.Text)
-				stdout.WriteString(ev.Text)
-			case bridgev1.EventType_EVENT_TYPE_STDERR:
-				fmt.Fprint(os.Stderr, ev.Text)
-			case bridgev1.EventType_EVENT_TYPE_SESSION_STOPPED:
-				if strings.TrimSpace(stdout.String()) == "" {
-					done <- 1
-				} else {
-					done <- 0
-				}
-				cancel()
-			case bridgev1.EventType_EVENT_TYPE_SESSION_FAILED:
-				fmt.Fprintf(os.Stderr, "\nSession FAILED: %s\n", ev.Error)
-				done <- 1
-				cancel()
-			}
-			return nil
-		})
-		if err != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "stream error: %v\n", err)
-		}
-		select {
-		case done <- 1:
-		default:
-		}
-	}()
-
+	done, cancelWait := tracker.begin(resp.Seq, timeout, idle)
+	defer cancelWait()
 	select {
-	case code := <-done:
-		return code
+	case err := <-done:
+		if err != nil {
+			if errors.Is(err, errWaitCancelled) {
+				return nil
+			}
+			return err
+		}
+		fmt.Println()
+		return nil
 	case <-ctx.Done():
-		fmt.Fprintf(os.Stderr, "timed out after %s\n", timeout)
-		return 1
+		return fmt.Errorf("timed out waiting for response after %s", timeout)
 	}
 }

@@ -64,4 +64,8 @@ const (
 	EventTypeStderr
 	EventTypeInputReceived
 	EventTypeBufferOverflow
+	// EventTypeAgentReady signals that the agent process is ready for input.
+	EventTypeAgentReady
+	// EventTypeResponseComplete signals that the agent has finished responding.
+	EventTypeResponseComplete
 )

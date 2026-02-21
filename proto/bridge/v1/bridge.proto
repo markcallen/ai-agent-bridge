@@ -45,6 +45,10 @@ enum EventType {
   EVENT_TYPE_STDERR = 5;
   EVENT_TYPE_INPUT_RECEIVED = 6;
   EVENT_TYPE_BUFFER_OVERFLOW = 7;
+  // Agent is ready and waiting for the first input.
+  EVENT_TYPE_AGENT_READY = 8;
+  // Agent has finished responding to the last input; safe to prompt again.
+  EVENT_TYPE_RESPONSE_COMPLETE = 9;
 }
 
 // --- Session lifecycle ---

@@ -6,7 +6,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/e2e-test ./e2e/cmd/e2e-test
+RUN CGO_ENABLED=0 go build -o /out/e2e-test ./e2e/cmd/e2e-test && \
+    CGO_ENABLED=0 go build -o /out/chat-example ./examples/chat
 
 # Runtime stage
 FROM ubuntu:24.04
@@ -18,6 +19,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY --from=build /out/e2e-test /usr/local/bin/e2e-test
+COPY --from=build /out/chat-example /usr/local/bin/chat-example
 COPY e2e/scripts/test-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

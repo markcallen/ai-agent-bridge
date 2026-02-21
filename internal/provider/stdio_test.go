@@ -181,15 +181,15 @@ func TestStdioProviderStartTimeout(t *testing.T) {
 }
 
 func TestStreamJSONParsing(t *testing.T) {
-	// Create a shell script that outputs stream-json lines
+	// Create a shell script that outputs Claude Code CLI stream-json lines.
+	// The real format is NDJSON where "assistant" events carry model output.
 	tmp := t.TempDir()
 	scriptPath := filepath.Join(tmp, "stream-json-provider.sh")
 	script := `#!/usr/bin/env sh
-echo '{"type":"stream_event","event":{"type":"message_start","message":{}}}'
-echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}'
-echo '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}}'
-echo '{"type":"stream_event","event":{"type":"content_block_stop"}}'
-echo '{"type":"stream_event","event":{"type":"message_stop"}}'
+echo '{"type":"system","subtype":"init","session_id":"test-session","tools":[],"mcp_servers":[]}'
+echo '{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"Hello"}],"model":"claude-opus-4-6","stop_reason":"end_turn"},"session_id":"test-session","parent_tool_use_id":null}'
+echo '{"type":"assistant","message":{"id":"msg_02","type":"message","role":"assistant","content":[{"type":"text","text":" world"}],"model":"claude-opus-4-6","stop_reason":"end_turn"},"session_id":"test-session","parent_tool_use_id":null}'
+echo '{"type":"result","subtype":"success","result":"Hello world","session_id":"test-session","duration_ms":100,"total_cost_usd":0.001}'
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -214,6 +214,7 @@ echo '{"type":"stream_event","event":{"type":"message_stop"}}'
 
 	events := p.Events(handle)
 	var texts []string
+	var gotAgentReady, gotResponseComplete bool
 	timeout := time.After(5 * time.Second)
 loop:
 	for {
@@ -222,8 +223,13 @@ loop:
 			if !ok {
 				break loop
 			}
-			if e.Type == bridge.EventTypeStdout {
+			switch e.Type {
+			case bridge.EventTypeStdout:
 				texts = append(texts, e.Text)
+			case bridge.EventTypeAgentReady:
+				gotAgentReady = true
+			case bridge.EventTypeResponseComplete:
+				gotResponseComplete = true
 			}
 			if e.Done {
 				break loop
@@ -233,7 +239,7 @@ loop:
 		}
 	}
 
-	// Should only get text_delta events, not message_start/stop etc.
+	// Should only get text events from "assistant" events, not system/result etc.
 	if len(texts) != 2 {
 		t.Fatalf("got %d text events %v, want 2", len(texts), texts)
 	}
@@ -242,6 +248,83 @@ loop:
 	}
 	if texts[1] != " world" {
 		t.Errorf("texts[1] = %q, want %q", texts[1], " world")
+	}
+	if !gotAgentReady {
+		t.Error("expected AGENT_READY event, got none")
+	}
+	if !gotResponseComplete {
+		t.Error("expected RESPONSE_COMPLETE event from result event, got none")
+	}
+}
+
+func TestPromptPatternDetection(t *testing.T) {
+	// Simulates a PTY-based REPL: prompt → output → prompt → output → prompt.
+	tmp := t.TempDir()
+	scriptPath := filepath.Join(tmp, "repl.sh")
+	script := `#!/usr/bin/env sh
+echo '> '
+echo 'first response line'
+echo '> '
+echo 'second response line'
+echo '> '
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID:     "test-prompt",
+		Binary:         scriptPath,
+		StartupTimeout: 5 * time.Second,
+		StopGrace:      2 * time.Second,
+		PromptPattern:  `^>\s*$`,
+	})
+
+	handle, err := p.Start(context.Background(), bridge.SessionConfig{
+		ProjectID: "test-project",
+		SessionID: "test-prompt-session",
+		RepoPath:  tmp,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	events := p.Events(handle)
+	var texts []string
+	var gotAgentReady int
+	var gotResponseComplete int
+	timeout := time.After(5 * time.Second)
+loop:
+	for {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				break loop
+			}
+			switch e.Type {
+			case bridge.EventTypeStdout:
+				texts = append(texts, e.Text)
+			case bridge.EventTypeAgentReady:
+				gotAgentReady++
+			case bridge.EventTypeResponseComplete:
+				gotResponseComplete++
+			}
+			if e.Done {
+				break loop
+			}
+		case <-timeout:
+			t.Fatal("timeout waiting for events")
+		}
+	}
+
+	if gotAgentReady != 1 {
+		t.Errorf("got %d AGENT_READY events, want 1", gotAgentReady)
+	}
+	if gotResponseComplete != 2 {
+		t.Errorf("got %d RESPONSE_COMPLETE events, want 2", gotResponseComplete)
+	}
+	if len(texts) != 2 {
+		t.Errorf("got %d stdout lines %v, want 2", len(texts), texts)
 	}
 }
 

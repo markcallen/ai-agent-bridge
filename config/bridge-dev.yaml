@@ -34,14 +34,31 @@ rate_limits:
   send_input_per_session_burst: 20
 
 providers:
-  claude:
-    binary: "./scripts/claude-print.sh"
-    args: ["--print", "--verbose"]
+  codex:
+    binary: "codex"
+    args: ["--quiet"]
     startup_timeout: "30s"
+    required_env: ["OPENAI_API_KEY"]
+    pty: true
+    prompt_pattern: "^\\s*>\\s*$"
+  opencode:
+    binary: "opencode"
+    args: []
+    startup_timeout: "30s"
+    required_env: ["OPENAI_API_KEY"]
+    pty: true
+    prompt_pattern: "❯"
+  gemini:
+    binary: "gemini"
+    args: []
+    startup_timeout: "30s"
+    pty: true
+    prompt_pattern: "^\\s*>\\s*$"
   claude-chat:
     binary: "claude"
-    args: ["-p", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json"]
+    args: ["--dangerously-skip-permissions", "--output-format", "stream-json", "--input-format", "stream-json"]
     startup_timeout: "30s"
+    required_env: ["ANTHROPIC_API_KEY"]
     stream_json: true
 
 allowed_paths:

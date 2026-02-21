@@ -99,6 +99,24 @@ func parseBearerToken(authz string) (string, error) {
 	return strings.TrimSpace(parts[1]), nil
 }
 
+// UnaryPassthroughInterceptor injects empty claims for dev mode when JWT auth is disabled.
+func UnaryPassthroughInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		return handler(ContextWithClaims(ctx, &BridgeClaims{}), req)
+	}
+}
+
+// StreamPassthroughInterceptor injects empty claims for dev mode when JWT auth is disabled.
+func StreamPassthroughInterceptor() grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		wrapped := &wrappedStream{
+			ServerStream: ss,
+			ctx:          ContextWithClaims(ss.Context(), &BridgeClaims{}),
+		}
+		return handler(srv, wrapped)
+	}
+}
+
 type wrappedStream struct {
 	grpc.ServerStream
 	ctx context.Context

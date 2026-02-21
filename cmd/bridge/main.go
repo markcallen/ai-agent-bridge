@@ -28,9 +28,18 @@ func main() {
 
 	bootstrapLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
+	if err := config.LoadDotEnv(".env"); err != nil {
+		bootstrapLogger.Error("failed to load .env", "error", err)
+		os.Exit(1)
+	}
+
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		bootstrapLogger.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+	if err := config.ValidateProviderEnv(cfg); err != nil {
+		bootstrapLogger.Error("provider environment validation failed", "error", err)
 		os.Exit(1)
 	}
 	redactor, err := redact.New(cfg.Logging.RedactPatterns)
@@ -51,6 +60,7 @@ func main() {
 			StopGrace:      config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
 			UsePTY:         pcfg.PTY,
 			StreamJSON:     pcfg.StreamJSON,
+			PromptPattern:  pcfg.PromptPattern,
 		})
 		if err := registry.Register(p); err != nil {
 			logger.Error("register provider", "provider", name, "error", err)
@@ -131,6 +141,11 @@ func main() {
 		)
 		logger.Info("JWT auth enabled", "issuers", len(verifier.Keys))
 	} else {
+		// No JWT keys: inject anonymous claims so RPCs function in dev mode.
+		grpcOpts = append(grpcOpts,
+			grpc.ChainUnaryInterceptor(auth.UnaryPassthroughInterceptor()),
+			grpc.ChainStreamInterceptor(auth.StreamPassthroughInterceptor()),
+		)
 		logger.Warn("no JWT keys configured - auth disabled (dev mode only)")
 	}
 

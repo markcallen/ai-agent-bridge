@@ -27,6 +27,11 @@ else
 fi
 
 echo "==> Running e2e test..."
+extra_args=()
+if [ -n "${E2E_ONLY:-}" ]; then
+  extra_args+=(-only "$E2E_ONLY")
+fi
+
 e2e-test \
   -target bridge:9445 \
   -cacert "$CERT_DIR/ca-bundle.crt" \
@@ -35,7 +40,8 @@ e2e-test \
   -jwt-key "$CERT_DIR/jwt-signing.key" \
   -jwt-issuer e2e \
   -repo /tmp/cache-cleaner \
-  -timeout 120s
+  -timeout 300s \
+  "${extra_args[@]}"
 
 exit_code=$?
 

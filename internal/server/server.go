@@ -466,6 +466,10 @@ func mapEventType(t bridge.EventType) bridgev1.EventType {
 		return bridgev1.EventType_EVENT_TYPE_INPUT_RECEIVED
 	case bridge.EventTypeBufferOverflow:
 		return bridgev1.EventType_EVENT_TYPE_BUFFER_OVERFLOW
+	case bridge.EventTypeAgentReady:
+		return bridgev1.EventType_EVENT_TYPE_AGENT_READY
+	case bridge.EventTypeResponseComplete:
+		return bridgev1.EventType_EVENT_TYPE_RESPONSE_COMPLETE
 	default:
 		return bridgev1.EventType_EVENT_TYPE_UNSPECIFIED
 	}
