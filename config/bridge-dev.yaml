@@ -54,7 +54,7 @@ providers:
     prompt_pattern: "^\\s*>\\s*$"
   claude-chat:
     binary: "claude"
-    args: ["--dangerously-skip-permissions", "--output-format", "stream-json", "--input-format", "stream-json"]
+    args: ["--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json"]
     startup_timeout: "30s"
     required_env: ["ANTHROPIC_API_KEY"]
     stream_json: true

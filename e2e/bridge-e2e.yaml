@@ -40,7 +40,7 @@ providers:
     startup_timeout: "120s"
   claude-chat:
     binary: "claude"
-    args: ["--dangerously-skip-permissions", "--output-format", "stream-json", "--input-format", "stream-json"]
+    args: ["--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json"]
     startup_timeout: "120s"
     stream_json: true
   echo:

@@ -11,7 +11,7 @@ CHAT_PROJECT ?= dev
 CHAT_REPO ?= $(PWD)
 RUNPROMPT_TARGET ?= 127.0.0.1:9445
 RUNPROMPT_PROJECT ?= dev
-RUNPROMPT_AGENT ?= claude
+RUNPROMPT_AGENT ?= claude-chat
 RUNPROMPT_DIR ?= $(PWD)
 RUNPROMPT_PROMPT ?=
 
@@ -83,7 +83,7 @@ chat-example:
 runprompt-example:
 	@if [ -z "$(RUNPROMPT_PROMPT)" ]; then \
 		echo "RUNPROMPT_PROMPT is required"; \
-		echo "example: make runprompt-example RUNPROMPT_AGENT=claude RUNPROMPT_DIR=$(PWD) RUNPROMPT_PROMPT='list 5 TODOs'"; \
+		echo "example: make runprompt-example RUNPROMPT_AGENT=claude-chat RUNPROMPT_DIR=$(PWD) RUNPROMPT_PROMPT='list 5 TODOs'"; \
 		exit 1; \
 	fi
 	go run ./examples/runprompt \

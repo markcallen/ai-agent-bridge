@@ -486,6 +486,14 @@ func (h *stdioHandle) readStream(stream string, r io.Reader) {
 func (h *stdioHandle) waitForExit() {
 	defer close(h.waitDone)
 
+	// Drain all stdout/stderr output BEFORE calling cmd.Wait(). Go's
+	// StdoutPipe/StderrPipe add the read ends to closeAfterWait, so cmd.Wait()
+	// closes those file descriptors. If we called Wait() first, the scanner in
+	// readStream would get a bad-fd error mid-stream and drop buffered output.
+	// The process exiting closes the write end of the pipes, so readStream gets
+	// a natural EOF that lets it drain everything before returning.
+	h.streamWG.Wait()
+
 	err := h.cmd.Wait()
 
 	h.mu.Lock()
@@ -518,9 +526,6 @@ func (h *stdioHandle) waitForExit() {
 		})
 	}
 
-	// Drain remaining stdout/stderr lines before channel close.
-	h.streamWG.Wait()
-
 	h.closeOnce.Do(func() {
 		h.mu.Lock()
 		h.closed = true
@@ -549,14 +554,19 @@ func (h *stdioHandle) emit(e bridge.Event) {
 	}
 }
 
-// filterEnv returns a filtered environment excluding sensitive variables.
+// filterEnv returns a filtered environment excluding sensitive variables and
+// variables that interfere with subprocess behaviour.
 func filterEnv(env []string) []string {
 	blocked := map[string]bool{
+		// Credentials that child processes should not inherit
 		"AWS_SECRET_ACCESS_KEY": true,
 		"AWS_SESSION_TOKEN":     true,
 		"SLACK_BOT_TOKEN":       true,
 		"SLACK_SIGNING_SECRET":  true,
 		"DISCORD_TOKEN":         true,
+		// Claude Code sets this to prevent nested invocations; unset it so
+		// the bridge can launch claude as a managed subprocess.
+		"CLAUDECODE": true,
 	}
 	filtered := make([]string, 0, len(env))
 	for _, e := range env {
