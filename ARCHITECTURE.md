@@ -2,7 +2,7 @@
 
 ## Overview
 
-The AI Agent Bridge is a standalone gRPC daemon and Go SDK that provides a secure, zero-trust communication layer between control-plane systems and AI agent processes. It manages AI agent subprocess lifecycles (codex, claude, opencode) and exposes a unified API for session management, command routing, and event streaming.
+The AI Agent Bridge is a standalone gRPC daemon and Go SDK that provides a secure, zero-trust communication layer between control-plane systems and AI agent processes. It manages AI agent subprocess lifecycles (codex, claude, opencode, gemini, and custom providers) and exposes a unified API for session management, command routing, and event streaming.
 
 ## System Context
 
@@ -15,10 +15,10 @@ The AI Agent Bridge sits between consumer applications and AI agent processes. C
 │                                                                      │
 │   Connect via: bridgeclient (Go SDK) or any gRPC client              │
 │   Auth: mTLS (per-project CA + cross-signing) + JWT (Ed25519)        │
-└──────────────────────────┬───────────────────────────────────────────┘
-                           │
-                           │  gRPC + mTLS + JWT
-                           ▼
+└──────────────────────┬───────────────────────────────────────────────┘
+                       │
+                       │  gRPC + mTLS + JWT
+                       ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                      AI Agent Bridge Daemon                          │
 │                      (cmd/bridge)                                    │
@@ -38,17 +38,17 @@ The AI Agent Bridge sits between consumer applications and AI agent processes. C
 │        │                                                             │
 │  ┌─────▼──────────────────────────────────────────────────────────┐  │
 │  │                    Provider Registry                           │  │
-│  │  ┌─────────┐  ┌─────────┐  ┌──────────┐                      │  │
-│  │  │ codex   │  │ claude  │  │ opencode │    (all stdio-based)  │  │
-│  │  │ adapter │  │ adapter │  │ adapter  │                       │  │
-│  │  └────┬────┘  └────┬────┘  └────┬─────┘                      │  │
-│  └───────┼────────────┼────────────┼─────────────────────────────┘  │
-│          │            │            │                                  │
-│    ┌─────▼────┐ ┌─────▼────┐ ┌────▼─────┐                          │
-│    │ codex    │ │ claude   │ │ opencode │   (child processes)       │
-│    │ process  │ │ process  │ │ process  │                           │
-│    │ (stdio)  │ │ (stdio)  │ │ (stdio)  │                           │
-│    └──────────┘ └──────────┘ └──────────┘                           │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐  │  │
+│  │  │  codex   │  │  claude  │  │ opencode │  │ claude-chat │  │  │
+│  │  │ (stdio)  │  │ (stdio)  │  │  (pty)   │  │(stream-json)│  │  │
+│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬──────┘  │  │
+│  └───────┼─────────────┼─────────────┼────────────────┼──────────┘  │
+│          │             │             │                │              │
+│    ┌─────▼───┐   ┌─────▼───┐  ┌─────▼───┐   ┌───────▼───┐         │
+│    │  codex  │   │  claude │  │opencode │   │  claude   │         │
+│    │ process │   │ process │  │ process │   │  process  │         │
+│    │ (stdio) │   │ (stdio) │  │  (pty)  │   │(stream-json│         │
+│    └─────────┘   └─────────┘  └─────────┘   └───────────┘         │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -88,6 +88,15 @@ Implements `bridge.v1.BridgeService`:
 | `Health` | Provider availability check |
 | `ListProviders` | Enumerate registered providers |
 
+**Rate limiting** (`ratelimit.go`)
+- Token-bucket rate limiter keyed by arbitrary string (client ID, session ID, or "global")
+- Three independent limiters per server instance: global RPS, per-client StartSession, per-session SendInput
+
+**Input validation** (`validate.go`)
+- UUID format enforcement on session/project IDs
+- String length bounds on all text fields
+- Applied before any business logic to return clean gRPC `INVALID_ARGUMENT` errors
+
 ### internal/bridge (Core Logic)
 
 **Supervisor** (`supervisor.go`)
@@ -112,11 +121,16 @@ Implements `bridge.v1.BridgeService`:
 - Configurable max subscribers per session and subscriber TTL
 
 **Provider Interface** (`provider.go`)
+- `ID() → string`
 - `Start(ctx, config) → SessionHandle`
 - `Stop(handle)`
 - `Send(handle, text)`
 - `Events(handle) → <-chan Event`
 - `Health(ctx) → error`
+
+**Event types** include standard lifecycle events plus two signalling events emitted by provider adapters:
+- `EventTypeAgentReady` — agent process is initialised and ready for input
+- `EventTypeResponseComplete` — agent has finished responding to the last input
 
 **Registry** (`registry.go`)
 - Register providers by ID
@@ -132,15 +146,26 @@ Implements `bridge.v1.BridgeService`:
 **StdioProvider** (`stdio.go`)
 - Shared subprocess adapter used by all providers
 - Spawns process with `exec.CommandContext`
-- Pipes stdin/stdout/stderr
-- Graceful shutdown: SIGTERM → grace period → SIGKILL
-- Environment filtering (strips sensitive variables)
-- Buffered event channel with line-based parsing
+- Graceful shutdown: SIGTERM to process group → grace period → SIGKILL
+- Environment filtering (strips sensitive variables: AWS credentials, Slack/Discord tokens, `CLAUDECODE`)
+- Buffered event channel
+
+Supports two distinct I/O modes, selected per provider config:
+
+**Stdio mode** (default) — pipes stdin/stdout/stderr directly. Used by `codex` and `claude --print`.
+
+**PTY mode** (`pty: true`) — attaches a pseudo-terminal via `creack/pty`. Required for interactive CLI tools (opencode, gemini) that need a TTY. Uses a configurable `prompt_pattern` regex to detect the shell prompt:
+- First prompt match → emit `AGENT_READY`
+- Subsequent prompt matches after output → emit `RESPONSE_COMPLETE`
+
+**stream-json mode** (`stream_json: true`) — parses the Claude Code CLI's `--output-format stream-json` NDJSON protocol. Extracts text from `assistant` content blocks and uses `result` events to emit `RESPONSE_COMPLETE`. `AGENT_READY` is emitted immediately on start since the process reads from stdin without a prompt.
 
 Provider-specific adapters set binary name and default args:
 - `codex.go` → `codex --quiet`
 - `claude.go` → `claude --print --verbose`
 - `opencode.go` → `opencode`
+
+Additional providers (`gemini`, `claude-chat`, etc.) are configured purely via YAML without a dedicated Go file; they are instantiated dynamically from `ProviderConfig` at daemon startup.
 
 ### internal/auth (Security)
 
@@ -162,6 +187,14 @@ Provider-specific adapters set binary name and default args:
 - Verify and inject claims into context
 - Health endpoint exempted from auth
 
+**Audit interceptors** (`audit.go`)
+- Unary + stream interceptors that log every RPC outcome
+- Records: method, project_id, session_id, mTLS caller CN, JWT subject, result code
+- Warnings on errors, info on success
+
+**Peer helpers** (`peer.go`)
+- Extracts the mTLS client certificate Common Name from gRPC peer context
+
 ### internal/pki (Certificate Management)
 
 - ECDSA P-384 CA generation
@@ -170,14 +203,24 @@ Provider-specific adapters set binary name and default args:
 - Trust bundle assembly
 - Ed25519 JWT keypair generation
 
+### internal/redact (Log Redaction)
+
+- Compiles a list of regex patterns from config (`logging.redact_patterns`)
+- `Redact(text) → string` replaces all matches with `[REDACTED]`
+- Applied to log output to prevent API keys and secrets from appearing in logs
+
 ### pkg/bridgeclient (Go SDK)
 
 Public API for consumer integration:
 - `New(opts...)` → `*Client`
 - Session operations: Start, Stop, Get, List, SendInput
-- Event streaming with automatic reconnect + backoff
+- Event streaming with automatic reconnect + backoff (`retry.go`)
 - mTLS + auto-renewing JWT credentials
 - Typed errors mapped from gRPC status codes
+
+**CursorStore** (`cursor_store.go`) — pluggable interface for persisting the last acknowledged event sequence number per session/subscriber, enabling durable resume across process restarts:
+- `MemoryCursorStore` — in-process storage (default)
+- `FileCursorStore` — JSON file backed, survives process restart
 
 ## Security Architecture
 
@@ -315,16 +358,56 @@ sessions:
   max_subscribers_per_session: 10
   subscriber_ttl: "30m"
 
+input:
+  max_size_bytes: 65536             # Maximum SendInput text size
+
+rate_limits:
+  global_rps: 50                    # Global RPC rate limit
+  global_burst: 100
+  start_session_per_client_rps: 1   # Per-client StartSession throttle
+  start_session_per_client_burst: 3
+  send_input_per_session_rps: 5     # Per-session SendInput throttle
+  send_input_per_session_burst: 20
+
 providers:
   codex:
     binary: "codex"
     args: ["--quiet"]
+    startup_timeout: "30s"
+    required_env: ["OPENAI_API_KEY"]
   claude:
     binary: "claude"
     args: ["--print", "--verbose"]
+    startup_timeout: "30s"
+    required_env: ["ANTHROPIC_API_KEY"]
+  claude-chat:
+    binary: "claude"
+    args: ["--dangerously-skip-permissions", "--verbose",
+           "--output-format", "stream-json", "--input-format", "stream-json"]
+    startup_timeout: "30s"
+    required_env: ["ANTHROPIC_API_KEY"]
+    stream_json: true               # Parse Claude Code NDJSON protocol
   opencode:
     binary: "opencode"
     args: []
+    startup_timeout: "30s"
+    required_env: ["OPENAI_API_KEY"]
+    pty: true                       # Attach pseudo-terminal
+    prompt_pattern: "❯"            # Regex to detect shell prompt
+  gemini:
+    binary: "gemini"
+    args: []
+    startup_timeout: "30s"
+    pty: true
+    prompt_pattern: "^\\s*>\\s*$"
+
+allowed_paths: []                   # Repo path allowlist (glob patterns); empty = allow all
+
+logging:
+  level: "info"                     # debug | info | warn | error
+  format: "json"                    # json | text
+  redact_patterns:                  # Regex patterns applied to log output
+    - "(?i)(api[_-]?key|token|secret|password)\\s*[:=]\\s*\\S+"
 ```
 
 ## Integration Points
@@ -379,12 +462,15 @@ ai-agent-bridge/
 ├── gen/bridge/v1/        # Generated Go stubs
 ├── pkg/bridgeclient/     # Public Go SDK
 ├── internal/
-│   ├── auth/             # mTLS + JWT
+│   ├── auth/             # mTLS + JWT + audit interceptors
 │   ├── pki/              # CA management
 │   ├── bridge/           # Supervisor, EventBuffer, Policy, Registry
-│   ├── provider/         # Stdio adapter + provider implementations
-│   ├── config/           # YAML config loading
-│   └── server/           # gRPC service implementation
+│   ├── provider/         # Stdio/PTY/stream-json adapter + provider implementations
+│   ├── redact/           # Log output redaction
+│   ├── config/           # YAML config loading + env var injection
+│   └── server/           # gRPC service implementation + rate limiting + validation
+├── e2e/                  # End-to-end test harness (docker-compose)
+├── examples/             # Example consumer programs (chat, runprompt)
 ├── config/               # Default configuration
 ├── certs/                # Generated certs (gitignored)
 └── scripts/              # Dev setup scripts
