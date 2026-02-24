@@ -20,7 +20,7 @@ RUN apt-get update && \
       @anthropic-ai/claude-code \
       @openai/codex \
       @google/gemini-cli \
-      opencode && \
+      opencode-ai && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash bridge
