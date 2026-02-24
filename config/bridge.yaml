@@ -2,12 +2,14 @@ server:
   listen: "0.0.0.0:9445"
 
 tls:
-  ca_bundle: "certs/ca-bundle.crt"
-  cert: "certs/bridge.crt"
-  key: "certs/bridge.key"
+  ca_bundle: "/app/certs/ca-bundle.crt"
+  cert: "/app/certs/bridge.crt"
+  key: "/app/certs/bridge.key"
 
 auth:
-  jwt_public_keys: []
+  jwt_public_keys:
+    - issuer: "bridge"
+      key_path: "/app/certs/jwt-signing.pub"
   jwt_audience: "bridge"
   jwt_max_ttl: "5m"
 
@@ -32,6 +34,12 @@ rate_limits:
   send_input_per_session_burst: 20
 
 providers:
+  claude-chat:
+    binary: "claude"
+    args: ["--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json"]
+    startup_timeout: "30s"
+    required_env: ["ANTHROPIC_API_KEY"]
+    stream_json: true
   codex:
     binary: "codex"
     args: ["--quiet"]
@@ -52,14 +60,10 @@ providers:
     startup_timeout: "30s"
     pty: true
     prompt_pattern: "^\\s*>\\s*$"
-  claude-chat:
-    binary: "claude"
-    args: ["--dangerously-skip-permissions", "--verbose", "--output-format", "stream-json", "--input-format", "stream-json"]
-    startup_timeout: "30s"
-    required_env: ["ANTHROPIC_API_KEY"]
-    stream_json: true
 
-allowed_paths: []
+allowed_paths:
+  - "/home"
+  - "/tmp"
 
 logging:
   level: "info"
