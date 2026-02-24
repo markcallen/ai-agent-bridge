@@ -1,0 +1,88 @@
+version: 2
+
+project_name: ai-agent-bridge
+
+builds:
+  - id: bridge
+    binary: bridge
+    main: ./cmd/bridge
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: bridge-ca
+    binary: bridge-ca
+    main: ./cmd/bridge-ca
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+dockers:
+  - id: bridge-amd64
+    goos: linux
+    goarch: amd64
+    ids:
+      - bridge
+      - bridge-ca
+    image_templates:
+      - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-amd64"
+      - "ghcr.io/markcallen/ai-agent-bridge:latest-amd64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+    extra_files:
+      - config/bridge.yaml
+      - docker-entrypoint.sh
+
+  - id: bridge-arm64
+    goos: linux
+    goarch: arm64
+    ids:
+      - bridge
+      - bridge-ca
+    image_templates:
+      - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-arm64"
+      - "ghcr.io/markcallen/ai-agent-bridge:latest-arm64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+    extra_files:
+      - config/bridge.yaml
+      - docker-entrypoint.sh
+
+docker_manifests:
+  - name_template: "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-amd64"
+      - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-arm64"
+
+  - name_template: "ghcr.io/markcallen/ai-agent-bridge:latest"
+    image_templates:
+      - "ghcr.io/markcallen/ai-agent-bridge:latest-amd64"
+      - "ghcr.io/markcallen/ai-agent-bridge:latest-arm64"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
