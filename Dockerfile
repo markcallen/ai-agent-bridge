@@ -23,6 +23,9 @@ RUN apt-get update && \
       opencode-ai && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+RUN printf '#!/bin/bash\nexec claude "$@" < /dev/null\n' > /usr/local/bin/claude-print && \
+    chmod +x /usr/local/bin/claude-print
+
 RUN useradd -m -s /bin/bash bridge
 
 WORKDIR /app
