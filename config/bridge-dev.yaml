@@ -36,10 +36,8 @@ rate_limits:
 providers:
   codex:
     binary: "codex"
-    args: ["--quiet"]
-    startup_timeout: "30s"
-    pty: true
-    prompt_pattern: "^\\s*>\\s*$"
+    mode: "exec"
+    args: ["-c", "check_for_update_on_startup=false"]
   opencode:
     binary: "opencode"
     args: []

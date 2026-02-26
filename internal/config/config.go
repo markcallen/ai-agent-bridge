@@ -68,6 +68,7 @@ type RateLimitsConfig struct {
 
 type ProviderConfig struct {
 	Binary         string   `yaml:"binary"`
+	Mode           string   `yaml:"mode"` // "exec" for one-shot exec providers (e.g. codex)
 	Args           []string `yaml:"args"`
 	StartupTimeout string   `yaml:"startup_timeout"`
 	RequiredEnv    []string `yaml:"required_env"`

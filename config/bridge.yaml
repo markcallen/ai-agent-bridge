@@ -42,11 +42,9 @@ providers:
     stream_json: true
   codex:
     binary: "codex"
-    args: ["--quiet"]
-    startup_timeout: "30s"
+    mode: "exec"
+    args: ["-c", "check_for_update_on_startup=false"]
     required_env: ["OPENAI_API_KEY"]
-    pty: true
-    prompt_pattern: "^\\s*>\\s*$"
   opencode:
     binary: "opencode"
     args: []
