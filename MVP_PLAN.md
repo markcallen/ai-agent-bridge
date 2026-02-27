@@ -63,7 +63,7 @@ ai-agent-bridge/
 │   ├── provider/                # Provider adapters
 │   │   ├── stdio.go             # Shared stdio subprocess logic
 │   │   ├── stdio_test.go
-│   │   ├── codex.go
+│   │   ├── codex_exec.go
 │   │   ├── claude.go
 │   │   └── opencode.go
 │   ├── redact/                  # Secret redaction
@@ -163,7 +163,7 @@ ai-agent-bridge/
   - Graceful shutdown: SIGTERM → wait grace period → SIGKILL
   - Emit structured events from stdout/stderr lines
   - Provider startup timeout enforcement
-- [x] `internal/provider/codex.go` - Codex-specific adapter (binary name, default args)
+- [x] `internal/provider/codex_exec.go` - Codex adapter using `codex exec --json -` (exec-based, replaced original stdio adapter)
 - [x] Unit tests with mock process (`stdio_test.go`)
 
 ### 1.6 Session Supervisor

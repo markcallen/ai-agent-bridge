@@ -1,6 +1,7 @@
 # TODO - Deferred Work
 
 Items tracked here are out of scope for the current implementation but planned for future phases.
+Items already covered in [PLAN.md](PLAN.md) are tracked there only.
 
 ## Security Hardening
 
@@ -10,19 +11,13 @@ Items tracked here are out of scope for the current implementation but planned f
 - [x] Per-session rate limiting on SendInput
 - [x] Global RPC rate limiting with RESOURCE_EXHAUSTED responses
 - [x] Audit logging of all auth decisions (success and failure)
-- [ ] Certificate file watching with hot-reload (no daemon restart)
-- [ ] SDK client cert file watching and auto-reconnect
-- [ ] CRL distribution point served by bridge daemon
-- [ ] OCSP stapling support
 - [x] Input validation for control characters in string fields
 - [x] UUID format validation for session_id
+- [ ] OCSP stapling support
 
 ## Provider Enhancements
 
-- [ ] Provider-specific output parsing (JSON events from Claude, structured codex output)
 - [x] Provider startup timeout enforcement (currently configured but not enforced)
-- [ ] Session idle timeout with automatic cleanup
-- [ ] Provider binary version detection via `--version` health check
 - [ ] `gemini` adapter (future provider)
 - [ ] `droid` adapter (future provider)
 - [ ] Plugin system for custom provider adapters
@@ -33,27 +28,15 @@ Items tracked here are out of scope for the current implementation but planned f
 - [ ] Session metadata persistence (survive bridge daemon restart)
 - [ ] Event export to external systems (webhook, Kafka, etc.)
 
-## Observability
-
-- [ ] Prometheus metrics: `sessions_active`, `events_total`, `events_dropped`, `rpc_latency_ms`, `auth_failures`
-- [ ] OpenTelemetry trace spans on RPC calls
-- [ ] Structured audit log with `project_id`, `session_id`, `caller_cn`, `caller_sub` (partial: `caller_cn` not yet wired)
-- [ ] Agent introspection API: inspect live session state (current action, pending input, last output/error, heartbeat)
-- [ ] gRPC reflection (dev mode only)
-- [ ] Health endpoint with detailed provider diagnostics
-
 ## SDK (bridgeclient)
 
 - [x] Configurable retry policy with exponential backoff
-- [ ] Connection keepalive configuration
+- [x] GoDoc examples (`example_test.go`)
 - [ ] SDK-level context propagation (trace IDs)
 - [ ] Example integration test with real bridge daemon
-- [x] GoDoc examples (`example_test.go`)
 
 ## Integration
 
-- [ ] Consumer application integration guide
-- [ ] Event type mapping examples for common consumer patterns
 - [ ] Feature flag for gradual rollout (in-process fallback)
 - [x] Docker Compose setup for integration testing
 - [x] `make dev-setup` one-command dev environment with all certs
@@ -64,12 +47,7 @@ Items tracked here are out of scope for the current implementation but planned f
 - [x] Integration tests: mTLS rejection (bad cert, expired, wrong CA)
 - [x] Integration tests: JWT rejection (expired, wrong audience, wrong issuer)
 - [x] Unit tests: subscriber reconnect/replay with ack_seq (subscribermgr_test.go)
-- [ ] Integration tests: reconnect/replay with after_seq (e2e)
-- [ ] Failure tests: agent process crash detection
-- [ ] Failure tests: bridge daemon restart (session cleanup)
-- [ ] Failure tests: concurrent session operations (race detection)
 - [ ] Load testing: concurrent sessions and event throughput
-- [ ] Matrix coverage: codex × claude × opencode providers
 
 ## Multi-Language SDKs
 

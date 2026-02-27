@@ -16,7 +16,7 @@ For the completed MVP scope, see [MVP_PLAN.md](MVP_PLAN.md).
 - [ ] Integration test: start → send prompt → receive parsed events → stop
 
 ### 1.2 OpenCode Integration Test
-- [ ] Integration test: start → send prompt → receive events → stop
+- [x] Integration test: start → send prompt → receive events → stop
 - [ ] Validate PTY interaction model if opencode requires a terminal
 
 ### 1.3 Session Idle Timeout
