@@ -59,6 +59,7 @@ func (p *CodexExecProvider) Version(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("binary %q not found: %w", p.binary, err)
 	}
 	cmd := exec.CommandContext(ctx, path, "--version")
+	cmd.Env = filterEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("version check: %w", err)

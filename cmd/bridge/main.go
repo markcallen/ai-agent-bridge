@@ -79,13 +79,17 @@ func main() {
 		logger.Info("registered provider", "provider", name, "binary", pcfg.Binary)
 	}
 
-	// Log provider versions at startup.
-	startupCtx := context.Background()
+	// Log provider versions at startup (5s timeout per provider).
 	for name := range cfg.Providers {
 		if p, err := registry.Get(name); err == nil {
-			if v, err := p.Version(startupCtx); err == nil {
-				logger.Info("provider version", "provider", name, "version", v)
+			vCtx, vCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			v, vErr := p.Version(vCtx)
+			vCancel()
+			if vErr != nil {
+				logger.Info("failed to get provider version", "provider", name, "error", vErr)
+				continue
 			}
+			logger.Info("provider version", "provider", name, "version", v)
 		}
 	}
 

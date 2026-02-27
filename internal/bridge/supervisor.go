@@ -102,6 +102,7 @@ func (s *Supervisor) cleanupLoop() {
 					if ms.info.State == SessionStateRunning &&
 						time.Since(ms.lastActivity) > s.idleTimeout {
 						ms.stopReason = "idle_timeout"
+						ms.info.State = SessionStateStopping // prevent duplicate Stop() spawns
 						idleSessions = append(idleSessions, id)
 					}
 				}
@@ -189,7 +190,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		buf:          buf,
 		subMgr:       subMgr,
 		cancel:       cancel,
-		lastActivity: now,
+		lastActivity: time.Now(), // keep monotonic clock for reliable time.Since() comparisons
 	}
 
 	s.mu.Lock()
@@ -268,7 +269,7 @@ func (s *Supervisor) Send(sessionID, text string) (uint64, error) {
 	}
 
 	s.mu.Lock()
-	ms.lastActivity = time.Now().UTC()
+	ms.lastActivity = time.Now() // keep monotonic clock for reliable time.Since() comparisons
 	s.mu.Unlock()
 
 	seq := ms.buf.Append(Event{

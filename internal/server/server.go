@@ -406,14 +406,16 @@ func (s *BridgeServer) ListProviders(ctx context.Context, req *bridgev1.ListProv
 
 	providers := make([]*bridgev1.ProviderInfo, 0, len(ids))
 	for _, id := range ids {
-		p, _ := s.registry.Get(id)
+		available := results[id] == nil
 		var version string
-		if p != nil {
-			version, _ = p.Version(ctx)
+		if available {
+			if p, err := s.registry.Get(id); err == nil {
+				version, _ = p.Version(ctx)
+			}
 		}
 		pi := &bridgev1.ProviderInfo{
 			Provider:  id,
-			Available: results[id] == nil,
+			Available: available,
 			Version:   version,
 		}
 		providers = append(providers, pi)
