@@ -31,11 +31,13 @@ type SessionInfo struct {
 
 // Supervisor manages the lifecycle of agent sessions.
 type Supervisor struct {
-	registry  *Registry
-	policy    Policy
-	bufSize   int
-	subConfig SubscriberConfig
-	redact    func(string) string
+	registry        *Registry
+	policy          Policy
+	bufSize         int
+	subConfig       SubscriberConfig
+	idleTimeout     time.Duration
+	cleanupInterval time.Duration // defaults to 5m; overridable in tests
+	redact          func(string) string
 
 	mu       sync.RWMutex
 	sessions map[string]*managedSession // keyed by session_id
@@ -44,25 +46,29 @@ type Supervisor struct {
 }
 
 type managedSession struct {
-	info   SessionInfo
-	handle SessionHandle
-	buf    *EventBuffer
-	subMgr *SubscriberManager
-	cancel context.CancelFunc
+	info         SessionInfo
+	handle       SessionHandle
+	buf          *EventBuffer
+	subMgr       *SubscriberManager
+	cancel       context.CancelFunc
+	lastActivity time.Time
+	stopReason   string // set before Stop(); forwardEvents surfaces it in the final event
 }
 
 // NewSupervisor creates a new session supervisor.
-func NewSupervisor(registry *Registry, policy Policy, eventBufSize int, subConfig SubscriberConfig) *Supervisor {
+func NewSupervisor(registry *Registry, policy Policy, eventBufSize int, subConfig SubscriberConfig, idleTimeout time.Duration) *Supervisor {
 	if eventBufSize <= 0 {
 		eventBufSize = 10000
 	}
 	s := &Supervisor{
-		registry:  registry,
-		policy:    policy,
-		bufSize:   eventBufSize,
-		subConfig: subConfig,
-		sessions:  make(map[string]*managedSession),
-		done:      make(chan struct{}),
+		registry:        registry,
+		policy:          policy,
+		bufSize:         eventBufSize,
+		subConfig:       subConfig,
+		idleTimeout:     idleTimeout,
+		cleanupInterval: 5 * time.Minute,
+		sessions:        make(map[string]*managedSession),
+		done:            make(chan struct{}),
 	}
 	go s.cleanupLoop()
 	return s
@@ -76,7 +82,7 @@ func (s *Supervisor) SetRedactor(fn func(string) string) {
 }
 
 func (s *Supervisor) cleanupLoop() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(s.cleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -88,6 +94,23 @@ func (s *Supervisor) cleanupLoop() {
 				ms.subMgr.CleanupExpired()
 			}
 			s.mu.RUnlock()
+
+			if s.idleTimeout > 0 {
+				s.mu.Lock()
+				var idleSessions []string
+				for id, ms := range s.sessions {
+					if ms.info.State == SessionStateRunning &&
+						time.Since(ms.lastActivity) > s.idleTimeout {
+						ms.stopReason = "idle_timeout"
+						ms.info.State = SessionStateStopping // prevent duplicate Stop() spawns
+						idleSessions = append(idleSessions, id)
+					}
+				}
+				s.mu.Unlock()
+				for _, id := range idleSessions {
+					go s.Stop(id, false) //nolint:errcheck
+				}
+			}
 		}
 	}
 }
@@ -162,11 +185,12 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	}
 
 	ms := &managedSession{
-		info:   info,
-		handle: handle,
-		buf:    buf,
-		subMgr: subMgr,
-		cancel: cancel,
+		info:         info,
+		handle:       handle,
+		buf:          buf,
+		subMgr:       subMgr,
+		cancel:       cancel,
+		lastActivity: time.Now(), // keep monotonic clock for reliable time.Since() comparisons
 	}
 
 	s.mu.Lock()
@@ -243,6 +267,10 @@ func (s *Supervisor) Send(sessionID, text string) (uint64, error) {
 	if err := provider.Send(ms.handle, text); err != nil {
 		return 0, err
 	}
+
+	s.mu.Lock()
+	ms.lastActivity = time.Now() // keep monotonic clock for reliable time.Since() comparisons
+	s.mu.Unlock()
 
 	seq := ms.buf.Append(Event{
 		Timestamp: time.Now().UTC(),
@@ -349,6 +377,16 @@ func (s *Supervisor) forwardEvents(sessionID string, provider Provider, handle S
 	for e := range events {
 		e.Text = s.redactString(e.Text)
 		e.Error = s.redactString(e.Error)
+
+		// Override text with stop reason for idle-timeout terminations.
+		if e.Done && e.Type == EventTypeSessionStopped {
+			s.mu.RLock()
+			if ms, ok := s.sessions[sessionID]; ok && ms.stopReason != "" {
+				e.Text = ms.stopReason
+			}
+			s.mu.RUnlock()
+		}
+
 		buf.Append(e)
 
 		// Update session state on terminal events

@@ -10,25 +10,25 @@ For the completed MVP scope, see [MVP_PLAN.md](MVP_PLAN.md).
 **Goal**: Close out gaps in provider support and session lifecycle management.
 
 ### 1.1 Claude Output Parsing
-- [ ] Parse Claude-specific streaming JSON output format into structured `EventType` fields
+- [x] Parse Claude-specific streaming JSON output format into structured `EventType` fields
   - Detect tool use, content blocks, thinking tokens separately
   - Map `AGENT_READY` / `RESPONSE_COMPLETE` signals to `SESSION_STARTED` / done events
-- [ ] Integration test: start → send prompt → receive parsed events → stop
+- [x] Integration test: start → send prompt → receive parsed events → stop
 
 ### 1.2 OpenCode Integration Test
 - [x] Integration test: start → send prompt → receive events → stop
 - [ ] Validate PTY interaction model if opencode requires a terminal
 
 ### 1.3 Session Idle Timeout
-- [ ] Enforce `sessions.idle_timeout` from config: stop session automatically after no `SendInput` for the configured duration
-- [ ] Emit `SESSION_STOPPED` event with reason `"idle_timeout"` on automatic stop
-- [ ] Unit test: verify idle timeout fires and cleans up session state
+- [x] Enforce `sessions.idle_timeout` from config: stop session automatically after no `SendInput` for the configured duration
+- [x] Emit `SESSION_STOPPED` event with reason `"idle_timeout"` on automatic stop
+- [x] Unit test: verify idle timeout fires and cleans up session state
 
 ### 1.4 Provider Binary Version Detection
-- [ ] Add `Version(ctx context.Context) (string, error)` to provider `Health` or a separate method
-- [ ] Call `<binary> --version` and parse output during `Health()` check
-- [ ] Surface version in `ListProviders` response
-- [ ] Log provider version at startup
+- [x] Add `Version(ctx context.Context) (string, error)` to provider `Health` or a separate method
+- [x] Call `<binary> --version` and parse output during `Health()` check
+- [x] Surface version in `ListProviders` response
+- [x] Log provider version at startup
 
 ---
 

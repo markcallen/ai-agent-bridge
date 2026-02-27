@@ -24,6 +24,9 @@ func (p *testProvider) ID() string { return p.id }
 func (p *testProvider) Health(ctx context.Context) error {
 	return nil
 }
+func (p *testProvider) Version(ctx context.Context) (string, error) {
+	return "test-1.0", nil
+}
 func (p *testProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (bridge.SessionHandle, error) {
 	h := &testHandle{id: cfg.SessionID, events: make(chan bridge.Event, 32)}
 	h.events <- bridge.Event{
@@ -92,7 +95,7 @@ func newTestServer(t *testing.T, policy bridge.Policy) *BridgeServer {
 	if err := reg.Register(&testProvider{id: "test"}); err != nil {
 		t.Fatalf("register provider: %v", err)
 	}
-	sup := bridge.NewSupervisor(reg, policy, 64, bridge.DefaultSubscriberConfig())
+	sup := bridge.NewSupervisor(reg, policy, 64, bridge.DefaultSubscriberConfig(), 0)
 	t.Cleanup(func() { sup.Close() })
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return New(sup, reg, logger, RateLimitConfig{
@@ -235,7 +238,7 @@ func TestRateLimitStartSessionPerClient(t *testing.T) {
 	if err := reg.Register(&testProvider{id: "test"}); err != nil {
 		t.Fatalf("register provider: %v", err)
 	}
-	sup := bridge.NewSupervisor(reg, bridge.DefaultPolicy(), 64, bridge.DefaultSubscriberConfig())
+	sup := bridge.NewSupervisor(reg, bridge.DefaultPolicy(), 64, bridge.DefaultSubscriberConfig(), 0)
 	t.Cleanup(func() { sup.Close() })
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := New(sup, reg, logger, RateLimitConfig{
@@ -273,7 +276,7 @@ func TestRateLimitSendInputPerSession(t *testing.T) {
 	if err := reg.Register(&testProvider{id: "test"}); err != nil {
 		t.Fatalf("register provider: %v", err)
 	}
-	sup := bridge.NewSupervisor(reg, bridge.DefaultPolicy(), 64, bridge.DefaultSubscriberConfig())
+	sup := bridge.NewSupervisor(reg, bridge.DefaultPolicy(), 64, bridge.DefaultSubscriberConfig(), 0)
 	t.Cleanup(func() { sup.Close() })
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := New(sup, reg, logger, RateLimitConfig{

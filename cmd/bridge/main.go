@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"flag"
 	"log/slog"
@@ -78,6 +79,20 @@ func main() {
 		logger.Info("registered provider", "provider", name, "binary", pcfg.Binary)
 	}
 
+	// Log provider versions at startup (5s timeout per provider).
+	for name := range cfg.Providers {
+		if p, err := registry.Get(name); err == nil {
+			vCtx, vCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			v, vErr := p.Version(vCtx)
+			vCancel()
+			if vErr != nil {
+				logger.Info("failed to get provider version", "provider", name, "error", vErr)
+				continue
+			}
+			logger.Info("provider version", "provider", name, "version", v)
+		}
+	}
+
 	// Set up policy
 	policy := bridge.Policy{
 		MaxPerProject: cfg.Sessions.MaxPerProject,
@@ -96,7 +111,8 @@ func main() {
 	}
 
 	// Set up supervisor
-	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, subConfig)
+	idleTimeout := config.ParseDuration(cfg.Sessions.IdleTimeout, 30*time.Minute)
+	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, subConfig, idleTimeout)
 	sup.SetRedactor(redactor.Redact)
 	defer sup.Close()
 
