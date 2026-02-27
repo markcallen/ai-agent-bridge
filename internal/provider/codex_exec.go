@@ -129,12 +129,13 @@ type codexExecHandle struct {
 	extraArgs  []string
 	stopGrace  time.Duration
 
-	mu        sync.Mutex
-	threadID  string              // set from "thread.started"; used for resume
-	busy      bool                // true while a subprocess is running
-	stopped   bool                // true after Stop() called
-	closed    bool                // true after events channel closed
-	cancelExec context.CancelFunc // cancels the in-flight exec subprocess
+	mu       sync.Mutex
+	threadID string       // set from "thread.started"; used for resume
+	busy     bool         // true while a subprocess is running
+	stopped  bool         // true after Stop() called
+	closed   bool         // true after events channel closed
+	pid      int          // PID of the in-flight subprocess; 0 when idle
+	execDone chan struct{} // closed when the in-flight runExec goroutine exits; nil before first send
 
 	events    chan bridge.Event
 	closeOnce sync.Once
@@ -154,18 +155,20 @@ func (h *codexExecHandle) send(text string) error {
 		return fmt.Errorf("session is busy: previous prompt still in progress")
 	}
 	h.busy = true
+	done := make(chan struct{})
+	h.execDone = done
 	threadID := h.threadID
 	h.mu.Unlock()
 
-	go h.runExec(text, threadID)
+	go h.runExec(text, threadID, done)
 	return nil
 }
 
-func (h *codexExecHandle) runExec(prompt, threadID string) {
+func (h *codexExecHandle) runExec(prompt, threadID string, done chan struct{}) {
+	// done is closed when this goroutine exits so stop() can wait on it.
+	defer close(done)
+
 	ctx, cancel := context.WithCancel(context.Background())
-	h.mu.Lock()
-	h.cancelExec = cancel
-	h.mu.Unlock()
 	defer cancel()
 
 	// Build args: extra_args first (global flags like -c), then exec subcommand.
@@ -210,13 +213,19 @@ func (h *codexExecHandle) runExec(prompt, threadID string) {
 		return
 	}
 
+	// Store PID so stop() can signal the process group.
+	h.mu.Lock()
+	h.pid = cmd.Process.Pid
+	h.mu.Unlock()
+
 	// Write prompt to stdin then close so codex sees EOF.
 	_, _ = io.WriteString(stdin, strings.TrimSpace(prompt)+"\n")
 	_ = stdin.Close()
 
-	// Drain stderr in background.
+	// Drain stderr in background with an enlarged buffer to handle long lines.
 	go func() {
 		sc := bufio.NewScanner(stderr)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for sc.Scan() {
 			line := sc.Text()
 			if strings.TrimSpace(line) == "" {
@@ -230,9 +239,11 @@ func (h *codexExecHandle) runExec(prompt, threadID string) {
 		}
 	}()
 
-	// Parse JSONL from stdout.
+	// Parse JSONL from stdout with an enlarged buffer to handle large
+	// aggregated_output values and avoid silent truncation via ErrTooLong.
 	newThreadID := ""
 	sc := bufio.NewScanner(stdout)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
 		if strings.TrimSpace(line) == "" {
@@ -269,10 +280,18 @@ func (h *codexExecHandle) runExec(prompt, threadID string) {
 			}
 		}
 	}
+	if err := sc.Err(); err != nil {
+		h.emit(bridge.Event{
+			Type:   bridge.EventTypeStderr,
+			Stream: "stderr",
+			Text:   fmt.Sprintf("stdout scan error: %v", err),
+		})
+	}
 
 	waitErr := cmd.Wait()
 
 	h.mu.Lock()
+	h.pid = 0
 	if newThreadID != "" {
 		h.threadID = newThreadID
 	}
@@ -301,8 +320,8 @@ func (h *codexExecHandle) runExec(prompt, threadID string) {
 	})
 }
 
-// emitExecError emits an error event. If fatal is true the session is closed;
-// otherwise a RESPONSE_COMPLETE is emitted to unblock the client.
+// emitExecError emits an error event. If fatal is true the session is
+// terminated; otherwise a RESPONSE_COMPLETE is emitted to unblock the client.
 func (h *codexExecHandle) emitExecError(msg string, fatal bool) {
 	h.mu.Lock()
 	h.busy = false
@@ -316,7 +335,9 @@ func (h *codexExecHandle) emitExecError(msg string, fatal bool) {
 			Error:  msg,
 			Done:   true,
 		})
-		h.closeSession()
+		// Close the channel directly — SESSION_FAILED is already the terminal
+		// event; calling closeSession() would emit a redundant SESSION_STOPPED.
+		h.closeEventChannel()
 		return
 	}
 	h.emit(bridge.Event{
@@ -338,20 +359,39 @@ func (h *codexExecHandle) stop() {
 		return
 	}
 	h.stopped = true
-	cancelExec := h.cancelExec
+	pid := h.pid
 	busy := h.busy
+	execDone := h.execDone
 	h.mu.Unlock()
 
-	if cancelExec != nil {
-		cancelExec()
-	}
-	// If not busy, runExec is not running; close the session directly.
 	if !busy {
+		// No exec in flight; emit SESSION_STOPPED and close the channel now.
 		h.closeSession()
+		return
 	}
-	// If busy, runExec will call closeSession when it finishes.
+
+	// An exec is running. SIGTERM the process group so child processes are also
+	// signalled (Setpgid: true makes the child PID equal its PGID).
+	if pid > 0 {
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
+	}
+
+	// Wait for runExec to finish. It will call closeSession() via the
+	// wasStopped path, emitting SESSION_STOPPED and closing the channel.
+	select {
+	case <-execDone:
+	case <-time.After(h.stopGrace):
+		// Grace period expired — force kill the process group.
+		if pid > 0 {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+		}
+		<-execDone
+	}
 }
 
+// closeSession emits SESSION_STOPPED and closes the event channel. It must
+// only be called when no terminal event has already been emitted; use
+// closeEventChannel directly after emitting SESSION_FAILED.
 func (h *codexExecHandle) closeSession() {
 	h.emit(bridge.Event{
 		Type:   bridge.EventTypeSessionStopped,
@@ -359,6 +399,11 @@ func (h *codexExecHandle) closeSession() {
 		Text:   "session stopped",
 		Done:   true,
 	})
+	h.closeEventChannel()
+}
+
+// closeEventChannel closes the events channel exactly once.
+func (h *codexExecHandle) closeEventChannel() {
 	h.closeOnce.Do(func() {
 		h.mu.Lock()
 		h.closed = true
@@ -389,13 +434,13 @@ func (h *codexExecHandle) emit(e bridge.Event) {
 
 // codexJSONEvent is a parsed line from "codex exec --json" JSONL output.
 type codexJSONEvent struct {
-	Type     string          `json:"type"`
-	ThreadID string          `json:"thread_id"`
-	Item     *codexJSONItem  `json:"item"`
+	Type     string         `json:"type"`
+	ThreadID string         `json:"thread_id"`
+	Item     *codexJSONItem `json:"item"`
 }
 
 type codexJSONItem struct {
-	Type            string `json:"type"`
-	Text            string `json:"text"`
+	Type             string `json:"type"`
+	Text             string `json:"text"`
 	AggregatedOutput string `json:"aggregated_output"`
 }
