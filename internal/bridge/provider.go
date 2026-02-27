@@ -24,6 +24,9 @@ type Provider interface {
 
 	// Health checks if the provider binary is available.
 	Health(ctx context.Context) error
+
+	// Version returns the version string of the provider binary.
+	Version(ctx context.Context) (string, error)
 }
 
 // SessionConfig holds configuration for starting a new agent session.

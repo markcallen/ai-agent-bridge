@@ -1129,6 +1129,7 @@ type ProviderInfo struct {
 	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
 	Available     bool                   `protobuf:"varint,2,opt,name=available,proto3" json:"available,omitempty"`
 	Binary        string                 `protobuf:"bytes,3,opt,name=binary,proto3" json:"binary,omitempty"`
+	Version       string                 `protobuf:"bytes,4,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1180,6 +1181,13 @@ func (x *ProviderInfo) GetAvailable() bool {
 func (x *ProviderInfo) GetBinary() string {
 	if x != nil {
 		return x.Binary
+	}
+	return ""
+}
+
+func (x *ProviderInfo) GetVersion() string {
+	if x != nil {
+		return x.Version
 	}
 	return ""
 }
@@ -1270,11 +1278,12 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"\x16\n" +
 	"\x14ListProvidersRequest\"N\n" +
 	"\x15ListProvidersResponse\x125\n" +
-	"\tproviders\x18\x01 \x03(\v2\x17.bridge.v1.ProviderInfoR\tproviders\"`\n" +
+	"\tproviders\x18\x01 \x03(\v2\x17.bridge.v1.ProviderInfoR\tproviders\"z\n" +
 	"\fProviderInfo\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x1c\n" +
 	"\tavailable\x18\x02 \x01(\bR\tavailable\x12\x16\n" +
-	"\x06binary\x18\x03 \x01(\tR\x06binary*\xbc\x01\n" +
+	"\x06binary\x18\x03 \x01(\tR\x06binary\x12\x18\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion*\xbc\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17SESSION_STATUS_STARTING\x10\x01\x12\x1a\n" +

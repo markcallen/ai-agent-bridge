@@ -81,6 +81,19 @@ func NewStdioProvider(cfg StdioConfig) *StdioProvider {
 
 func (p *StdioProvider) ID() string { return p.cfg.ProviderID }
 
+func (p *StdioProvider) Version(ctx context.Context) (string, error) {
+	path, err := resolveBinaryPath(p.cfg.Binary)
+	if err != nil {
+		return "", fmt.Errorf("binary %q not found: %w", p.cfg.Binary, err)
+	}
+	cmd := exec.CommandContext(ctx, path, "--version")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("version check: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func (p *StdioProvider) Health(ctx context.Context) error {
 	path, err := resolveBinaryPath(p.cfg.Binary)
 	if err != nil {

@@ -17,9 +17,10 @@ func newMockProvider(id string) *mockProvider {
 	return &mockProvider{id: id}
 }
 
-func (m *mockProvider) ID() string                                   { return m.id }
-func (m *mockProvider) Health(ctx context.Context) error             { return nil }
-func (m *mockProvider) Send(handle SessionHandle, text string) error { return nil }
+func (m *mockProvider) ID() string                                        { return m.id }
+func (m *mockProvider) Health(ctx context.Context) error                  { return nil }
+func (m *mockProvider) Version(ctx context.Context) (string, error)       { return "mock-1.0", nil }
+func (m *mockProvider) Send(handle SessionHandle, text string) error       { return nil }
 
 func (m *mockProvider) Events(handle SessionHandle) <-chan Event {
 	h := handle.(*mockHandle)
@@ -65,7 +66,7 @@ func TestSupervisorStartGetStop(t *testing.T) {
 	mp := newMockProvider("test")
 	reg.Register(mp)
 
-	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig())
+	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig(), 0)
 	defer sup.Close()
 
 	info, err := sup.Start(context.Background(), SessionConfig{
@@ -119,7 +120,7 @@ func TestSupervisorStartGetStop(t *testing.T) {
 func TestSupervisorDuplicateSession(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(newMockProvider("test"))
-	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig())
+	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig(), 0)
 	defer sup.Close()
 
 	_, err := sup.Start(context.Background(), SessionConfig{
@@ -151,7 +152,7 @@ func TestSupervisorSessionLimits(t *testing.T) {
 	policy.MaxPerProject = 2
 	policy.MaxGlobal = 3
 
-	sup := NewSupervisor(reg, policy, 100, DefaultSubscriberConfig())
+	sup := NewSupervisor(reg, policy, 100, DefaultSubscriberConfig(), 0)
 	defer sup.Close()
 
 	for i := 0; i < 2; i++ {
@@ -203,7 +204,7 @@ func TestSupervisorSessionLimits(t *testing.T) {
 func TestSupervisorEventBuffer(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(newMockProvider("test"))
-	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig())
+	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig(), 0)
 	defer sup.Close()
 
 	_, err := sup.Start(context.Background(), SessionConfig{
@@ -237,7 +238,7 @@ func TestSupervisorEventBuffer(t *testing.T) {
 func TestSupervisorRedactsBufferedEvents(t *testing.T) {
 	reg := NewRegistry()
 	reg.Register(newMockProvider("test"))
-	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig())
+	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig(), 0)
 	sup.SetRedactor(func(text string) string {
 		return strings.ReplaceAll(text, "secret=abc", "[REDACTED]")
 	})
@@ -273,4 +274,60 @@ func TestSupervisorRedactsBufferedEvents(t *testing.T) {
 	if !foundRedactedInput {
 		t.Fatalf("did not find redacted input event in %+v", events)
 	}
+}
+
+// newSupervisorWithCleanupInterval constructs a supervisor with a custom
+// cleanup interval so the idle check fires quickly in tests, without racing
+// on struct fields after the cleanup goroutine has already started.
+func newSupervisorWithCleanupInterval(reg *Registry, policy Policy, idleTimeout, cleanupInterval time.Duration) *Supervisor {
+	s := &Supervisor{
+		registry:        reg,
+		policy:          policy,
+		bufSize:         100,
+		subConfig:       DefaultSubscriberConfig(),
+		idleTimeout:     idleTimeout,
+		cleanupInterval: cleanupInterval,
+		sessions:        make(map[string]*managedSession),
+		done:            make(chan struct{}),
+	}
+	go s.cleanupLoop()
+	return s
+}
+
+func TestIdleTimeout(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(newMockProvider("test"))
+
+	// Very short idle timeout; cleanup runs every 50ms so the idle check fires quickly.
+	idleTimeout := 100 * time.Millisecond
+	sup := newSupervisorWithCleanupInterval(reg, DefaultPolicy(), idleTimeout, 50*time.Millisecond)
+	defer sup.Close()
+
+	_, err := sup.Start(context.Background(), SessionConfig{
+		SessionID: "idle-session",
+		ProjectID: "p1",
+		RepoPath:  "/tmp",
+		Options:   map[string]string{"provider": "test"},
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for the idle timeout to fire and the session to be stopped.
+	buf, err := sup.EventBuffer("idle-session")
+	if err != nil {
+		t.Fatalf("EventBuffer: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		events := buf.After(0)
+		for _, e := range events {
+			if e.Type == EventTypeSessionStopped && e.Done && e.Text == "idle_timeout" {
+				return // success
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for idle_timeout SESSION_STOPPED event")
 }

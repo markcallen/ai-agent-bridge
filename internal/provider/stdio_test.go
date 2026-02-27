@@ -328,6 +328,111 @@ loop:
 	}
 }
 
+func TestStdioProviderVersion(t *testing.T) {
+	t.Run("version_script", func(t *testing.T) {
+		// A fake binary that prints a version string to stdout with --version.
+		tmp := t.TempDir()
+		scriptPath := filepath.Join(tmp, "fake-provider")
+		if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env sh\necho 'fake-provider 2.3.1'\n"), 0o755); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		p := NewStdioProvider(StdioConfig{
+			ProviderID: "fake",
+			Binary:     scriptPath,
+		})
+		v, err := p.Version(context.Background())
+		if err != nil {
+			t.Fatalf("Version: %v", err)
+		}
+		if v != "fake-provider 2.3.1" {
+			t.Errorf("Version = %q, want %q", v, "fake-provider 2.3.1")
+		}
+	})
+
+	t.Run("missing_binary", func(t *testing.T) {
+		p := NewStdioProvider(StdioConfig{
+			ProviderID: "missing",
+			Binary:     "nonexistent-binary-xyz-version",
+		})
+		_, err := p.Version(context.Background())
+		if err == nil {
+			t.Error("expected error for missing binary")
+		}
+	})
+}
+
+func TestClaudeProviderStreamJSON(t *testing.T) {
+	// Build a fake "claude" binary that emits mock stream-json output.
+	tmp := t.TempDir()
+	scriptPath := filepath.Join(tmp, "claude")
+	script := `#!/usr/bin/env sh
+echo '{"type":"system","subtype":"init","session_id":"test-session","tools":[],"mcp_servers":[]}'
+echo '{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"Hi there"}],"model":"claude-opus-4-6","stop_reason":"end_turn"},"session_id":"test-session","parent_tool_use_id":null}'
+echo '{"type":"result","subtype":"success","result":"Hi there","session_id":"test-session","duration_ms":50,"total_cost_usd":0.001}'
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Construct the provider the same way NewClaudeProvider() does, but with our fake binary.
+	p := NewStdioProvider(StdioConfig{
+		ProviderID:     "claude",
+		Binary:         scriptPath,
+		DefaultArgs:    []string{"--output-format", "stream-json", "--verbose"},
+		StreamJSON:     true,
+		StartupTimeout: 5 * time.Second,
+		StopGrace:      2 * time.Second,
+	})
+
+	handle, err := p.Start(context.Background(), bridge.SessionConfig{
+		ProjectID: "test-project",
+		SessionID: "claude-stream-json-session",
+		RepoPath:  tmp,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	events := p.Events(handle)
+	var gotAgentReady, gotResponseComplete bool
+	var stdoutTexts []string
+	timeout := time.After(5 * time.Second)
+loop:
+	for {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				break loop
+			}
+			switch e.Type {
+			case bridge.EventTypeAgentReady:
+				gotAgentReady = true
+			case bridge.EventTypeStdout:
+				stdoutTexts = append(stdoutTexts, e.Text)
+			case bridge.EventTypeResponseComplete:
+				gotResponseComplete = true
+			}
+			if e.Done {
+				break loop
+			}
+		case <-timeout:
+			t.Fatal("timeout waiting for events")
+		}
+	}
+
+	if !gotAgentReady {
+		t.Error("expected AGENT_READY event")
+	}
+	if len(stdoutTexts) == 0 {
+		t.Error("expected at least one STDOUT event with assistant text")
+	} else if stdoutTexts[0] != "Hi there" {
+		t.Errorf("stdout[0] = %q, want %q", stdoutTexts[0], "Hi there")
+	}
+	if !gotResponseComplete {
+		t.Error("expected RESPONSE_COMPLETE event")
+	}
+}
+
 func TestResolveBinaryPathRelativeSlash(t *testing.T) {
 	oldWD, err := os.Getwd()
 	if err != nil {

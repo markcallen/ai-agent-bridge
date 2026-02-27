@@ -159,4 +159,5 @@ message ProviderInfo {
   string provider = 1;
   bool available = 2;
   string binary = 3;
+  string version = 4;
 }
