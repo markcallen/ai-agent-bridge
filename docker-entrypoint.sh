@@ -5,6 +5,7 @@ CERT_DIR="${CERT_DIR:-/app/certs}"
 BRIDGE_CONFIG="${BRIDGE_CONFIG:-/app/config/bridge.yaml}"
 BRIDGE_CN="${BRIDGE_CN:-bridge}"
 BRIDGE_SANS="${BRIDGE_SANS:-bridge,localhost,127.0.0.1}"
+BRIDGE_CLIENT_CN="${BRIDGE_CLIENT_CN:-client}"
 
 # Running as root — fix volume ownership so the bridge user can read/write certs.
 chown bridge:bridge "$CERT_DIR"
@@ -20,7 +21,7 @@ if [ ! -f "$CERT_DIR/ca.crt" ]; then
     --out "$CERT_DIR"
 
   echo "==> Issuing client certificate..."
-  bridge-ca issue --type client --cn client \
+  bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
     --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
     --out "$CERT_DIR"
 

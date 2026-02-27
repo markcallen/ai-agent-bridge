@@ -2,12 +2,16 @@ services:
   bridge:
     build:
       context: ..
-      dockerfile: e2e/Dockerfile.bridge
+      dockerfile: Dockerfile
     env_file:
       - .env
+    environment:
+      BRIDGE_CONFIG: /app/config/bridge-e2e.yaml
+      BRIDGE_CLIENT_CN: e2e-client
     volumes:
       - certs:/app/certs
       - repos:/tmp/cache-cleaner
+      - ./bridge-e2e.yaml:/app/config/bridge-e2e.yaml:ro
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
       interval: 3s

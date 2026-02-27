@@ -39,8 +39,7 @@ func main() {
 		os.Exit(1)
 	}
 	if err := config.ValidateProviderEnv(cfg); err != nil {
-		bootstrapLogger.Error("provider environment validation failed", "error", err)
-		os.Exit(1)
+		bootstrapLogger.Warn("some providers have missing env vars and will be unavailable at session start", "error", err)
 	}
 	redactor, err := redact.New(cfg.Logging.RedactPatterns)
 	if err != nil {
@@ -52,16 +51,26 @@ func main() {
 	// Set up provider registry
 	registry := bridge.NewRegistry()
 	for name, pcfg := range cfg.Providers {
-		p := provider.NewStdioProvider(provider.StdioConfig{
-			ProviderID:     name,
-			Binary:         pcfg.Binary,
-			DefaultArgs:    pcfg.Args,
-			StartupTimeout: config.ParseDuration(pcfg.StartupTimeout, 30e9),
-			StopGrace:      config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
-			UsePTY:         pcfg.PTY,
-			StreamJSON:     pcfg.StreamJSON,
-			PromptPattern:  pcfg.PromptPattern,
-		})
+		var p bridge.Provider
+		if pcfg.Mode == "exec" {
+			p = provider.NewCodexExecProvider(provider.CodexExecConfig{
+				ProviderID: name,
+				Binary:     pcfg.Binary,
+				ExtraArgs:  pcfg.Args,
+				StopGrace:  config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
+			})
+		} else {
+			p = provider.NewStdioProvider(provider.StdioConfig{
+				ProviderID:     name,
+				Binary:         pcfg.Binary,
+				DefaultArgs:    pcfg.Args,
+				StartupTimeout: config.ParseDuration(pcfg.StartupTimeout, 30e9),
+				StopGrace:      config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
+				UsePTY:         pcfg.PTY,
+				StreamJSON:     pcfg.StreamJSON,
+				PromptPattern:  pcfg.PromptPattern,
+			})
+		}
 		if err := registry.Register(p); err != nil {
 			logger.Error("register provider", "provider", name, "error", err)
 			os.Exit(1)
