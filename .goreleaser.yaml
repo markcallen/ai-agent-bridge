@@ -32,12 +32,13 @@ dockers:
     image_templates:
       - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-amd64"
       - "ghcr.io/markcallen/ai-agent-bridge:latest-amd64"
-    dockerfile: Dockerfile.goreleaser
+    dockerfile: Dockerfile
     use: buildx
     extra_files:
       - docker-entrypoint.sh
       - config/bridge.yaml
     build_flag_templates:
+      - "--build-arg=BUILD_FROM=prebuilt"
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{.Date}}"
       - "--label=org.opencontainers.image.title={{.ProjectName}}"
@@ -50,12 +51,13 @@ dockers:
     image_templates:
       - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-arm64"
       - "ghcr.io/markcallen/ai-agent-bridge:latest-arm64"
-    dockerfile: Dockerfile.goreleaser
+    dockerfile: Dockerfile
     use: buildx
     extra_files:
       - docker-entrypoint.sh
       - config/bridge.yaml
     build_flag_templates:
+      - "--build-arg=BUILD_FROM=prebuilt"
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.created={{.Date}}"
       - "--label=org.opencontainers.image.title={{.ProjectName}}"

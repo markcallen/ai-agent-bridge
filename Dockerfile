@@ -1,5 +1,10 @@
-# Build stage
-FROM golang:1.25 AS build
+# BUILD_FROM selects the binary source:
+#   source   - build from Go source (default, for local docker build)
+#   prebuilt - use binaries already compiled by GoReleaser
+ARG BUILD_FROM=source
+
+# Source build stage
+FROM golang:1.25 AS source
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -8,6 +13,13 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/bridge ./cmd/bridge && \
     CGO_ENABLED=0 go build -o /out/bridge-ca ./cmd/bridge-ca
+
+# Pre-built binaries stage (GoReleaser provides these in the build context)
+FROM scratch AS prebuilt
+COPY bridge bridge-ca /out/
+
+# Select binary source — BuildKit skips whichever stage is not referenced
+FROM ${BUILD_FROM} AS build
 
 # Runtime stage
 FROM ubuntu:24.04
