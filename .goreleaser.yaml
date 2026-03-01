@@ -34,6 +34,9 @@ dockers:
       - "ghcr.io/markcallen/ai-agent-bridge:latest-amd64"
     dockerfile: Dockerfile
     use: buildx
+    extra_files:
+      - docker-entrypoint.sh
+      - config/bridge.yaml
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{.Date}}"
@@ -49,6 +52,9 @@ dockers:
       - "ghcr.io/markcallen/ai-agent-bridge:latest-arm64"
     dockerfile: Dockerfile
     use: buildx
+    extra_files:
+      - docker-entrypoint.sh
+      - config/bridge.yaml
     build_flag_templates:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.created={{.Date}}"
