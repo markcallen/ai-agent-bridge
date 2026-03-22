@@ -207,10 +207,13 @@ export function createBridgeWebSocketHandler(
           }
 
           default: {
-            sendError(
-              "unknown_message_type",
-              `Unknown message type: ${(msg as { type: string }).type}`
-            );
+            // Silently ignore unknown types so this handler can coexist on a
+            // shared socket alongside other message broadcasters (e.g. HMR,
+            // file-watch events).  Matches the Go WSHandler behavior.
+            logger.debug("Ignoring unknown WebSocket message type", {
+              connId,
+              type: (msg as { type?: string }).type,
+            });
           }
         }
       } catch (err) {

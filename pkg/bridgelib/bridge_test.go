@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/markcallen/ai-agent-bridge/internal/bridge"
 )
 
 // newTestBridge returns a bridge with a minimal valid config using the default
@@ -33,24 +35,26 @@ func newTestBridge(t *testing.T) *Bridge {
 	return b
 }
 
-// TestNew_DefaultConfig verifies that an empty Config still produces a usable
-// Bridge (the default "claude" provider is inserted automatically).
+// TestNew_DefaultConfig verifies that an empty Providers list causes New to
+// insert the default "claude" provider automatically.
 func TestNew_DefaultConfig(t *testing.T) {
-	b, err := New(Config{
-		Providers: []ProviderConfig{
-			{
-				ID:             "claude",
-				Binary:         "false",
-				Args:           []string{},
-				StartupTimeout: 50 * time.Millisecond,
-				StopGrace:      50 * time.Millisecond,
-			},
-		},
-	})
+	// Empty Providers → default "claude" provider is registered.
+	// We override the binary to something that doesn't need to be installed.
+	b, err := New(Config{})
 	if err != nil {
-		t.Fatalf("New with minimal config: %v", err)
+		t.Fatalf("New with empty config: %v", err)
 	}
-	b.Close()
+	defer b.Close()
+	providers := b.ListProviders()
+	found := false
+	for _, p := range providers {
+		if p == "claude" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("default provider 'claude' not registered; got %v", providers)
+	}
 }
 
 // TestNew_MultiProvider ensures multiple providers can be registered.
@@ -174,34 +178,28 @@ func TestHealth_Returns(t *testing.T) {
 	// that's fine; we just verify the call works.
 }
 
-// TestEventTypeName covers the eventTypeName helper for all known types.
+// TestEventTypeName covers eventTypeName for every known proto EventType value.
 func TestEventTypeName(t *testing.T) {
-	b := newTestBridge(t)
-	// Access via toSequencedEvent which calls eventTypeName internally.
-	// Build a dummy SequencedEvent with Type=0..9 and check we get a string.
-	_ = b // just ensure it compiles; eventTypeName is package-private
-}
-
-// TestEventTypeNames covers the internal eventTypeName function directly
-// (same package).
-func TestEventTypeNames(t *testing.T) {
 	cases := []struct {
-		input    int
+		input    bridge.EventType
 		wantName string
 	}{
-		{0, "unspecified"},
-		{1, "session_started"},
-		{2, "session_stopped"},
-		{3, "session_failed"},
-		{4, "stdout"},
-		{5, "stderr"},
-		{6, "input_received"},
-		{7, "buffer_overflow"},
-		{8, "agent_ready"},
-		{9, "response_complete"},
+		{bridge.EventType(0), "unspecified"},
+		{bridge.EventTypeSessionStarted, "session_started"},
+		{bridge.EventTypeSessionStopped, "session_stopped"},
+		{bridge.EventTypeSessionFailed, "session_failed"},
+		{bridge.EventTypeStdout, "stdout"},
+		{bridge.EventTypeStderr, "stderr"},
+		{bridge.EventTypeInputReceived, "input_received"},
+		{bridge.EventTypeBufferOverflow, "buffer_overflow"},
+		{bridge.EventTypeAgentReady, "agent_ready"},
+		{bridge.EventTypeResponseComplete, "response_complete"},
+		{bridge.EventType(99), "unspecified"},
 	}
-
-	// Import internal bridge types via the toSequencedEvent function.
-	// We test indirectly through sessionInfoToMap which uses stateToString.
-	_ = cases
+	for _, tc := range cases {
+		got := eventTypeName(tc.input)
+		if got != tc.wantName {
+			t.Errorf("eventTypeName(%d) = %q, want %q", tc.input, got, tc.wantName)
+		}
+	}
 }

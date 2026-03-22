@@ -14,6 +14,11 @@ import (
 //
 // The protocol is the same JSON format understood by the useBridgeSession
 // React hook in packages/bridge-client-node/react/useBridgeSession.ts.
+//
+// Concurrency: HandleMessage may be called concurrently from the connection
+// read loop. Event goroutines spawned by stream_events call sendFn
+// concurrently with HandleMessage. Callers MUST ensure sendFn is safe for
+// concurrent use (e.g. wrap the underlying WebSocket writer in a mutex).
 type WSHandler struct {
 	bridge *Bridge
 
@@ -201,15 +206,28 @@ func (h *WSHandler) handleStreamEvents(ctx context.Context, connID string, msg [
 	h.streams[connID][req.SubscriberID] = cancel
 	h.mu.Unlock()
 
+	removeStream := func() {
+		h.mu.Lock()
+		if subs, ok := h.streams[connID]; ok {
+			delete(subs, req.SubscriberID)
+			if len(subs) == 0 {
+				delete(h.streams, connID)
+			}
+		}
+		h.mu.Unlock()
+	}
+
 	events, err := h.bridge.StreamEvents(streamCtx, req.SessionID, req.SubscriberID, req.AfterSeq)
 	if err != nil {
 		cancel()
+		removeStream()
 		sendError(sendFn, "stream_failed", err.Error())
 		return
 	}
 
 	go func() {
 		defer cancel()
+		defer removeStream()
 		for se := range events {
 			sendJSON(sendFn, map[string]any{
 				"type":      "event",
@@ -261,28 +279,38 @@ func (h *WSHandler) handleGetSession(msg []byte, sendFn func([]byte)) {
 
 func (h *WSHandler) handleHealth(ctx context.Context, sendFn func([]byte)) {
 	results := h.bridge.Health(ctx)
-	providers := make(map[string]any, len(results))
-	healthy := true
+	// Emit ProviderHealth slice matching the shared WebSocket protocol:
+	// { provider: string, available: bool, error?: string }
+	providers := make([]map[string]any, 0, len(results))
+	status := "healthy"
 	for id, err := range results {
+		p := map[string]any{"provider": id, "available": err == nil}
 		if err != nil {
-			healthy = false
-			providers[id] = map[string]any{"healthy": false, "error": err.Error()}
-		} else {
-			providers[id] = map[string]any{"healthy": true}
+			p["error"] = err.Error()
+			status = "unhealthy"
 		}
+		providers = append(providers, p)
 	}
 	sendJSON(sendFn, map[string]any{
 		"type":      "health_response",
-		"healthy":   healthy,
+		"status":    status,
 		"providers": providers,
 	})
 }
 
 func (h *WSHandler) handleListProviders(sendFn func([]byte)) {
+	// Emit ProviderInfo slice matching the shared WebSocket protocol:
+	// { provider: string, available: bool, binary: string, version: string }
+	// bridgelib only exposes provider IDs, so binary/version are empty.
 	ids := h.bridge.ListProviders()
 	providers := make([]map[string]any, len(ids))
 	for i, id := range ids {
-		providers[i] = map[string]any{"id": id}
+		providers[i] = map[string]any{
+			"provider":  id,
+			"available": true,
+			"binary":    "",
+			"version":   "",
+		}
 	}
 	sendJSON(sendFn, map[string]any{
 		"type":      "providers_list",

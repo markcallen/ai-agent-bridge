@@ -24,11 +24,24 @@ import {
   SessionStatus,
 } from "./types";
 
-// Path to the proto file — relative to this package's location in the repo
-const PROTO_PATH = path.resolve(
-  __dirname,
-  "../../../proto/bridge/v1/bridge.proto"
-);
+// Resolve the proto file relative to the package root regardless of whether
+// we are running from src/ (ts-node / tsx) or dist/src/ (compiled output).
+// Walk up from __dirname until we find a directory containing package.json,
+// then resolve the proto path relative to the repo root (two levels up).
+function resolveProtoPath(): string {
+  let dir = __dirname;
+  for (let i = 0; i < 5; i++) {
+    if (require("fs").existsSync(path.join(dir, "package.json"))) {
+      // dir is the package root (packages/bridge-client-node)
+      return path.resolve(dir, "../../proto/bridge/v1/bridge.proto");
+    }
+    dir = path.dirname(dir);
+  }
+  // Fallback: assume we're in src/ at dev time
+  return path.resolve(__dirname, "../../../proto/bridge/v1/bridge.proto");
+}
+
+const PROTO_PATH = resolveProtoPath();
 
 const PROTO_OPTIONS: protoLoader.Options = {
   keepCase: true,

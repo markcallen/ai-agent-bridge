@@ -158,16 +158,18 @@ func New(cfg Config) (*Bridge, error) {
 // StartSession starts a new agent session.
 // opts is an optional map of additional agent options.
 func (b *Bridge) StartSession(ctx context.Context, projectID, sessionID, repoPath, providerID string, opts map[string]string) (*SessionInfo, error) {
-	if opts == nil {
-		opts = make(map[string]string)
+	// Copy opts so we don't mutate the caller's map.
+	options := make(map[string]string, len(opts)+1)
+	for k, v := range opts {
+		options[k] = v
 	}
-	opts["provider"] = providerID
+	options["provider"] = providerID
 
 	info, err := b.supervisor.Start(ctx, bridge.SessionConfig{
 		ProjectID: projectID,
 		SessionID: sessionID,
 		RepoPath:  repoPath,
-		Options:   opts,
+		Options:   options,
 	})
 	if err != nil {
 		return nil, err

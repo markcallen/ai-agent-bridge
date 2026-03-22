@@ -212,8 +212,11 @@ func TestHandleMessage_Health(t *testing.T) {
 	if msg["type"] != "health_response" {
 		t.Fatalf("got type=%q, want health_response", msg["type"])
 	}
-	if _, ok := msg["healthy"]; !ok {
-		t.Fatal("health_response missing 'healthy' field")
+	if _, ok := msg["status"]; !ok {
+		t.Fatal("health_response missing 'status' field")
+	}
+	if _, ok := msg["providers"]; !ok {
+		t.Fatal("health_response missing 'providers' field")
 	}
 }
 

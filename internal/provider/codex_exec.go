@@ -144,11 +144,11 @@ type codexExecHandle struct {
 	stopGrace  time.Duration
 
 	mu       sync.Mutex
-	threadID string       // set from "thread.started"; used for resume
-	busy     bool         // true while a subprocess is running
-	stopped  bool         // true after Stop() called
-	closed   bool         // true after events channel closed
-	pid      int          // PID of the in-flight subprocess; 0 when idle
+	threadID string        // set from "thread.started"; used for resume
+	busy     bool          // true while a subprocess is running
+	stopped  bool          // true after Stop() called
+	closed   bool          // true after events channel closed
+	pid      int           // PID of the in-flight subprocess; 0 when idle
 	execDone chan struct{} // closed when the in-flight runExec goroutine exits; nil before first send
 
 	events    chan bridge.Event

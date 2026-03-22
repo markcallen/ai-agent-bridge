@@ -3,6 +3,8 @@ package bridgeclient
 import (
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
 )
 
 func TestNew_MissingTarget(t *testing.T) {
@@ -129,25 +131,20 @@ func TestClient_Close(t *testing.T) {
 
 func TestShouldRetry(t *testing.T) {
 	cases := []struct {
-		code string
+		code codes.Code
 		want bool
 	}{
-		{"Unavailable", true},
-		{"DeadlineExceeded", true},
-		{"NotFound", false},
-		{"Internal", false},
+		{codes.Unavailable, true},
+		{codes.DeadlineExceeded, true},
+		{codes.NotFound, false},
+		{codes.Internal, false},
+		{codes.OK, false},
 	}
 	for _, tc := range cases {
-		// Build a gRPC status error for each code using the errors_test helper style.
-		var err error
-		switch tc.code {
-		case "Unavailable":
-			err = grpcErr(10, "unavailable") // codes.Unavailable = 14
-		case "DeadlineExceeded":
-			err = grpcErr(4, "deadline") // codes.DeadlineExceeded = 4
-		default:
-			continue
+		err := grpcErr(tc.code, "test")
+		got := shouldRetry(err)
+		if got != tc.want {
+			t.Errorf("shouldRetry(%v) = %v, want %v", tc.code, got, tc.want)
 		}
-		_ = err
 	}
 }

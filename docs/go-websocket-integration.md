@@ -81,12 +81,12 @@ type ServerMessage struct {
     Sessions []SessionInfo `json:"sessions,omitempty"`
     Session  *SessionInfo  `json:"session,omitempty"`
 
-    // health_response
-    HealthStatus string           `json:"healthStatus,omitempty"`
+    // health_response — "status" matches the shared protocol (not "healthStatus")
+    HealthStatus string           `json:"status,omitempty"`
     Providers    []ProviderHealth `json:"providers,omitempty"`
 
-    // providers_list
-    ProviderList []ProviderInfo `json:"providerList,omitempty"`
+    // providers_list — "providers" matches the shared protocol (not "providerList")
+    ProviderList []ProviderInfo `json:"providers,omitempty"`
 
     // shared
     Text    string `json:"text,omitempty"`
@@ -377,7 +377,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             }
             send(ServerMessage{
                 Type:         "health_response",
-                HealthStatus: resp.Status,
+                HealthStatus: resp.Status, // serializes as "status" per the JSON tag
                 Providers:    providers,
             })
 
@@ -396,7 +396,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
                     Version:   p.Version,
                 })
             }
-            send(ServerMessage{Type: "providers_list", ProviderList: providers})
+            send(ServerMessage{Type: "providers_list", ProviderList: providers}) // serializes as "providers" per the JSON tag
 
         default:
             sendErr("unknown_message_type", "Unknown message type: "+msg.Type)
@@ -426,8 +426,6 @@ func protoToSessionInfo(s *bridgev1.GetSessionResponse) SessionInfo {
     return info
 }
 ```
-
-> **Note on `SessionID` in `ServerMessage`**: The struct field `SessionID` should be added to `ServerMessage` (alongside `SessionId` JSON tag) if you follow the exact protocol. Adjust the struct tags to match the protocol exactly (`"sessionId"` JSON key).
 
 ---
 

@@ -17,10 +17,10 @@ func newMockProvider(id string) *mockProvider {
 	return &mockProvider{id: id}
 }
 
-func (m *mockProvider) ID() string                                        { return m.id }
-func (m *mockProvider) Health(ctx context.Context) error                  { return nil }
-func (m *mockProvider) Version(ctx context.Context) (string, error)       { return "mock-1.0", nil }
-func (m *mockProvider) Send(handle SessionHandle, text string) error       { return nil }
+func (m *mockProvider) ID() string                                   { return m.id }
+func (m *mockProvider) Health(ctx context.Context) error             { return nil }
+func (m *mockProvider) Version(ctx context.Context) (string, error)  { return "mock-1.0", nil }
+func (m *mockProvider) Send(handle SessionHandle, text string) error { return nil }
 
 func (m *mockProvider) Events(handle SessionHandle) <-chan Event {
 	h := handle.(*mockHandle)

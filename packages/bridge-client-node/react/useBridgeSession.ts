@@ -8,13 +8,14 @@
  * function App() {
  *   const bridge = useBridgeSession("ws://localhost:3000/api/bridge");
  *
- *   const start = async () => {
- *     await bridge.startSession({
+ *   const start = () => {
+ *     // startSession enqueues the message; the session_started response sets
+ *     // bridge.sessionId. Call streamEvents once sessionId is set.
+ *     bridge.startSession({
  *       projectId: "my-project",
  *       repoPath: "/repos/my-app",
  *       provider: "claude",
  *     });
- *     bridge.streamEvents({ sessionId: bridge.sessionId! });
  *   };
  *
  *   return (
