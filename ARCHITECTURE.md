@@ -8,6 +8,8 @@ The AI Agent Bridge is a standalone gRPC daemon and Go SDK that provides a secur
 
 The AI Agent Bridge sits between consumer applications and AI agent processes. Consumer applications (orchestrators, control planes, CLI tools, web services) connect via gRPC with mTLS + JWT authentication. Each consumer project gets its own CA and JWT signing key, with cross-signing enabling multi-tenant trust.
 
+Browser-based applications cannot speak gRPC directly. The `packages/bridge-client-node` package provides a Node.js WebSocket adapter layer that translates between browser clients (using the JSON WebSocket protocol) and the gRPC daemon. A React hook (`useBridgeSession`) is included for the browser side.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                       Consumer Applications                          │
@@ -221,6 +223,30 @@ Public API for consumer integration:
 **CursorStore** (`cursor_store.go`) — pluggable interface for persisting the last acknowledged event sequence number per session/subscriber, enabling durable resume across process restarts:
 - `MemoryCursorStore` — in-process storage (default)
 - `FileCursorStore` — JSON file backed, survives process restart
+
+### packages/bridge-client-node (Node.js / Browser)
+
+For applications where gRPC is not available (browsers, some edge runtimes), this package provides a WebSocket adapter layer:
+
+```
+React App (Browser)
+    ↕ WebSocket (JSON protocol)
+Next.js / Go HTTP server   ← bridge-client-node or go-websocket-integration
+    ↕ gRPC
+ai-agent-bridge daemon
+```
+
+**`BridgeGrpcClient`** — Node.js gRPC client using `@grpc/grpc-js`. Loads the proto file dynamically at runtime. Exposes the same operations as the Go SDK with an async generator for `streamEvents`.
+
+**`createBridgeWebSocketHandler`** — `ws.WebSocketServer` factory. Each WebSocket connection gets a dedicated gRPC client. Translates the JSON WebSocket protocol to gRPC calls and streams events back as JSON. Cancels in-flight streams on disconnect.
+
+**`createNextJsBridgeRoute`** — Pages Router API route helper. Attaches the WebSocket server to the underlying Node.js HTTP server on first call (survives hot reload).
+
+**`useBridgeSession`** — React hook using the native `WebSocket` API. Manages connection lifecycle with exponential backoff reconnect. Returns `{ startSession, sendInput, stopSession, streamEvents, events, status, error }`.
+
+**WebSocket JSON protocol** — same protocol supported by both the Node.js package and the Go HTTP integration (`docs/go-websocket-integration.md`). All messages are JSON-encoded tagged unions with a `type` field.
+
+See [`packages/bridge-client-node/README.md`](../packages/bridge-client-node/README.md) and [`docs/go-websocket-integration.md`](../docs/go-websocket-integration.md) for details.
 
 ## Security Architecture
 
@@ -461,6 +487,8 @@ ai-agent-bridge/
 ├── proto/bridge/v1/      # Protobuf service definitions
 ├── gen/bridge/v1/        # Generated Go stubs
 ├── pkg/bridgeclient/     # Public Go SDK
+├── packages/
+│   └── bridge-client-node/  # Node.js gRPC→WebSocket adapter + React hook
 ├── internal/
 │   ├── auth/             # mTLS + JWT + audit interceptors
 │   ├── pki/              # CA management
@@ -469,6 +497,7 @@ ai-agent-bridge/
 │   ├── redact/           # Log output redaction
 │   ├── config/           # YAML config loading + env var injection
 │   └── server/           # gRPC service implementation + rate limiting + validation
+├── docs/                 # Integration guides (go-websocket-integration.md)
 ├── e2e/                  # End-to-end test harness (docker-compose)
 ├── examples/             # Example consumer programs (chat, runprompt)
 ├── config/               # Default configuration

@@ -102,6 +102,55 @@ The bridge emits `AGENT_READY` when an agent is ready for input and `RESPONSE_CO
 
 ---
 
+## Using from a Browser (Node.js + React)
+
+Browsers can't speak gRPC directly. The `packages/bridge-client-node` package provides a Node.js adapter that sits between browser clients and the bridge daemon:
+
+```
+React App (Browser)
+    ↕ WebSocket (JSON protocol)
+Next.js or Go HTTP server
+    ↕ gRPC
+ai-agent-bridge daemon
+```
+
+### Node.js quick start
+
+```bash
+npm install @ai-agent-bridge/client-node
+```
+
+**Next.js Pages Router** — create `pages/api/bridge.ts`:
+
+```ts
+import { createNextJsBridgeRoute } from "@ai-agent-bridge/client-node";
+export default createNextJsBridgeRoute({ bridgeAddr: "localhost:9445" });
+export const config = { api: { bodyParser: false } };
+```
+
+**React hook**:
+
+```tsx
+import { useBridgeSession } from "@ai-agent-bridge/client-node/react";
+
+function AgentPanel() {
+  const bridge = useBridgeSession("ws://localhost:3000/api/bridge");
+
+  return (
+    <>
+      <button onClick={() => bridge.startSession({ projectId: "p1", repoPath: "/repo", provider: "claude-chat" })}>
+        Start
+      </button>
+      {bridge.events.map((ev) => <p key={ev.seq}>{ev.text}</p>)}
+    </>
+  );
+}
+```
+
+See [`packages/bridge-client-node/README.md`](packages/bridge-client-node/README.md) for the full API, App Router custom server setup, and the Go HTTP WebSocket integration guide at [`docs/go-websocket-integration.md`](docs/go-websocket-integration.md).
+
+---
+
 ## Using the Go SDK
 
 Import `pkg/bridgeclient` to connect from your own Go program.
@@ -253,21 +302,23 @@ Builds `bridge` and `test-client` containers, starts the bridge with mTLS+JWT, a
 ## Project Structure
 
 ```
-cmd/bridge/          Bridge daemon binary
-cmd/bridge-ca/       CA and certificate management CLI
-pkg/bridgeclient/    Go SDK for consumer integration
-proto/bridge/v1/     Protobuf service definitions
-gen/bridge/v1/       Generated protobuf Go code
-internal/auth/       mTLS, JWT, and gRPC interceptors
-internal/bridge/     Session supervisor, event buffer, provider registry, policy
-internal/config/     YAML configuration loader and env var validation
-internal/pki/        CA management, cert issuance, cross-signing, verification
-internal/provider/   Stdio/PTY-based provider adapters
-internal/server/     gRPC server implementation
-examples/chat/       Interactive multi-turn chat example
-examples/runprompt/  Single-prompt streaming example
-config/              Default configuration files
-scripts/             Development helper scripts
+cmd/bridge/                    Bridge daemon binary
+cmd/bridge-ca/                 CA and certificate management CLI
+pkg/bridgeclient/              Go SDK for consumer integration
+packages/bridge-client-node/   Node.js gRPC→WebSocket adapter + React hook
+proto/bridge/v1/               Protobuf service definitions
+gen/bridge/v1/                 Generated protobuf Go code
+internal/auth/                 mTLS, JWT, and gRPC interceptors
+internal/bridge/               Session supervisor, event buffer, provider registry, policy
+internal/config/               YAML configuration loader and env var validation
+internal/pki/                  CA management, cert issuance, cross-signing, verification
+internal/provider/             Stdio/PTY-based provider adapters
+internal/server/               gRPC server implementation
+examples/chat/                 Interactive multi-turn chat example
+examples/runprompt/            Single-prompt streaming example
+docs/                          Integration guides
+config/                        Default configuration files
+scripts/                       Development helper scripts
 ```
 
 ---
@@ -293,3 +344,5 @@ Run `bridge-ca <command> --help` for details.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture and design
 - [PLAN.md](PLAN.md) — Implementation plan
 - [TODO.md](TODO.md) — Current task tracking
+- [packages/bridge-client-node/README.md](packages/bridge-client-node/README.md) — Node.js client and React hook
+- [docs/go-websocket-integration.md](docs/go-websocket-integration.md) — Go HTTP WebSocket integration guide
