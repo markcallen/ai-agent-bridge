@@ -1,5 +1,7 @@
 # AI Agent Bridge
 
+[![Smoke Tests](https://github.com/markcallen/ai-agent-bridge/actions/workflows/smoke.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/smoke.yml)
+
 A standalone gRPC daemon and Go SDK that provides a secure, zero-trust communication layer between control-plane systems and AI agent processes. It manages AI agent subprocess lifecycles (Claude Code, Codex, OpenCode, Gemini) and exposes a unified API for session management, command routing, and event streaming.
 
 ## Quick Start

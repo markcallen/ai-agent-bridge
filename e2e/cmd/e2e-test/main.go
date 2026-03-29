@@ -3,8 +3,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -16,18 +14,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/google/uuid"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
@@ -43,7 +37,7 @@ func main() {
 	jwtIssuer := flag.String("jwt-issuer", "e2e", "JWT issuer")
 	repo := flag.String("repo", "/tmp/cache-cleaner", "repo path")
 	timeout := flag.Duration("timeout", 2*time.Minute, "overall timeout")
-	only := flag.String("only", "all", "test subset: all, chat-sdk, chat-cli, chat, codex, opencode")
+	only := flag.String("only", "all", "test subset: all, chat-sdk, chat-cli, chat, codex, opencode, gemini")
 	flag.Parse()
 
 	os.Exit(run(*target, *cacert, *cert, *key, *jwtKey, *jwtIssuer, *repo, *timeout, *only))
@@ -108,9 +102,14 @@ func run(target, cacert, cert, key, jwtKey, jwtIssuer, repo string, timeout time
 		cancel()
 		return 0
 	case "chat-cli":
-		if err := runChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: chat example CLI e2e: %v\n", err)
-			return 1
+		for _, p := range cliProviders {
+			if p.name != "claude-chat" {
+				continue
+			}
+			if err := runAllCLIScenarios(p, target, cacert, cert, key, jwtKey, jwtIssuer, repo); err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: %s CLI scenarios: %v\n", p.name, err)
+				return 1
+			}
 		}
 		return 0
 	case "chat":
@@ -121,27 +120,31 @@ func run(target, cacert, cert, key, jwtKey, jwtIssuer, repo string, timeout time
 			return 1
 		}
 		cancel()
-		if err := runChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: chat example CLI e2e: %v\n", err)
-			return 1
+		for _, p := range cliProviders {
+			if p.name != "claude-chat" {
+				continue
+			}
+			if err := runAllCLIScenarios(p, target, cacert, cert, key, jwtKey, jwtIssuer, repo); err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: %s CLI scenarios: %v\n", p.name, err)
+				return 1
+			}
 		}
 		return 0
-	case "codex":
-		if err := runCodexChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: codex chat example CLI e2e: %v\n", err)
-			return 1
-		}
-		return 0
-	case "opencode":
-		if err := runOpencodeChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: opencode chat example CLI e2e: %v\n", err)
-			return 1
+	case "codex", "opencode", "gemini":
+		for _, p := range cliProviders {
+			if p.name != only {
+				continue
+			}
+			if err := runAllCLIScenarios(p, target, cacert, cert, key, jwtKey, jwtIssuer, repo); err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: %s CLI scenarios: %v\n", p.name, err)
+				return 1
+			}
 		}
 		return 0
 	case "all":
 		// continue with full suite below
 	default:
-		fmt.Fprintf(os.Stderr, "ERROR: unknown -only value %q (valid: all, chat-sdk, chat-cli, chat, codex, opencode)\n", only)
+		fmt.Fprintf(os.Stderr, "ERROR: unknown -only value %q (valid: all, chat-sdk, chat-cli, chat, codex, opencode, gemini)\n", only)
 		return 1
 	}
 
@@ -152,9 +155,6 @@ func run(target, cacert, cert, key, jwtKey, jwtIssuer, repo string, timeout time
 		err := fn()
 		results = append(results, testResult{name: name, err: err})
 	}
-	skip := func(name, reason string) {
-		results = append(results, testResult{name: name, skipped: true, skipReason: reason})
-	}
 
 	record("chat example (SDK)", func() error {
 		ctx, cancel := newStepContext()
@@ -162,19 +162,15 @@ func run(target, cacert, cert, key, jwtKey, jwtIssuer, repo string, timeout time
 		return runChatExampleTest(ctx, client, repo)
 	})
 
-	record("chat example CLI (claude-chat)", func() error {
-		return runChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo)
-	})
-
-	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
-		skip("codex CLI", "OPENAI_API_KEY not set")
-		skip("opencode CLI", "OPENAI_API_KEY not set")
-	} else {
-		record("codex CLI", func() error {
-			return runCodexChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo)
+	for _, p := range cliProviders {
+		record(p.name+" CLI: one-shot", func() error {
+			return runCLIOneShot(p, target, cacert, cert, key, jwtKey, jwtIssuer, repo)
 		})
-		record("opencode CLI", func() error {
-			return runOpencodeChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo)
+		record(p.name+" CLI: multi-turn", func() error {
+			return runCLIMultiTurn(p, target, cacert, cert, key, jwtKey, jwtIssuer, repo)
+		})
+		record(p.name+" CLI: agent question", func() error {
+			return runCLIAgentQuestion(p, target, cacert, cert, key, jwtKey, jwtIssuer, repo)
 		})
 	}
 
@@ -393,451 +389,6 @@ func runChatExampleTest(ctx context.Context, client *bridgeclient.Client, repo s
 	fmt.Println("  Session stopped")
 	fmt.Println("Chat example test passed.")
 	return nil
-}
-
-func runChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo string) error {
-	fmt.Println("Running chat example CLI e2e test (claude-chat)...")
-
-	apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
-	if apiKey == "" {
-		return errors.New("ANTHROPIC_API_KEY is required for chat example CLI e2e")
-	}
-
-	prompt := "Give a one-line acknowledgment that you received this message."
-
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "/usr/local/bin/chat-example",
-		"-target", target,
-		"-provider", "claude-chat",
-		"-project", "e2e",
-		"-cacert", cacert,
-		"-cert", cert,
-		"-key", key,
-		"-jwt-key", jwtKey,
-		"-jwt-issuer", jwtIssuer,
-		"-timeout", "90s",
-		repo,
-	)
-	cmd.Env = os.Environ()
-
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return fmt.Errorf("start chat-example via pty: %w", err)
-	}
-	defer func() { _ = ptmx.Close() }()
-
-	var outMu sync.Mutex
-	var out bytes.Buffer
-	readDone := make(chan error, 1)
-	go func() {
-		r := bufio.NewReader(ptmx)
-		buf := make([]byte, 4096)
-		for {
-			n, err := r.Read(buf)
-			if n > 0 {
-				outMu.Lock()
-				out.Write(buf[:n])
-				outMu.Unlock()
-			}
-			if err != nil {
-				readDone <- err
-				return
-			}
-		}
-	}()
-
-	snapshot := func() string {
-		outMu.Lock()
-		defer outMu.Unlock()
-		return out.String()
-	}
-
-	waitContains := func(substr string, timeout time.Duration) error {
-		deadline := time.Now().Add(timeout)
-		for time.Now().Before(deadline) {
-			if strings.Contains(snapshot(), substr) {
-				return nil
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-		return fmt.Errorf("timed out waiting for %q; output:\n%s", substr, snapshot())
-	}
-
-	if err := waitContains("you> ", 20*time.Second); err != nil {
-		return err
-	}
-
-	startOffset := len(snapshot())
-	if _, err := io.WriteString(ptmx, prompt+"\n"); err != nil {
-		return fmt.Errorf("write prompt: %w", err)
-	}
-
-	var assistantChunk string
-	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) {
-		outNow := snapshot()
-		if startOffset > len(outNow) {
-			startOffset = 0
-		}
-		window := outNow[startOffset:]
-		echoIdx := strings.Index(window, prompt)
-		if echoIdx < 0 {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		afterEcho := window[echoIdx+len(prompt):]
-		nextPromptIdx := strings.Index(afterEcho, "you> ")
-		if nextPromptIdx < 0 {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		between := sanitizeTTYText(afterEcho[:nextPromptIdx])
-		assistantChunk = strings.TrimSpace(between)
-		if assistantChunk == "" {
-			return fmt.Errorf("chat prompt reappeared before assistant output; output:\n%s", outNow)
-		}
-		break
-	}
-	if assistantChunk == "" {
-		return fmt.Errorf("timed out waiting for assistant output before next prompt; output:\n%s", snapshot())
-	}
-
-	if _, err := io.WriteString(ptmx, "/quit\n"); err != nil {
-		return fmt.Errorf("write /quit: %w", err)
-	}
-
-	waitErr := make(chan error, 1)
-	go func() { waitErr <- cmd.Wait() }()
-
-	select {
-	case err := <-waitErr:
-		if err != nil {
-			return fmt.Errorf("chat-example exited with error: %w\noutput:\n%s", err, snapshot())
-		}
-	case <-time.After(20 * time.Second):
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("timed out waiting for chat-example to exit\noutput:\n%s", snapshot())
-	}
-
-	select {
-	case err := <-readDone:
-		if err != nil &&
-			!errors.Is(err, io.EOF) &&
-			!errors.Is(err, syscall.EIO) &&
-			!strings.Contains(strings.ToLower(err.Error()), "input/output error") &&
-			!strings.Contains(strings.ToLower(err.Error()), "closed") {
-			return fmt.Errorf("pty read error: %w", err)
-		}
-	default:
-	}
-
-	fmt.Println("Chat example CLI e2e test passed.")
-	return nil
-}
-
-func runCodexChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo string) error {
-	fmt.Println("Running chat example CLI e2e test (codex)...")
-
-	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-	if apiKey == "" {
-		return errors.New("OPENAI_API_KEY is required for codex chat example CLI e2e")
-	}
-
-	prompt := "Give a one-line acknowledgment that you received this message."
-
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "/usr/local/bin/chat-example",
-		"-target", target,
-		"-provider", "codex",
-		"-project", "e2e",
-		"-cacert", cacert,
-		"-cert", cert,
-		"-key", key,
-		"-jwt-key", jwtKey,
-		"-jwt-issuer", jwtIssuer,
-		"-timeout", "150s",
-		repo,
-	)
-	cmd.Env = os.Environ()
-
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return fmt.Errorf("start chat-example via pty: %w", err)
-	}
-	defer func() { _ = ptmx.Close() }()
-
-	var outMu sync.Mutex
-	var out bytes.Buffer
-	readDone := make(chan error, 1)
-	go func() {
-		r := bufio.NewReader(ptmx)
-		buf := make([]byte, 4096)
-		for {
-			n, err := r.Read(buf)
-			if n > 0 {
-				outMu.Lock()
-				out.Write(buf[:n])
-				outMu.Unlock()
-			}
-			if err != nil {
-				readDone <- err
-				return
-			}
-		}
-	}()
-
-	snapshot := func() string {
-		outMu.Lock()
-		defer outMu.Unlock()
-		return out.String()
-	}
-
-	waitContains := func(substr string, timeout time.Duration) error {
-		deadline := time.Now().Add(timeout)
-		for time.Now().Before(deadline) {
-			if strings.Contains(snapshot(), substr) {
-				return nil
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-		return fmt.Errorf("timed out waiting for %q; output:\n%s", substr, snapshot())
-	}
-
-	if err := waitContains("you> ", 30*time.Second); err != nil {
-		return err
-	}
-
-	startOffset := len(snapshot())
-	if _, err := io.WriteString(ptmx, prompt+"\n"); err != nil {
-		return fmt.Errorf("write prompt: %w", err)
-	}
-
-	var assistantChunk string
-	deadline := time.Now().Add(150 * time.Second)
-	for time.Now().Before(deadline) {
-		outNow := snapshot()
-		if startOffset > len(outNow) {
-			startOffset = 0
-		}
-		window := outNow[startOffset:]
-		echoIdx := strings.Index(window, prompt)
-		if echoIdx < 0 {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		afterEcho := window[echoIdx+len(prompt):]
-		nextPromptIdx := strings.Index(afterEcho, "you> ")
-		if nextPromptIdx < 0 {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		between := sanitizeTTYText(afterEcho[:nextPromptIdx])
-		assistantChunk = strings.TrimSpace(between)
-		if assistantChunk == "" {
-			return fmt.Errorf("chat prompt reappeared before assistant output; output:\n%s", outNow)
-		}
-		break
-	}
-	if assistantChunk == "" {
-		return fmt.Errorf("timed out waiting for assistant output before next prompt; output:\n%s", snapshot())
-	}
-
-	if _, err := io.WriteString(ptmx, "/quit\n"); err != nil {
-		return fmt.Errorf("write /quit: %w", err)
-	}
-
-	waitErr := make(chan error, 1)
-	go func() { waitErr <- cmd.Wait() }()
-
-	select {
-	case err := <-waitErr:
-		if err != nil {
-			return fmt.Errorf("chat-example exited with error: %w\noutput:\n%s", err, snapshot())
-		}
-	case <-time.After(20 * time.Second):
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("timed out waiting for chat-example to exit\noutput:\n%s", snapshot())
-	}
-
-	select {
-	case err := <-readDone:
-		if err != nil &&
-			!errors.Is(err, io.EOF) &&
-			!errors.Is(err, syscall.EIO) &&
-			!strings.Contains(strings.ToLower(err.Error()), "input/output error") &&
-			!strings.Contains(strings.ToLower(err.Error()), "closed") {
-			return fmt.Errorf("pty read error: %w", err)
-		}
-	default:
-	}
-
-	fmt.Println("Codex chat example CLI e2e test passed.")
-	return nil
-}
-
-func runOpencodeChatExampleCLIE2E(target, cacert, cert, key, jwtKey, jwtIssuer, repo string) error {
-	fmt.Println("Running chat example CLI e2e test (opencode)...")
-
-	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-	if apiKey == "" {
-		return errors.New("OPENAI_API_KEY is required for opencode chat example CLI e2e")
-	}
-
-	prompt := "Give a one-line acknowledgment that you received this message."
-
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "/usr/local/bin/chat-example",
-		"-target", target,
-		"-provider", "opencode",
-		"-project", "e2e",
-		"-cacert", cacert,
-		"-cert", cert,
-		"-key", key,
-		"-jwt-key", jwtKey,
-		"-jwt-issuer", jwtIssuer,
-		"-timeout", "150s",
-		repo,
-	)
-	cmd.Env = os.Environ()
-
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return fmt.Errorf("start chat-example via pty: %w", err)
-	}
-	defer func() { _ = ptmx.Close() }()
-
-	var outMu sync.Mutex
-	var out bytes.Buffer
-	readDone := make(chan error, 1)
-	go func() {
-		r := bufio.NewReader(ptmx)
-		buf := make([]byte, 4096)
-		for {
-			n, err := r.Read(buf)
-			if n > 0 {
-				outMu.Lock()
-				out.Write(buf[:n])
-				outMu.Unlock()
-			}
-			if err != nil {
-				readDone <- err
-				return
-			}
-		}
-	}()
-
-	snapshot := func() string {
-		outMu.Lock()
-		defer outMu.Unlock()
-		return out.String()
-	}
-
-	waitContains := func(substr string, timeout time.Duration) error {
-		deadline := time.Now().Add(timeout)
-		for time.Now().Before(deadline) {
-			if strings.Contains(snapshot(), substr) {
-				return nil
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-		return fmt.Errorf("timed out waiting for %q; output:\n%s", substr, snapshot())
-	}
-
-	if err := waitContains("you> ", 30*time.Second); err != nil {
-		return err
-	}
-
-	startOffset := len(snapshot())
-	if _, err := io.WriteString(ptmx, prompt+"\n"); err != nil {
-		return fmt.Errorf("write prompt: %w", err)
-	}
-
-	var assistantChunk string
-	deadline := time.Now().Add(150 * time.Second)
-	for time.Now().Before(deadline) {
-		outNow := snapshot()
-		if startOffset > len(outNow) {
-			startOffset = 0
-		}
-		window := outNow[startOffset:]
-		echoIdx := strings.Index(window, prompt)
-		if echoIdx < 0 {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		afterEcho := window[echoIdx+len(prompt):]
-		nextPromptIdx := strings.Index(afterEcho, "you> ")
-		if nextPromptIdx < 0 {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		between := sanitizeTTYText(afterEcho[:nextPromptIdx])
-		assistantChunk = strings.TrimSpace(between)
-		if assistantChunk == "" {
-			return fmt.Errorf("chat prompt reappeared before assistant output; output:\n%s", outNow)
-		}
-		break
-	}
-	if assistantChunk == "" {
-		return fmt.Errorf("timed out waiting for assistant output before next prompt; output:\n%s", snapshot())
-	}
-
-	if _, err := io.WriteString(ptmx, "/quit\n"); err != nil {
-		return fmt.Errorf("write /quit: %w", err)
-	}
-
-	waitErr := make(chan error, 1)
-	go func() { waitErr <- cmd.Wait() }()
-
-	select {
-	case err := <-waitErr:
-		if err != nil {
-			return fmt.Errorf("chat-example exited with error: %w\noutput:\n%s", err, snapshot())
-		}
-	case <-time.After(20 * time.Second):
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("timed out waiting for chat-example to exit\noutput:\n%s", snapshot())
-	}
-
-	select {
-	case err := <-readDone:
-		if err != nil &&
-			!errors.Is(err, io.EOF) &&
-			!errors.Is(err, syscall.EIO) &&
-			!strings.Contains(strings.ToLower(err.Error()), "input/output error") &&
-			!strings.Contains(strings.ToLower(err.Error()), "closed") {
-			return fmt.Errorf("pty read error: %w", err)
-		}
-	default:
-	}
-
-	fmt.Println("Opencode chat example CLI e2e test passed.")
-	return nil
-}
-
-func sanitizeTTYText(s string) string {
-	replacer := strings.NewReplacer(
-		"\r", "\n",
-		"\x1b[K", "",
-		"\x1b[0m", "",
-		"\x1b[1m", "",
-		"\x1b[2m", "",
-		"\x1b[22m", "",
-		"\x1b[39m", "",
-	)
-	return replacer.Replace(s)
 }
 
 func runMultiInputTest(ctx context.Context, client *bridgeclient.Client, repo string) error {
