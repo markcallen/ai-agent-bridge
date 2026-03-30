@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup fmt run dev-run chat-example
+.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup fmt run dev-run chat-example chat-claude chat-opencode chat-gemini
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
@@ -8,7 +8,7 @@ DEV_CONFIG ?= config/bridge-dev.yaml
 CHAT_TARGET ?= 127.0.0.1:9445
 CHAT_PROVIDER ?= claude
 CHAT_PROJECT ?= dev
-CHAT_REPO ?= $(PWD)
+CHAT_REPO ?= /repos/penduin
 build: proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BRIDGE) ./cmd/bridge
@@ -78,3 +78,12 @@ chat-example:
 		-jwt-issuer dev \
 		-timeout 5m \
 		$(CHAT_REPO)
+
+chat-claude: CHAT_PROVIDER=claude
+chat-claude: chat-example
+
+chat-opencode: CHAT_PROVIDER=opencode
+chat-opencode: chat-example
+
+chat-gemini: CHAT_PROVIDER=gemini
+chat-gemini: chat-example

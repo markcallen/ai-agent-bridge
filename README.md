@@ -69,7 +69,7 @@ go run ./examples/chat \
 In a second terminal:
 
 ```bash
-make chat-example
+make chat-claude
 ```
 
 ---
@@ -87,7 +87,21 @@ make chat-example
 | Variable | Default | Description |
 |---|---|---|
 | `CHAT_PROVIDER` | `claude` | Provider name from config |
-| `CHAT_REPO` | `$(PWD)` | Repo path passed to the agent |
+| `CHAT_REPO` | `/repos/penduin` | Repo path passed to the agent |
+
+Provider-specific shortcuts:
+
+```bash
+make chat-claude
+make chat-opencode
+make chat-gemini
+```
+
+Override the repo path when needed:
+
+```bash
+make chat-gemini CHAT_REPO=/repos/your-repo
+```
 
 ---
 
@@ -258,7 +272,10 @@ Note: `grpcurl` does not support JWT injection. For JWT-authenticated RPCs use t
 | `make test` | Run all unit tests with race detection |
 | `make test-e2e` | Run the dockerized end-to-end test suite |
 | `make test-cover` | Run tests with coverage report |
-| `make chat-example` | Run the interactive PTY example against the local bridge |
+| `make chat-example` | Run the interactive PTY example using `CHAT_PROVIDER` and `CHAT_REPO` |
+| `make chat-claude` | Run the interactive PTY example with the `claude` provider |
+| `make chat-opencode` | Run the interactive PTY example with the `opencode` provider |
+| `make chat-gemini` | Run the interactive PTY example with the `gemini` provider |
 | `make proto` | Regenerate protobuf Go code |
 | `make lint` | Run golangci-lint |
 | `make fmt` | Format code with gofmt and goimports |
