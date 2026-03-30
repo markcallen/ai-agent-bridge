@@ -251,5 +251,21 @@ func filterEnv(env []string) []string {
 		}
 		filtered = append(filtered, e)
 	}
+	if !hasEnvKey(filtered, "TERM") {
+		filtered = append(filtered, "TERM=xterm-256color")
+	}
+	if !hasEnvKey(filtered, "COLORTERM") {
+		filtered = append(filtered, "COLORTERM=truecolor")
+	}
 	return filtered
+}
+
+func hasEnvKey(env []string, key string) bool {
+	for _, e := range env {
+		k, _, ok := strings.Cut(e, "=")
+		if ok && k == key {
+			return true
+		}
+	}
+	return false
 }
