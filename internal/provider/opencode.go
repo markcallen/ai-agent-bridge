@@ -2,13 +2,15 @@ package provider
 
 import "time"
 
-// NewOpenCodeProvider creates a provider adapter for the OpenCode CLI.
+// NewOpenCodeProvider creates the interactive PTY-backed OpenCode provider.
 func NewOpenCodeProvider() *StdioProvider {
 	return NewStdioProvider(StdioConfig{
 		ProviderID:     "opencode",
 		Binary:         "opencode",
 		DefaultArgs:    nil,
-		StartupTimeout: 30 * time.Second,
+		StartupTimeout: 45 * time.Second,
 		StopGrace:      10 * time.Second,
+		RequiredEnv:    []string{"OPENAI_API_KEY"},
+		PromptPattern:  `❯`,
 	})
 }

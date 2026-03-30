@@ -38,7 +38,9 @@ RUN apt-get update && \
 RUN printf '#!/bin/bash\nexec claude "$@" < /dev/null\n' > /usr/local/bin/claude-print && \
     chmod +x /usr/local/bin/claude-print
 
-RUN useradd -m -s /bin/bash bridge
+RUN useradd -m -s /bin/bash bridge && \
+    mkdir -p /home/bridge/.gemini && \
+    chown -R bridge:bridge /home/bridge/.gemini
 
 WORKDIR /app
 

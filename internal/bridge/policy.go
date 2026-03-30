@@ -59,6 +59,14 @@ func (p *Policy) ValidateInput(text string) error {
 	return nil
 }
 
+// ValidateInputBytes checks that PTY input bytes do not exceed the maximum size.
+func (p *Policy) ValidateInputBytes(data []byte) error {
+	if p.MaxInputBytes > 0 && len(data) > p.MaxInputBytes {
+		return fmt.Errorf("%w: input size %d exceeds max %d bytes", ErrInputTooLarge, len(data), p.MaxInputBytes)
+	}
+	return nil
+}
+
 // CheckSessionLimits verifies that creating a new session would not exceed limits.
 func (p *Policy) CheckSessionLimits(projectCount, globalCount int) error {
 	if p.MaxPerProject > 0 && projectCount >= p.MaxPerProject {

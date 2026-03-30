@@ -2,83 +2,75 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/creack/pty"
 )
 
-// SessionState represents the lifecycle state of a session.
-type SessionState int
-
-const (
-	SessionStateStarting SessionState = iota + 1
-	SessionStateRunning
-	SessionStateStopping
-	SessionStateStopped
-	SessionStateFailed
-)
-
-// SessionInfo holds metadata about a running session.
-type SessionInfo struct {
-	SessionID string
-	ProjectID string
-	Provider  string
-	State     SessionState
-	CreatedAt time.Time
-	StoppedAt time.Time
-	Error     string
+type AttachState struct {
+	ClientID     string
+	Replay       []OutputChunk
+	Live         <-chan OutputChunk
+	ReplayGap    bool
+	OldestSeq    uint64
+	LastSeq      uint64
+	ExitRecorded bool
+	ExitCode     int
+	Cols         uint32
+	Rows         uint32
 }
 
-// Supervisor manages the lifecycle of agent sessions.
+// Supervisor manages the lifecycle of PTY-backed provider sessions.
 type Supervisor struct {
 	registry        *Registry
 	policy          Policy
 	bufSize         int
-	subConfig       SubscriberConfig
 	idleTimeout     time.Duration
-	cleanupInterval time.Duration // defaults to 5m; overridable in tests
-	redact          func(string) string
+	cleanupInterval time.Duration
 
 	mu       sync.RWMutex
-	sessions map[string]*managedSession // keyed by session_id
-
-	done chan struct{} // closed by Close to stop background goroutines
+	sessions map[string]*managedSession
+	done     chan struct{}
 }
 
 type managedSession struct {
+	mu           sync.Mutex
 	info         SessionInfo
-	handle       SessionHandle
-	buf          *EventBuffer
-	subMgr       *SubscriberManager
+	provider     Provider
+	cmd          *exec.Cmd
+	ptmx         *os.File
+	buf          *ByteBuffer
 	cancel       context.CancelFunc
+	stopGrace    time.Duration
 	lastActivity time.Time
-	stopReason   string // set before Stop(); forwardEvents surfaces it in the final event
+	forceStop    bool
+
+	attachedClient string
+	live           chan OutputChunk
 }
 
-// NewSupervisor creates a new session supervisor.
-func NewSupervisor(registry *Registry, policy Policy, eventBufSize int, subConfig SubscriberConfig, idleTimeout time.Duration) *Supervisor {
-	if eventBufSize <= 0 {
-		eventBufSize = 10000
+func NewSupervisor(registry *Registry, policy Policy, outputBufSize int, idleTimeout time.Duration) *Supervisor {
+	if outputBufSize <= 0 {
+		outputBufSize = 8 << 20
 	}
 	s := &Supervisor{
 		registry:        registry,
 		policy:          policy,
-		bufSize:         eventBufSize,
-		subConfig:       subConfig,
+		bufSize:         outputBufSize,
 		idleTimeout:     idleTimeout,
-		cleanupInterval: 5 * time.Minute,
+		cleanupInterval: 30 * time.Second,
 		sessions:        make(map[string]*managedSession),
 		done:            make(chan struct{}),
 	}
 	go s.cleanupLoop()
 	return s
-}
-
-// SetRedactor configures a redaction function for buffered event text/error.
-func (s *Supervisor) SetRedactor(fn func(string) string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.redact = fn
 }
 
 func (s *Supervisor) cleanupLoop() {
@@ -89,33 +81,27 @@ func (s *Supervisor) cleanupLoop() {
 		case <-s.done:
 			return
 		case <-ticker.C:
+			if s.idleTimeout <= 0 {
+				continue
+			}
+			var idle []string
 			s.mu.RLock()
-			for _, ms := range s.sessions {
-				ms.subMgr.CleanupExpired()
+			for id, ms := range s.sessions {
+				ms.mu.Lock()
+				if (ms.info.State == SessionStateRunning || ms.info.State == SessionStateAttached) &&
+					time.Since(ms.lastActivity) > s.idleTimeout {
+					idle = append(idle, id)
+				}
+				ms.mu.Unlock()
 			}
 			s.mu.RUnlock()
-
-			if s.idleTimeout > 0 {
-				s.mu.Lock()
-				var idleSessions []string
-				for id, ms := range s.sessions {
-					if ms.info.State == SessionStateRunning &&
-						time.Since(ms.lastActivity) > s.idleTimeout {
-						ms.stopReason = "idle_timeout"
-						ms.info.State = SessionStateStopping // prevent duplicate Stop() spawns
-						idleSessions = append(idleSessions, id)
-					}
-				}
-				s.mu.Unlock()
-				for _, id := range idleSessions {
-					go s.Stop(id, false) //nolint:errcheck
-				}
+			for _, id := range idle {
+				_ = s.Stop(id, false)
 			}
 		}
 	}
 }
 
-// Start creates and starts a new agent session.
 func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo, error) {
 	if cfg.SessionID == "" {
 		return nil, fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
@@ -126,24 +112,19 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	if cfg.RepoPath == "" {
 		return nil, fmt.Errorf("%w: repo_path is required", ErrInvalidArgument)
 	}
-
-	// Validate repo path
 	if err := s.policy.ValidateRepoPath(cfg.RepoPath); err != nil {
 		return nil, err
 	}
 
 	s.mu.Lock()
-	// Check for duplicate
 	if _, exists := s.sessions[cfg.SessionID]; exists {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
 	}
-
-	// Check limits
 	projectCount := 0
 	globalCount := 0
 	for _, ms := range s.sessions {
-		if ms.info.State == SessionStateRunning || ms.info.State == SessionStateStarting {
+		if ms.info.State == SessionStateRunning || ms.info.State == SessionStateStarting || ms.info.State == SessionStateAttached {
 			globalCount++
 			if ms.info.ProjectID == cfg.ProjectID {
 				projectCount++
@@ -156,7 +137,6 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	}
 	s.mu.Unlock()
 
-	// Look up provider
 	provider, err := s.registry.Get(cfg.Options["provider"])
 	if err != nil {
 		return nil, err
@@ -165,253 +145,317 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
 
-	sessionCtx, cancel := context.WithCancel(context.Background())
+	if cfg.InitialCols == 0 {
+		cfg.InitialCols = 120
+	}
+	if cfg.InitialRows == 0 {
+		cfg.InitialRows = 40
+	}
 
-	handle, err := provider.Start(sessionCtx, cfg)
+	sessionCtx, cancel := context.WithCancel(context.Background())
+	cmd, err := provider.BuildCommand(sessionCtx, cfg)
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("start session: %w", err)
+		return nil, err
+	}
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
+		Cols: uint16(cfg.InitialCols),
+		Rows: uint16(cfg.InitialRows),
+	})
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("start pty session: %w", err)
 	}
 
-	buf := NewEventBuffer(s.bufSize)
-	subMgr := NewSubscriberManager(buf, s.subConfig)
-	now := time.Now().UTC()
-	info := SessionInfo{
-		SessionID: cfg.SessionID,
-		ProjectID: cfg.ProjectID,
-		Provider:  cfg.Options["provider"],
-		State:     SessionStateRunning,
-		CreatedAt: now,
-	}
-
+	now := nowUTC()
 	ms := &managedSession{
-		info:         info,
-		handle:       handle,
-		buf:          buf,
-		subMgr:       subMgr,
+		info: SessionInfo{
+			SessionID: cfg.SessionID,
+			ProjectID: cfg.ProjectID,
+			Provider:  provider.ID(),
+			State:     SessionStateRunning,
+			CreatedAt: now,
+			Cols:      cfg.InitialCols,
+			Rows:      cfg.InitialRows,
+		},
+		provider:     provider,
+		cmd:          cmd,
+		ptmx:         ptmx,
+		buf:          NewByteBuffer(s.bufSize),
 		cancel:       cancel,
-		lastActivity: time.Now(), // keep monotonic clock for reliable time.Since() comparisons
+		stopGrace:    provider.StopGrace(),
+		lastActivity: time.Now(),
 	}
 
 	s.mu.Lock()
-	// Double-check no race
 	if _, exists := s.sessions[cfg.SessionID]; exists {
 		s.mu.Unlock()
 		cancel()
-		_ = provider.Stop(handle)
+		_ = ptmx.Close()
 		return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
 	}
 	s.sessions[cfg.SessionID] = ms
 	s.mu.Unlock()
 
-	// Forward provider events to the event buffer
-	go s.forwardEvents(cfg.SessionID, provider, handle, buf)
+	go s.readLoop(ms)
+	go s.waitLoop(ms)
 
+	info := ms.snapshotInfo()
 	return &info, nil
 }
 
-// Stop terminates a session.
+func (s *Supervisor) readLoop(ms *managedSession) {
+	buf := make([]byte, 8192)
+	for {
+		n, err := ms.ptmx.Read(buf)
+		if n > 0 {
+			chunk := ms.buf.Append(buf[:n])
+			ms.mu.Lock()
+			ms.info.OldestSeq = ms.buf.OldestSeq()
+			ms.info.LastSeq = ms.buf.LastSeq()
+			ms.lastActivity = time.Now()
+			live := ms.live
+			ms.mu.Unlock()
+			if live != nil {
+				live <- chunk
+			}
+		}
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				ms.mu.Lock()
+				if ms.info.Error == "" && !ms.info.ExitRecorded {
+					ms.info.Error = err.Error()
+				}
+				ms.mu.Unlock()
+			}
+			return
+		}
+	}
+}
+
+func (s *Supervisor) waitLoop(ms *managedSession) {
+	err := ms.cmd.Wait()
+
+	exitCode := 0
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	ms.mu.Lock()
+	ms.info.StoppedAt = nowUTC()
+	ms.info.ExitRecorded = true
+	ms.info.ExitCode = exitCode
+	if err != nil && !ms.forceStop {
+		ms.info.State = SessionStateFailed
+		if ms.info.Error == "" {
+			ms.info.Error = err.Error()
+		}
+	} else {
+		ms.info.State = SessionStateStopped
+	}
+	ms.cancel()
+	ms.mu.Unlock()
+}
+
 func (s *Supervisor) Stop(sessionID string, force bool) error {
-	s.mu.Lock()
+	s.mu.RLock()
 	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
 	if !ok {
-		s.mu.Unlock()
 		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
+
+	ms.mu.Lock()
 	if ms.info.State == SessionStateStopped || ms.info.State == SessionStateFailed {
-		s.mu.Unlock()
+		ms.mu.Unlock()
 		return nil
 	}
 	ms.info.State = SessionStateStopping
-	s.mu.Unlock()
+	ms.forceStop = force
+	pid := ms.cmd.Process.Pid
+	grace := ms.stopGrace
+	ms.mu.Unlock()
 
-	provider, err := s.registry.Get(ms.info.Provider)
-	if err != nil {
-		return err
+	if force {
+		if pid > 0 {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	if pid > 0 {
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
 	}
 
-	if err := provider.Stop(ms.handle); err != nil {
-		return fmt.Errorf("stop session: %w", err)
-	}
-
-	s.mu.Lock()
-	ms.info.State = SessionStateStopped
-	ms.info.StoppedAt = time.Now().UTC()
-	ms.cancel()
-	s.mu.Unlock()
-
+	go func() {
+		time.Sleep(grace)
+		ms.mu.Lock()
+		state := ms.info.State
+		pid := ms.cmd.Process.Pid
+		ms.mu.Unlock()
+		if state == SessionStateStopping && pid > 0 {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+		}
+	}()
 	return nil
 }
 
-// Send writes input to a session's agent.
-func (s *Supervisor) Send(sessionID, text string) (uint64, error) {
-	if err := s.policy.ValidateInput(text); err != nil {
+func (s *Supervisor) WriteInput(sessionID, clientID string, data []byte) (int, error) {
+	if err := s.policy.ValidateInputBytes(data); err != nil {
 		return 0, err
 	}
-
 	s.mu.RLock()
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
 		return 0, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
-	if ms.info.State != SessionStateRunning {
-		return 0, fmt.Errorf("%w: %q (state=%d)", ErrSessionNotRunning, sessionID, ms.info.State)
+	ms.mu.Lock()
+	if ms.attachedClient == "" {
+		ms.mu.Unlock()
+		return 0, ErrClientNotAttached
 	}
-
-	provider, err := s.registry.Get(ms.info.Provider)
+	if ms.attachedClient != clientID {
+		ms.mu.Unlock()
+		return 0, ErrClientMismatch
+	}
+	ms.lastActivity = time.Now()
+	ms.mu.Unlock()
+	n, err := ms.ptmx.Write(data)
 	if err != nil {
-		return 0, err
+		return n, err
 	}
-
-	if err := provider.Send(ms.handle, text); err != nil {
-		return 0, err
-	}
-
-	s.mu.Lock()
-	ms.lastActivity = time.Now() // keep monotonic clock for reliable time.Since() comparisons
-	s.mu.Unlock()
-
-	seq := ms.buf.Append(Event{
-		Timestamp: time.Now().UTC(),
-		SessionID: sessionID,
-		ProjectID: ms.info.ProjectID,
-		Provider:  ms.info.Provider,
-		Type:      EventTypeInputReceived,
-		Stream:    "system",
-		Text:      s.redactString(text),
-	})
-
-	return seq, nil
+	return n, nil
 }
 
-// Get returns info about a session.
-func (s *Supervisor) Get(sessionID string) (*SessionInfo, error) {
+func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+	}
+	ms.mu.Lock()
+	if ms.attachedClient == "" {
+		ms.mu.Unlock()
+		return ErrClientNotAttached
+	}
+	if ms.attachedClient != clientID {
+		ms.mu.Unlock()
+		return ErrClientMismatch
+	}
+	ms.info.Cols = cols
+	ms.info.Rows = rows
+	ms.lastActivity = time.Now()
+	ms.mu.Unlock()
+	return pty.Setsize(ms.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+}
+
+func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*AttachState, error) {
+	s.mu.RLock()
+	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
-	info := ms.info // copy
+
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	if ms.attachedClient != "" {
+		return nil, ErrSessionAlreadyAttached
+	}
+	ms.attachedClient = clientID
+	ms.live = make(chan OutputChunk, 128)
+	ms.info.Attached = true
+	ms.info.AttachedClientID = clientID
+	ms.info.State = SessionStateAttached
+	ms.lastActivity = time.Now()
+
+	oldest := ms.buf.OldestSeq()
+	last := ms.buf.LastSeq()
+	return &AttachState{
+		ClientID:     clientID,
+		Replay:       ms.buf.After(afterSeq),
+		Live:         ms.live,
+		ReplayGap:    oldest > 0 && afterSeq > 0 && afterSeq < oldest-1,
+		OldestSeq:    oldest,
+		LastSeq:      last,
+		ExitRecorded: ms.info.ExitRecorded,
+		ExitCode:     ms.info.ExitCode,
+		Cols:         ms.info.Cols,
+		Rows:         ms.info.Rows,
+	}, nil
+}
+
+func (s *Supervisor) Detach(sessionID, clientID string) error {
+	s.mu.RLock()
+	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	if ms.attachedClient != clientID {
+		return ErrClientMismatch
+	}
+	ms.attachedClient = ""
+	ms.live = nil
+	ms.info.Attached = false
+	ms.info.AttachedClientID = ""
+	if ms.info.State == SessionStateAttached {
+		ms.info.State = SessionStateRunning
+	}
+	return nil
+}
+
+func (s *Supervisor) Get(sessionID string) (*SessionInfo, error) {
+	s.mu.RLock()
+	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+	}
+	info := ms.snapshotInfo()
 	return &info, nil
 }
 
-// List returns all sessions, optionally filtered by project.
 func (s *Supervisor) List(projectID string) []SessionInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var result []SessionInfo
+	out := make([]SessionInfo, 0, len(s.sessions))
 	for _, ms := range s.sessions {
-		if projectID == "" || ms.info.ProjectID == projectID {
-			result = append(result, ms.info)
+		info := ms.snapshotInfo()
+		if projectID != "" && info.ProjectID != projectID {
+			continue
 		}
+		out = append(out, info)
 	}
-	return result
+	return out
 }
 
-// EventBuffer returns the event buffer for a session.
-func (s *Supervisor) EventBuffer(sessionID string) (*EventBuffer, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ms, ok := s.sessions[sessionID]
-	if !ok {
-		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
-	}
-	return ms.buf, nil
-}
-
-// SubscriberManager returns the subscriber manager for a session.
-func (s *Supervisor) SubscriberManager(sessionID string) (*SubscriberManager, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ms, ok := s.sessions[sessionID]
-	if !ok {
-		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
-	}
-	return ms.subMgr, nil
-}
-
-// ActiveCount returns the number of running sessions globally and for a project.
-func (s *Supervisor) ActiveCount(projectID string) (project, global int) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, ms := range s.sessions {
-		if ms.info.State == SessionStateRunning || ms.info.State == SessionStateStarting {
-			global++
-			if ms.info.ProjectID == projectID {
-				project++
-			}
-		}
-	}
-	return
-}
-
-// Close stops all running sessions and background goroutines.
 func (s *Supervisor) Close() {
-	// Signal cleanup goroutine to stop.
-	select {
-	case <-s.done:
-		// Already closed.
-	default:
-		close(s.done)
+	close(s.done)
+	s.mu.RLock()
+	ids := make([]string, 0, len(s.sessions))
+	for id := range s.sessions {
+		ids = append(ids, id)
 	}
-
-	s.mu.Lock()
-	sessions := make(map[string]*managedSession, len(s.sessions))
-	for k, v := range s.sessions {
-		sessions[k] = v
-	}
-	s.mu.Unlock()
-
-	for id := range sessions {
+	s.mu.RUnlock()
+	for _, id := range ids {
 		_ = s.Stop(id, true)
 	}
 }
 
-func (s *Supervisor) forwardEvents(sessionID string, provider Provider, handle SessionHandle, buf *EventBuffer) {
-	events := provider.Events(handle)
-	if events == nil {
-		return
-	}
-	for e := range events {
-		e.Text = s.redactString(e.Text)
-		e.Error = s.redactString(e.Error)
-
-		// Override text with stop reason for idle-timeout terminations.
-		if e.Done && e.Type == EventTypeSessionStopped {
-			s.mu.RLock()
-			if ms, ok := s.sessions[sessionID]; ok && ms.stopReason != "" {
-				e.Text = ms.stopReason
-			}
-			s.mu.RUnlock()
-		}
-
-		buf.Append(e)
-
-		// Update session state on terminal events
-		if e.Done {
-			s.mu.Lock()
-			if ms, ok := s.sessions[sessionID]; ok {
-				if e.Type == EventTypeSessionFailed {
-					ms.info.State = SessionStateFailed
-					ms.info.Error = e.Error
-				} else if e.Type == EventTypeSessionStopped {
-					ms.info.State = SessionStateStopped
-				}
-				ms.info.StoppedAt = time.Now().UTC()
-			}
-			s.mu.Unlock()
-		}
-	}
-}
-
-func (s *Supervisor) redactString(text string) string {
-	s.mu.RLock()
-	fn := s.redact
-	s.mu.RUnlock()
-	if fn == nil {
-		return text
-	}
-	return fn(text)
+func (ms *managedSession) snapshotInfo() SessionInfo {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	info := ms.info
+	info.OldestSeq = ms.buf.OldestSeq()
+	info.LastSeq = ms.buf.LastSeq()
+	return info
 }

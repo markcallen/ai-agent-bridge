@@ -1,0 +1,11 @@
+{
+  "target": "claude",
+  "agents": [
+    "local-dev",
+    "cicd",
+    "observability",
+    "linting",
+    "logging",
+    "testing"
+  ]
+}

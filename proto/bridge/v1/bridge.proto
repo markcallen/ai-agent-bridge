@@ -6,52 +6,38 @@ option go_package = "github.com/markcallen/ai-agent-bridge/gen/bridge/v1;bridgev
 
 import "google/protobuf/timestamp.proto";
 
-// BridgeService manages AI agent sessions across providers.
 service BridgeService {
-  // Session lifecycle
   rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
   rpc StopSession(StopSessionRequest) returns (StopSessionResponse);
   rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
 
-  // Command routing
-  rpc SendInput(SendInputRequest) returns (SendInputResponse);
+  rpc AttachSession(AttachSessionRequest) returns (stream AttachSessionEvent);
+  rpc WriteInput(WriteInputRequest) returns (WriteInputResponse);
+  rpc ResizeSession(ResizeSessionRequest) returns (ResizeSessionResponse);
 
-  // Event streaming
-  rpc StreamEvents(StreamEventsRequest) returns (stream SessionEvent);
-
-  // Health and discovery
   rpc Health(HealthRequest) returns (HealthResponse);
   rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
 }
-
-// --- Enums ---
 
 enum SessionStatus {
   SESSION_STATUS_UNSPECIFIED = 0;
   SESSION_STATUS_STARTING = 1;
   SESSION_STATUS_RUNNING = 2;
-  SESSION_STATUS_STOPPING = 3;
-  SESSION_STATUS_STOPPED = 4;
-  SESSION_STATUS_FAILED = 5;
+  SESSION_STATUS_ATTACHED = 3;
+  SESSION_STATUS_STOPPING = 4;
+  SESSION_STATUS_STOPPED = 5;
+  SESSION_STATUS_FAILED = 6;
 }
 
-enum EventType {
-  EVENT_TYPE_UNSPECIFIED = 0;
-  EVENT_TYPE_SESSION_STARTED = 1;
-  EVENT_TYPE_SESSION_STOPPED = 2;
-  EVENT_TYPE_SESSION_FAILED = 3;
-  EVENT_TYPE_STDOUT = 4;
-  EVENT_TYPE_STDERR = 5;
-  EVENT_TYPE_INPUT_RECEIVED = 6;
-  EVENT_TYPE_BUFFER_OVERFLOW = 7;
-  // Agent is ready and waiting for the first input.
-  EVENT_TYPE_AGENT_READY = 8;
-  // Agent has finished responding to the last input; safe to prompt again.
-  EVENT_TYPE_RESPONSE_COMPLETE = 9;
+enum AttachEventType {
+  ATTACH_EVENT_TYPE_UNSPECIFIED = 0;
+  ATTACH_EVENT_TYPE_ATTACHED = 1;
+  ATTACH_EVENT_TYPE_OUTPUT = 2;
+  ATTACH_EVENT_TYPE_REPLAY_GAP = 3;
+  ATTACH_EVENT_TYPE_SESSION_EXIT = 4;
+  ATTACH_EVENT_TYPE_ERROR = 5;
 }
-
-// --- Session lifecycle ---
 
 message StartSessionRequest {
   string project_id = 1;
@@ -59,6 +45,8 @@ message StartSessionRequest {
   string repo_path = 3;
   string provider = 4;
   map<string, string> agent_opts = 5;
+  uint32 initial_cols = 6;
+  uint32 initial_rows = 7;
 }
 
 message StartSessionResponse {
@@ -88,51 +76,67 @@ message GetSessionResponse {
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Timestamp stopped_at = 6;
   string error = 7;
+  bool attached = 8;
+  string attached_client_id = 9;
+  bool exit_recorded = 10;
+  int32 exit_code = 11;
+  uint64 oldest_seq = 12;
+  uint64 last_seq = 13;
+  uint32 cols = 14;
+  uint32 rows = 15;
 }
 
 message ListSessionsRequest {
-  string project_id = 1;  // optional filter
+  string project_id = 1;
 }
 
 message ListSessionsResponse {
   repeated GetSessionResponse sessions = 1;
 }
 
-// --- Command routing ---
-
-message SendInputRequest {
-  string session_id = 1;
-  string text = 2;
-  string idempotency_key = 3;
-}
-
-message SendInputResponse {
-  bool accepted = 1;
-  uint64 seq = 2;
-}
-
-// --- Event streaming ---
-
-message StreamEventsRequest {
+message AttachSessionRequest {
   string session_id = 1;
   uint64 after_seq = 2;
-  string subscriber_id = 3;
+  string client_id = 3;
 }
 
-message SessionEvent {
-  uint64 seq = 1;
-  google.protobuf.Timestamp timestamp = 2;
-  string session_id = 3;
-  string project_id = 4;
-  string provider = 5;
-  EventType type = 6;
-  string stream = 7;
-  string text = 8;
-  bool done = 9;
-  string error = 10;
+message AttachSessionEvent {
+  AttachEventType type = 1;
+  uint64 seq = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string session_id = 4;
+  bytes payload = 5;
+  bool replay = 6;
+  uint64 oldest_seq = 7;
+  uint64 last_seq = 8;
+  bool exit_recorded = 9;
+  int32 exit_code = 10;
+  string error = 11;
+  uint32 cols = 12;
+  uint32 rows = 13;
 }
 
-// --- Health ---
+message WriteInputRequest {
+  string session_id = 1;
+  string client_id = 2;
+  bytes data = 3;
+}
+
+message WriteInputResponse {
+  bool accepted = 1;
+  uint32 bytes_written = 2;
+}
+
+message ResizeSessionRequest {
+  string session_id = 1;
+  string client_id = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+
+message ResizeSessionResponse {
+  bool applied = 1;
+}
 
 message HealthRequest {}
 
@@ -146,8 +150,6 @@ message ProviderHealth {
   bool available = 2;
   string error = 3;
 }
-
-// --- Provider discovery ---
 
 message ListProvidersRequest {}
 

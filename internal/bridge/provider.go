@@ -2,73 +2,68 @@ package bridge
 
 import (
 	"context"
+	"os/exec"
+	"regexp"
 	"time"
 )
 
-// Provider defines the interface that all AI agent adapters must implement.
+// Provider describes an interactive PTY-backed CLI provider.
 type Provider interface {
-	// ID returns the provider identifier (e.g. "codex", "claude", "opencode").
 	ID() string
-
-	// Start spawns a new agent session and returns a handle.
-	Start(ctx context.Context, cfg SessionConfig) (SessionHandle, error)
-
-	// Send writes input text to the agent's stdin.
-	Send(handle SessionHandle, text string) error
-
-	// Stop terminates the agent session.
-	Stop(handle SessionHandle) error
-
-	// Events returns a channel that emits events from the agent.
-	Events(handle SessionHandle) <-chan Event
-
-	// Health checks if the provider binary is available.
+	Binary() string
+	PromptPattern() *regexp.Regexp
+	StartupTimeout() time.Duration
+	StopGrace() time.Duration
+	BuildCommand(ctx context.Context, cfg SessionConfig) (*exec.Cmd, error)
+	ValidateStartup(ctx context.Context) error
 	Health(ctx context.Context) error
-
-	// Version returns the version string of the provider binary.
 	Version(ctx context.Context) (string, error)
 }
 
-// SessionConfig holds configuration for starting a new agent session.
+// SessionConfig holds configuration for starting a new provider session.
 type SessionConfig struct {
-	ProjectID string
-	SessionID string
-	RepoPath  string
-	Options   map[string]string
+	ProjectID   string
+	SessionID   string
+	RepoPath    string
+	Options     map[string]string
+	InitialCols uint32
+	InitialRows uint32
 }
 
-// SessionHandle represents a running agent session.
-type SessionHandle interface {
-	ID() string
-	PID() int
-}
-
-// Event represents a single event emitted by an agent session.
-type Event struct {
-	Timestamp time.Time
-	SessionID string
-	ProjectID string
-	Provider  string
-	Type      EventType
-	Stream    string // "system", "stdout", "stderr"
-	Text      string
-	Done      bool
-	Error     string
-}
-
-// EventType enumerates the types of events an agent can emit.
-type EventType int
+// SessionState represents the lifecycle state of a session.
+type SessionState int
 
 const (
-	EventTypeSessionStarted EventType = iota + 1
-	EventTypeSessionStopped
-	EventTypeSessionFailed
-	EventTypeStdout
-	EventTypeStderr
-	EventTypeInputReceived
-	EventTypeBufferOverflow
-	// EventTypeAgentReady signals that the agent process is ready for input.
-	EventTypeAgentReady
-	// EventTypeResponseComplete signals that the agent has finished responding.
-	EventTypeResponseComplete
+	SessionStateStarting SessionState = iota + 1
+	SessionStateRunning
+	SessionStateAttached
+	SessionStateStopping
+	SessionStateStopped
+	SessionStateFailed
 )
+
+// SessionInfo holds metadata about a running session.
+type SessionInfo struct {
+	SessionID        string
+	ProjectID        string
+	Provider         string
+	State            SessionState
+	CreatedAt        time.Time
+	StoppedAt        time.Time
+	Error            string
+	Attached         bool
+	AttachedClientID string
+	ExitRecorded     bool
+	ExitCode         int
+	OldestSeq        uint64
+	LastSeq          uint64
+	Cols             uint32
+	Rows             uint32
+}
+
+// OutputChunk is one retained PTY byte chunk.
+type OutputChunk struct {
+	Seq       uint64
+	Timestamp time.Time
+	Payload   []byte
+}

@@ -55,3 +55,13 @@ func validateOptionalStringField(name, value string, maxLen int, allowWhitespace
 	}
 	return validateStringField(name, value, maxLen, allowWhitespaceControl)
 }
+
+func validateByteField(name string, value []byte, maxLen int) error {
+	if len(value) == 0 {
+		return status.Errorf(codes.InvalidArgument, "%s is required", name)
+	}
+	if len(value) > maxLen {
+		return status.Errorf(codes.InvalidArgument, "%s exceeds max length %d", name, maxLen)
+	}
+	return nil
+}

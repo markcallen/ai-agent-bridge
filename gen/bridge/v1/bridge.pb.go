@@ -7,13 +7,12 @@
 package bridgev1
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -29,9 +28,10 @@ const (
 	SessionStatus_SESSION_STATUS_UNSPECIFIED SessionStatus = 0
 	SessionStatus_SESSION_STATUS_STARTING    SessionStatus = 1
 	SessionStatus_SESSION_STATUS_RUNNING     SessionStatus = 2
-	SessionStatus_SESSION_STATUS_STOPPING    SessionStatus = 3
-	SessionStatus_SESSION_STATUS_STOPPED     SessionStatus = 4
-	SessionStatus_SESSION_STATUS_FAILED      SessionStatus = 5
+	SessionStatus_SESSION_STATUS_ATTACHED    SessionStatus = 3
+	SessionStatus_SESSION_STATUS_STOPPING    SessionStatus = 4
+	SessionStatus_SESSION_STATUS_STOPPED     SessionStatus = 5
+	SessionStatus_SESSION_STATUS_FAILED      SessionStatus = 6
 )
 
 // Enum value maps for SessionStatus.
@@ -40,17 +40,19 @@ var (
 		0: "SESSION_STATUS_UNSPECIFIED",
 		1: "SESSION_STATUS_STARTING",
 		2: "SESSION_STATUS_RUNNING",
-		3: "SESSION_STATUS_STOPPING",
-		4: "SESSION_STATUS_STOPPED",
-		5: "SESSION_STATUS_FAILED",
+		3: "SESSION_STATUS_ATTACHED",
+		4: "SESSION_STATUS_STOPPING",
+		5: "SESSION_STATUS_STOPPED",
+		6: "SESSION_STATUS_FAILED",
 	}
 	SessionStatus_value = map[string]int32{
 		"SESSION_STATUS_UNSPECIFIED": 0,
 		"SESSION_STATUS_STARTING":    1,
 		"SESSION_STATUS_RUNNING":     2,
-		"SESSION_STATUS_STOPPING":    3,
-		"SESSION_STATUS_STOPPED":     4,
-		"SESSION_STATUS_FAILED":      5,
+		"SESSION_STATUS_ATTACHED":    3,
+		"SESSION_STATUS_STOPPING":    4,
+		"SESSION_STATUS_STOPPED":     5,
+		"SESSION_STATUS_FAILED":      6,
 	}
 )
 
@@ -81,75 +83,61 @@ func (SessionStatus) EnumDescriptor() ([]byte, []int) {
 	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{0}
 }
 
-type EventType int32
+type AttachEventType int32
 
 const (
-	EventType_EVENT_TYPE_UNSPECIFIED     EventType = 0
-	EventType_EVENT_TYPE_SESSION_STARTED EventType = 1
-	EventType_EVENT_TYPE_SESSION_STOPPED EventType = 2
-	EventType_EVENT_TYPE_SESSION_FAILED  EventType = 3
-	EventType_EVENT_TYPE_STDOUT          EventType = 4
-	EventType_EVENT_TYPE_STDERR          EventType = 5
-	EventType_EVENT_TYPE_INPUT_RECEIVED  EventType = 6
-	EventType_EVENT_TYPE_BUFFER_OVERFLOW EventType = 7
-	// Agent is ready and waiting for the first input.
-	EventType_EVENT_TYPE_AGENT_READY EventType = 8
-	// Agent has finished responding to the last input; safe to prompt again.
-	EventType_EVENT_TYPE_RESPONSE_COMPLETE EventType = 9
+	AttachEventType_ATTACH_EVENT_TYPE_UNSPECIFIED  AttachEventType = 0
+	AttachEventType_ATTACH_EVENT_TYPE_ATTACHED     AttachEventType = 1
+	AttachEventType_ATTACH_EVENT_TYPE_OUTPUT       AttachEventType = 2
+	AttachEventType_ATTACH_EVENT_TYPE_REPLAY_GAP   AttachEventType = 3
+	AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT AttachEventType = 4
+	AttachEventType_ATTACH_EVENT_TYPE_ERROR        AttachEventType = 5
 )
 
-// Enum value maps for EventType.
+// Enum value maps for AttachEventType.
 var (
-	EventType_name = map[int32]string{
-		0: "EVENT_TYPE_UNSPECIFIED",
-		1: "EVENT_TYPE_SESSION_STARTED",
-		2: "EVENT_TYPE_SESSION_STOPPED",
-		3: "EVENT_TYPE_SESSION_FAILED",
-		4: "EVENT_TYPE_STDOUT",
-		5: "EVENT_TYPE_STDERR",
-		6: "EVENT_TYPE_INPUT_RECEIVED",
-		7: "EVENT_TYPE_BUFFER_OVERFLOW",
-		8: "EVENT_TYPE_AGENT_READY",
-		9: "EVENT_TYPE_RESPONSE_COMPLETE",
+	AttachEventType_name = map[int32]string{
+		0: "ATTACH_EVENT_TYPE_UNSPECIFIED",
+		1: "ATTACH_EVENT_TYPE_ATTACHED",
+		2: "ATTACH_EVENT_TYPE_OUTPUT",
+		3: "ATTACH_EVENT_TYPE_REPLAY_GAP",
+		4: "ATTACH_EVENT_TYPE_SESSION_EXIT",
+		5: "ATTACH_EVENT_TYPE_ERROR",
 	}
-	EventType_value = map[string]int32{
-		"EVENT_TYPE_UNSPECIFIED":       0,
-		"EVENT_TYPE_SESSION_STARTED":   1,
-		"EVENT_TYPE_SESSION_STOPPED":   2,
-		"EVENT_TYPE_SESSION_FAILED":    3,
-		"EVENT_TYPE_STDOUT":            4,
-		"EVENT_TYPE_STDERR":            5,
-		"EVENT_TYPE_INPUT_RECEIVED":    6,
-		"EVENT_TYPE_BUFFER_OVERFLOW":   7,
-		"EVENT_TYPE_AGENT_READY":       8,
-		"EVENT_TYPE_RESPONSE_COMPLETE": 9,
+	AttachEventType_value = map[string]int32{
+		"ATTACH_EVENT_TYPE_UNSPECIFIED":  0,
+		"ATTACH_EVENT_TYPE_ATTACHED":     1,
+		"ATTACH_EVENT_TYPE_OUTPUT":       2,
+		"ATTACH_EVENT_TYPE_REPLAY_GAP":   3,
+		"ATTACH_EVENT_TYPE_SESSION_EXIT": 4,
+		"ATTACH_EVENT_TYPE_ERROR":        5,
 	}
 )
 
-func (x EventType) Enum() *EventType {
-	p := new(EventType)
+func (x AttachEventType) Enum() *AttachEventType {
+	p := new(AttachEventType)
 	*p = x
 	return p
 }
 
-func (x EventType) String() string {
+func (x AttachEventType) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (EventType) Descriptor() protoreflect.EnumDescriptor {
+func (AttachEventType) Descriptor() protoreflect.EnumDescriptor {
 	return file_bridge_v1_bridge_proto_enumTypes[1].Descriptor()
 }
 
-func (EventType) Type() protoreflect.EnumType {
+func (AttachEventType) Type() protoreflect.EnumType {
 	return &file_bridge_v1_bridge_proto_enumTypes[1]
 }
 
-func (x EventType) Number() protoreflect.EnumNumber {
+func (x AttachEventType) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use EventType.Descriptor instead.
-func (EventType) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use AttachEventType.Descriptor instead.
+func (AttachEventType) EnumDescriptor() ([]byte, []int) {
 	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{1}
 }
 
@@ -160,6 +148,8 @@ type StartSessionRequest struct {
 	RepoPath      string                 `protobuf:"bytes,3,opt,name=repo_path,json=repoPath,proto3" json:"repo_path,omitempty"`
 	Provider      string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
 	AgentOpts     map[string]string      `protobuf:"bytes,5,rep,name=agent_opts,json=agentOpts,proto3" json:"agent_opts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	InitialCols   uint32                 `protobuf:"varint,6,opt,name=initial_cols,json=initialCols,proto3" json:"initial_cols,omitempty"`
+	InitialRows   uint32                 `protobuf:"varint,7,opt,name=initial_rows,json=initialRows,proto3" json:"initial_rows,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -227,6 +217,20 @@ func (x *StartSessionRequest) GetAgentOpts() map[string]string {
 		return x.AgentOpts
 	}
 	return nil
+}
+
+func (x *StartSessionRequest) GetInitialCols() uint32 {
+	if x != nil {
+		return x.InitialCols
+	}
+	return 0
+}
+
+func (x *StartSessionRequest) GetInitialRows() uint32 {
+	if x != nil {
+		return x.InitialRows
+	}
+	return 0
 }
 
 type StartSessionResponse struct {
@@ -430,16 +434,24 @@ func (x *GetSessionRequest) GetSessionId() string {
 }
 
 type GetSessionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	ProjectId     string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	Provider      string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
-	Status        SessionStatus          `protobuf:"varint,4,opt,name=status,proto3,enum=bridge.v1.SessionStatus" json:"status,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	StoppedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=stopped_at,json=stoppedAt,proto3" json:"stopped_at,omitempty"`
-	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	SessionId        string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ProjectId        string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	Provider         string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
+	Status           SessionStatus          `protobuf:"varint,4,opt,name=status,proto3,enum=bridge.v1.SessionStatus" json:"status,omitempty"`
+	CreatedAt        *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	StoppedAt        *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=stopped_at,json=stoppedAt,proto3" json:"stopped_at,omitempty"`
+	Error            string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
+	Attached         bool                   `protobuf:"varint,8,opt,name=attached,proto3" json:"attached,omitempty"`
+	AttachedClientId string                 `protobuf:"bytes,9,opt,name=attached_client_id,json=attachedClientId,proto3" json:"attached_client_id,omitempty"`
+	ExitRecorded     bool                   `protobuf:"varint,10,opt,name=exit_recorded,json=exitRecorded,proto3" json:"exit_recorded,omitempty"`
+	ExitCode         int32                  `protobuf:"varint,11,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	OldestSeq        uint64                 `protobuf:"varint,12,opt,name=oldest_seq,json=oldestSeq,proto3" json:"oldest_seq,omitempty"`
+	LastSeq          uint64                 `protobuf:"varint,13,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
+	Cols             uint32                 `protobuf:"varint,14,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows             uint32                 `protobuf:"varint,15,opt,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetSessionResponse) Reset() {
@@ -521,9 +533,65 @@ func (x *GetSessionResponse) GetError() string {
 	return ""
 }
 
+func (x *GetSessionResponse) GetAttached() bool {
+	if x != nil {
+		return x.Attached
+	}
+	return false
+}
+
+func (x *GetSessionResponse) GetAttachedClientId() string {
+	if x != nil {
+		return x.AttachedClientId
+	}
+	return ""
+}
+
+func (x *GetSessionResponse) GetExitRecorded() bool {
+	if x != nil {
+		return x.ExitRecorded
+	}
+	return false
+}
+
+func (x *GetSessionResponse) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *GetSessionResponse) GetOldestSeq() uint64 {
+	if x != nil {
+		return x.OldestSeq
+	}
+	return 0
+}
+
+func (x *GetSessionResponse) GetLastSeq() uint64 {
+	if x != nil {
+		return x.LastSeq
+	}
+	return 0
+}
+
+func (x *GetSessionResponse) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *GetSessionResponse) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
 type ListSessionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"` // optional filter
+	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -609,142 +677,30 @@ func (x *ListSessionsResponse) GetSessions() []*GetSessionResponse {
 	return nil
 }
 
-type SendInputRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	SessionId      string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Text           string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
-	IdempotencyKey string                 `protobuf:"bytes,3,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *SendInputRequest) Reset() {
-	*x = SendInputRequest{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SendInputRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SendInputRequest) ProtoMessage() {}
-
-func (x *SendInputRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SendInputRequest.ProtoReflect.Descriptor instead.
-func (*SendInputRequest) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *SendInputRequest) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *SendInputRequest) GetText() string {
-	if x != nil {
-		return x.Text
-	}
-	return ""
-}
-
-func (x *SendInputRequest) GetIdempotencyKey() string {
-	if x != nil {
-		return x.IdempotencyKey
-	}
-	return ""
-}
-
-type SendInputResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
-	Seq           uint64                 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SendInputResponse) Reset() {
-	*x = SendInputResponse{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[9]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SendInputResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SendInputResponse) ProtoMessage() {}
-
-func (x *SendInputResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[9]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SendInputResponse.ProtoReflect.Descriptor instead.
-func (*SendInputResponse) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *SendInputResponse) GetAccepted() bool {
-	if x != nil {
-		return x.Accepted
-	}
-	return false
-}
-
-func (x *SendInputResponse) GetSeq() uint64 {
-	if x != nil {
-		return x.Seq
-	}
-	return 0
-}
-
-type StreamEventsRequest struct {
+type AttachSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	AfterSeq      uint64                 `protobuf:"varint,2,opt,name=after_seq,json=afterSeq,proto3" json:"after_seq,omitempty"`
-	SubscriberId  string                 `protobuf:"bytes,3,opt,name=subscriber_id,json=subscriberId,proto3" json:"subscriber_id,omitempty"`
+	ClientId      string                 `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StreamEventsRequest) Reset() {
-	*x = StreamEventsRequest{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[10]
+func (x *AttachSessionRequest) Reset() {
+	*x = AttachSessionRequest{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StreamEventsRequest) String() string {
+func (x *AttachSessionRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StreamEventsRequest) ProtoMessage() {}
+func (*AttachSessionRequest) ProtoMessage() {}
 
-func (x *StreamEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[10]
+func (x *AttachSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -755,62 +711,254 @@ func (x *StreamEventsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StreamEventsRequest.ProtoReflect.Descriptor instead.
-func (*StreamEventsRequest) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{10}
+// Deprecated: Use AttachSessionRequest.ProtoReflect.Descriptor instead.
+func (*AttachSessionRequest) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *StreamEventsRequest) GetSessionId() string {
+func (x *AttachSessionRequest) GetSessionId() string {
 	if x != nil {
 		return x.SessionId
 	}
 	return ""
 }
 
-func (x *StreamEventsRequest) GetAfterSeq() uint64 {
+func (x *AttachSessionRequest) GetAfterSeq() uint64 {
 	if x != nil {
 		return x.AfterSeq
 	}
 	return 0
 }
 
-func (x *StreamEventsRequest) GetSubscriberId() string {
+func (x *AttachSessionRequest) GetClientId() string {
 	if x != nil {
-		return x.SubscriberId
+		return x.ClientId
 	}
 	return ""
 }
 
-type SessionEvent struct {
+type AttachSessionEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Seq           uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
-	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	ProjectId     string                 `protobuf:"bytes,4,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	Provider      string                 `protobuf:"bytes,5,opt,name=provider,proto3" json:"provider,omitempty"`
-	Type          EventType              `protobuf:"varint,6,opt,name=type,proto3,enum=bridge.v1.EventType" json:"type,omitempty"`
-	Stream        string                 `protobuf:"bytes,7,opt,name=stream,proto3" json:"stream,omitempty"`
-	Text          string                 `protobuf:"bytes,8,opt,name=text,proto3" json:"text,omitempty"`
-	Done          bool                   `protobuf:"varint,9,opt,name=done,proto3" json:"done,omitempty"`
-	Error         string                 `protobuf:"bytes,10,opt,name=error,proto3" json:"error,omitempty"`
+	Type          AttachEventType        `protobuf:"varint,1,opt,name=type,proto3,enum=bridge.v1.AttachEventType" json:"type,omitempty"`
+	Seq           uint64                 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
+	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	Replay        bool                   `protobuf:"varint,6,opt,name=replay,proto3" json:"replay,omitempty"`
+	OldestSeq     uint64                 `protobuf:"varint,7,opt,name=oldest_seq,json=oldestSeq,proto3" json:"oldest_seq,omitempty"`
+	LastSeq       uint64                 `protobuf:"varint,8,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
+	ExitRecorded  bool                   `protobuf:"varint,9,opt,name=exit_recorded,json=exitRecorded,proto3" json:"exit_recorded,omitempty"`
+	ExitCode      int32                  `protobuf:"varint,10,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Error         string                 `protobuf:"bytes,11,opt,name=error,proto3" json:"error,omitempty"`
+	Cols          uint32                 `protobuf:"varint,12,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32                 `protobuf:"varint,13,opt,name=rows,proto3" json:"rows,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionEvent) Reset() {
-	*x = SessionEvent{}
+func (x *AttachSessionEvent) Reset() {
+	*x = AttachSessionEvent{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttachSessionEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttachSessionEvent) ProtoMessage() {}
+
+func (x *AttachSessionEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttachSessionEvent.ProtoReflect.Descriptor instead.
+func (*AttachSessionEvent) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AttachSessionEvent) GetType() AttachEventType {
+	if x != nil {
+		return x.Type
+	}
+	return AttachEventType_ATTACH_EVENT_TYPE_UNSPECIFIED
+}
+
+func (x *AttachSessionEvent) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *AttachSessionEvent) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+func (x *AttachSessionEvent) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *AttachSessionEvent) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *AttachSessionEvent) GetReplay() bool {
+	if x != nil {
+		return x.Replay
+	}
+	return false
+}
+
+func (x *AttachSessionEvent) GetOldestSeq() uint64 {
+	if x != nil {
+		return x.OldestSeq
+	}
+	return 0
+}
+
+func (x *AttachSessionEvent) GetLastSeq() uint64 {
+	if x != nil {
+		return x.LastSeq
+	}
+	return 0
+}
+
+func (x *AttachSessionEvent) GetExitRecorded() bool {
+	if x != nil {
+		return x.ExitRecorded
+	}
+	return false
+}
+
+func (x *AttachSessionEvent) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *AttachSessionEvent) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *AttachSessionEvent) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *AttachSessionEvent) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+type WriteInputRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ClientId      string                 `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteInputRequest) Reset() {
+	*x = WriteInputRequest{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriteInputRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriteInputRequest) ProtoMessage() {}
+
+func (x *WriteInputRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriteInputRequest.ProtoReflect.Descriptor instead.
+func (*WriteInputRequest) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *WriteInputRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *WriteInputRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *WriteInputRequest) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type WriteInputResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	BytesWritten  uint32                 `protobuf:"varint,2,opt,name=bytes_written,json=bytesWritten,proto3" json:"bytes_written,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteInputResponse) Reset() {
+	*x = WriteInputResponse{}
 	mi := &file_bridge_v1_bridge_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionEvent) String() string {
+func (x *WriteInputResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SessionEvent) ProtoMessage() {}
+func (*WriteInputResponse) ProtoMessage() {}
 
-func (x *SessionEvent) ProtoReflect() protoreflect.Message {
+func (x *WriteInputResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_bridge_v1_bridge_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -822,79 +970,135 @@ func (x *SessionEvent) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SessionEvent.ProtoReflect.Descriptor instead.
-func (*SessionEvent) Descriptor() ([]byte, []int) {
+// Deprecated: Use WriteInputResponse.ProtoReflect.Descriptor instead.
+func (*WriteInputResponse) Descriptor() ([]byte, []int) {
 	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *SessionEvent) GetSeq() uint64 {
+func (x *WriteInputResponse) GetAccepted() bool {
 	if x != nil {
-		return x.Seq
+		return x.Accepted
+	}
+	return false
+}
+
+func (x *WriteInputResponse) GetBytesWritten() uint32 {
+	if x != nil {
+		return x.BytesWritten
 	}
 	return 0
 }
 
-func (x *SessionEvent) GetTimestamp() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Timestamp
-	}
-	return nil
+type ResizeSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ClientId      string                 `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	Cols          uint32                 `protobuf:"varint,3,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32                 `protobuf:"varint,4,opt,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionEvent) GetSessionId() string {
+func (x *ResizeSessionRequest) Reset() {
+	*x = ResizeSessionRequest{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResizeSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResizeSessionRequest) ProtoMessage() {}
+
+func (x *ResizeSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResizeSessionRequest.ProtoReflect.Descriptor instead.
+func (*ResizeSessionRequest) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ResizeSessionRequest) GetSessionId() string {
 	if x != nil {
 		return x.SessionId
 	}
 	return ""
 }
 
-func (x *SessionEvent) GetProjectId() string {
+func (x *ResizeSessionRequest) GetClientId() string {
 	if x != nil {
-		return x.ProjectId
+		return x.ClientId
 	}
 	return ""
 }
 
-func (x *SessionEvent) GetProvider() string {
+func (x *ResizeSessionRequest) GetCols() uint32 {
 	if x != nil {
-		return x.Provider
+		return x.Cols
 	}
-	return ""
+	return 0
 }
 
-func (x *SessionEvent) GetType() EventType {
+func (x *ResizeSessionRequest) GetRows() uint32 {
 	if x != nil {
-		return x.Type
+		return x.Rows
 	}
-	return EventType_EVENT_TYPE_UNSPECIFIED
+	return 0
 }
 
-func (x *SessionEvent) GetStream() string {
-	if x != nil {
-		return x.Stream
-	}
-	return ""
+type ResizeSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Applied       bool                   `protobuf:"varint,1,opt,name=applied,proto3" json:"applied,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionEvent) GetText() string {
-	if x != nil {
-		return x.Text
-	}
-	return ""
+func (x *ResizeSessionResponse) Reset() {
+	*x = ResizeSessionResponse{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionEvent) GetDone() bool {
+func (x *ResizeSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResizeSessionResponse) ProtoMessage() {}
+
+func (x *ResizeSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[13]
 	if x != nil {
-		return x.Done
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResizeSessionResponse.ProtoReflect.Descriptor instead.
+func (*ResizeSessionResponse) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ResizeSessionResponse) GetApplied() bool {
+	if x != nil {
+		return x.Applied
 	}
 	return false
-}
-
-func (x *SessionEvent) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
 }
 
 type HealthRequest struct {
@@ -905,7 +1109,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[12]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -917,7 +1121,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[12]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -930,7 +1134,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{12}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{14}
 }
 
 type HealthResponse struct {
@@ -943,7 +1147,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[13]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -955,7 +1159,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[13]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -968,7 +1172,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{13}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *HealthResponse) GetStatus() string {
@@ -996,7 +1200,7 @@ type ProviderHealth struct {
 
 func (x *ProviderHealth) Reset() {
 	*x = ProviderHealth{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[14]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1008,7 +1212,7 @@ func (x *ProviderHealth) String() string {
 func (*ProviderHealth) ProtoMessage() {}
 
 func (x *ProviderHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[14]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1021,7 +1225,7 @@ func (x *ProviderHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProviderHealth.ProtoReflect.Descriptor instead.
 func (*ProviderHealth) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{14}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ProviderHealth) GetProvider() string {
@@ -1053,7 +1257,7 @@ type ListProvidersRequest struct {
 
 func (x *ListProvidersRequest) Reset() {
 	*x = ListProvidersRequest{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[15]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1065,7 +1269,7 @@ func (x *ListProvidersRequest) String() string {
 func (*ListProvidersRequest) ProtoMessage() {}
 
 func (x *ListProvidersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[15]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1078,7 +1282,7 @@ func (x *ListProvidersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProvidersRequest.ProtoReflect.Descriptor instead.
 func (*ListProvidersRequest) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{15}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{17}
 }
 
 type ListProvidersResponse struct {
@@ -1090,7 +1294,7 @@ type ListProvidersResponse struct {
 
 func (x *ListProvidersResponse) Reset() {
 	*x = ListProvidersResponse{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[16]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1102,7 +1306,7 @@ func (x *ListProvidersResponse) String() string {
 func (*ListProvidersResponse) ProtoMessage() {}
 
 func (x *ListProvidersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[16]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1115,7 +1319,7 @@ func (x *ListProvidersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProvidersResponse.ProtoReflect.Descriptor instead.
 func (*ListProvidersResponse) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{16}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListProvidersResponse) GetProviders() []*ProviderInfo {
@@ -1137,7 +1341,7 @@ type ProviderInfo struct {
 
 func (x *ProviderInfo) Reset() {
 	*x = ProviderInfo{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[17]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1149,7 +1353,7 @@ func (x *ProviderInfo) String() string {
 func (*ProviderInfo) ProtoMessage() {}
 
 func (x *ProviderInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[17]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1162,7 +1366,7 @@ func (x *ProviderInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProviderInfo.ProtoReflect.Descriptor instead.
 func (*ProviderInfo) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{17}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ProviderInfo) GetProvider() string {
@@ -1197,7 +1401,7 @@ var File_bridge_v1_bridge_proto protoreflect.FileDescriptor
 
 const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\n" +
-	"\x16bridge/v1/bridge.proto\x12\tbridge.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x98\x02\n" +
+	"\x16bridge/v1/bridge.proto\x12\tbridge.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xde\x02\n" +
 	"\x13StartSessionRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
@@ -1206,7 +1410,9 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\trepo_path\x18\x03 \x01(\tR\brepoPath\x12\x1a\n" +
 	"\bprovider\x18\x04 \x01(\tR\bprovider\x12L\n" +
 	"\n" +
-	"agent_opts\x18\x05 \x03(\v2-.bridge.v1.StartSessionRequest.AgentOptsEntryR\tagentOpts\x1a<\n" +
+	"agent_opts\x18\x05 \x03(\v2-.bridge.v1.StartSessionRequest.AgentOptsEntryR\tagentOpts\x12!\n" +
+	"\finitial_cols\x18\x06 \x01(\rR\vinitialCols\x12!\n" +
+	"\finitial_rows\x18\a \x01(\rR\vinitialRows\x1a<\n" +
 	"\x0eAgentOptsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa2\x01\n" +
@@ -1224,7 +1430,7 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.bridge.v1.SessionStatusR\x06status\"2\n" +
 	"\x11GetSessionRequest\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\xac\x02\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"\x9a\x04\n" +
 	"\x12GetSessionResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1d\n" +
@@ -1236,39 +1442,60 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"stopped_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tstoppedAt\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error\"4\n" +
+	"\x05error\x18\a \x01(\tR\x05error\x12\x1a\n" +
+	"\battached\x18\b \x01(\bR\battached\x12,\n" +
+	"\x12attached_client_id\x18\t \x01(\tR\x10attachedClientId\x12#\n" +
+	"\rexit_recorded\x18\n" +
+	" \x01(\bR\fexitRecorded\x12\x1b\n" +
+	"\texit_code\x18\v \x01(\x05R\bexitCode\x12\x1d\n" +
+	"\n" +
+	"oldest_seq\x18\f \x01(\x04R\toldestSeq\x12\x19\n" +
+	"\blast_seq\x18\r \x01(\x04R\alastSeq\x12\x12\n" +
+	"\x04cols\x18\x0e \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x0f \x01(\rR\x04rows\"4\n" +
 	"\x13ListSessionsRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\"Q\n" +
 	"\x14ListSessionsResponse\x129\n" +
-	"\bsessions\x18\x01 \x03(\v2\x1d.bridge.v1.GetSessionResponseR\bsessions\"n\n" +
-	"\x10SendInputRequest\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\x12'\n" +
-	"\x0fidempotency_key\x18\x03 \x01(\tR\x0eidempotencyKey\"A\n" +
-	"\x11SendInputResponse\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x10\n" +
-	"\x03seq\x18\x02 \x01(\x04R\x03seq\"v\n" +
-	"\x13StreamEventsRequest\x12\x1d\n" +
+	"\bsessions\x18\x01 \x03(\v2\x1d.bridge.v1.GetSessionResponseR\bsessions\"o\n" +
+	"\x14AttachSessionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
-	"\tafter_seq\x18\x02 \x01(\x04R\bafterSeq\x12#\n" +
-	"\rsubscriber_id\x18\x03 \x01(\tR\fsubscriberId\"\xb4\x02\n" +
-	"\fSessionEvent\x12\x10\n" +
-	"\x03seq\x18\x01 \x01(\x04R\x03seq\x128\n" +
-	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x1d\n" +
+	"\tafter_seq\x18\x02 \x01(\x04R\bafterSeq\x12\x1b\n" +
+	"\tclient_id\x18\x03 \x01(\tR\bclientId\"\x9b\x03\n" +
+	"\x12AttachSessionEvent\x12.\n" +
+	"\x04type\x18\x01 \x01(\x0e2\x1a.bridge.v1.AttachEventTypeR\x04type\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\x128\n" +
+	"\ttimestamp\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x1d\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\x12\x18\n" +
+	"\apayload\x18\x05 \x01(\fR\apayload\x12\x16\n" +
+	"\x06replay\x18\x06 \x01(\bR\x06replay\x12\x1d\n" +
 	"\n" +
-	"project_id\x18\x04 \x01(\tR\tprojectId\x12\x1a\n" +
-	"\bprovider\x18\x05 \x01(\tR\bprovider\x12(\n" +
-	"\x04type\x18\x06 \x01(\x0e2\x14.bridge.v1.EventTypeR\x04type\x12\x16\n" +
-	"\x06stream\x18\a \x01(\tR\x06stream\x12\x12\n" +
-	"\x04text\x18\b \x01(\tR\x04text\x12\x12\n" +
-	"\x04done\x18\t \x01(\bR\x04done\x12\x14\n" +
-	"\x05error\x18\n" +
-	" \x01(\tR\x05error\"\x0f\n" +
+	"oldest_seq\x18\a \x01(\x04R\toldestSeq\x12\x19\n" +
+	"\blast_seq\x18\b \x01(\x04R\alastSeq\x12#\n" +
+	"\rexit_recorded\x18\t \x01(\bR\fexitRecorded\x12\x1b\n" +
+	"\texit_code\x18\n" +
+	" \x01(\x05R\bexitCode\x12\x14\n" +
+	"\x05error\x18\v \x01(\tR\x05error\x12\x12\n" +
+	"\x04cols\x18\f \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\r \x01(\rR\x04rows\"c\n" +
+	"\x11WriteInputRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x12\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\"U\n" +
+	"\x12WriteInputResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\x12#\n" +
+	"\rbytes_written\x18\x02 \x01(\rR\fbytesWritten\"z\n" +
+	"\x14ResizeSessionRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x12\n" +
+	"\x04cols\x18\x03 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x04 \x01(\rR\x04rows\"1\n" +
+	"\x15ResizeSessionResponse\x12\x18\n" +
+	"\aapplied\x18\x01 \x01(\bR\aapplied\"\x0f\n" +
 	"\rHealthRequest\"a\n" +
 	"\x0eHealthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x127\n" +
@@ -1284,33 +1511,32 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x1c\n" +
 	"\tavailable\x18\x02 \x01(\bR\tavailable\x12\x16\n" +
 	"\x06binary\x18\x03 \x01(\tR\x06binary\x12\x18\n" +
-	"\aversion\x18\x04 \x01(\tR\aversion*\xbc\x01\n" +
+	"\aversion\x18\x04 \x01(\tR\aversion*\xd9\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17SESSION_STATUS_STARTING\x10\x01\x12\x1a\n" +
 	"\x16SESSION_STATUS_RUNNING\x10\x02\x12\x1b\n" +
-	"\x17SESSION_STATUS_STOPPING\x10\x03\x12\x1a\n" +
-	"\x16SESSION_STATUS_STOPPED\x10\x04\x12\x19\n" +
-	"\x15SESSION_STATUS_FAILED\x10\x05*\xb1\x02\n" +
-	"\tEventType\x12\x1a\n" +
-	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1e\n" +
-	"\x1aEVENT_TYPE_SESSION_STARTED\x10\x01\x12\x1e\n" +
-	"\x1aEVENT_TYPE_SESSION_STOPPED\x10\x02\x12\x1d\n" +
-	"\x19EVENT_TYPE_SESSION_FAILED\x10\x03\x12\x15\n" +
-	"\x11EVENT_TYPE_STDOUT\x10\x04\x12\x15\n" +
-	"\x11EVENT_TYPE_STDERR\x10\x05\x12\x1d\n" +
-	"\x19EVENT_TYPE_INPUT_RECEIVED\x10\x06\x12\x1e\n" +
-	"\x1aEVENT_TYPE_BUFFER_OVERFLOW\x10\a\x12\x1a\n" +
-	"\x16EVENT_TYPE_AGENT_READY\x10\b\x12 \n" +
-	"\x1cEVENT_TYPE_RESPONSE_COMPLETE\x10\t2\xf0\x04\n" +
+	"\x17SESSION_STATUS_ATTACHED\x10\x03\x12\x1b\n" +
+	"\x17SESSION_STATUS_STOPPING\x10\x04\x12\x1a\n" +
+	"\x16SESSION_STATUS_STOPPED\x10\x05\x12\x19\n" +
+	"\x15SESSION_STATUS_FAILED\x10\x06*\xd5\x01\n" +
+	"\x0fAttachEventType\x12!\n" +
+	"\x1dATTACH_EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aATTACH_EVENT_TYPE_ATTACHED\x10\x01\x12\x1c\n" +
+	"\x18ATTACH_EVENT_TYPE_OUTPUT\x10\x02\x12 \n" +
+	"\x1cATTACH_EVENT_TYPE_REPLAY_GAP\x10\x03\x12\"\n" +
+	"\x1eATTACH_EVENT_TYPE_SESSION_EXIT\x10\x04\x12\x1b\n" +
+	"\x17ATTACH_EVENT_TYPE_ERROR\x10\x052\xcf\x05\n" +
 	"\rBridgeService\x12O\n" +
 	"\fStartSession\x12\x1e.bridge.v1.StartSessionRequest\x1a\x1f.bridge.v1.StartSessionResponse\x12L\n" +
 	"\vStopSession\x12\x1d.bridge.v1.StopSessionRequest\x1a\x1e.bridge.v1.StopSessionResponse\x12I\n" +
 	"\n" +
 	"GetSession\x12\x1c.bridge.v1.GetSessionRequest\x1a\x1d.bridge.v1.GetSessionResponse\x12O\n" +
-	"\fListSessions\x12\x1e.bridge.v1.ListSessionsRequest\x1a\x1f.bridge.v1.ListSessionsResponse\x12F\n" +
-	"\tSendInput\x12\x1b.bridge.v1.SendInputRequest\x1a\x1c.bridge.v1.SendInputResponse\x12I\n" +
-	"\fStreamEvents\x12\x1e.bridge.v1.StreamEventsRequest\x1a\x17.bridge.v1.SessionEvent0\x01\x12=\n" +
+	"\fListSessions\x12\x1e.bridge.v1.ListSessionsRequest\x1a\x1f.bridge.v1.ListSessionsResponse\x12Q\n" +
+	"\rAttachSession\x12\x1f.bridge.v1.AttachSessionRequest\x1a\x1d.bridge.v1.AttachSessionEvent0\x01\x12I\n" +
+	"\n" +
+	"WriteInput\x12\x1c.bridge.v1.WriteInputRequest\x1a\x1d.bridge.v1.WriteInputResponse\x12R\n" +
+	"\rResizeSession\x12\x1f.bridge.v1.ResizeSessionRequest\x1a .bridge.v1.ResizeSessionResponse\x12=\n" +
 	"\x06Health\x12\x18.bridge.v1.HealthRequest\x1a\x19.bridge.v1.HealthResponse\x12R\n" +
 	"\rListProviders\x12\x1f.bridge.v1.ListProvidersRequest\x1a .bridge.v1.ListProvidersResponseB>Z<github.com/markcallen/ai-agent-bridge/gen/bridge/v1;bridgev1b\x06proto3"
 
@@ -1327,10 +1553,10 @@ func file_bridge_v1_bridge_proto_rawDescGZIP() []byte {
 }
 
 var file_bridge_v1_bridge_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_bridge_v1_bridge_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_bridge_v1_bridge_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_bridge_v1_bridge_proto_goTypes = []any{
 	(SessionStatus)(0),            // 0: bridge.v1.SessionStatus
-	(EventType)(0),                // 1: bridge.v1.EventType
+	(AttachEventType)(0),          // 1: bridge.v1.AttachEventType
 	(*StartSessionRequest)(nil),   // 2: bridge.v1.StartSessionRequest
 	(*StartSessionResponse)(nil),  // 3: bridge.v1.StartSessionResponse
 	(*StopSessionRequest)(nil),    // 4: bridge.v1.StopSessionRequest
@@ -1339,50 +1565,54 @@ var file_bridge_v1_bridge_proto_goTypes = []any{
 	(*GetSessionResponse)(nil),    // 7: bridge.v1.GetSessionResponse
 	(*ListSessionsRequest)(nil),   // 8: bridge.v1.ListSessionsRequest
 	(*ListSessionsResponse)(nil),  // 9: bridge.v1.ListSessionsResponse
-	(*SendInputRequest)(nil),      // 10: bridge.v1.SendInputRequest
-	(*SendInputResponse)(nil),     // 11: bridge.v1.SendInputResponse
-	(*StreamEventsRequest)(nil),   // 12: bridge.v1.StreamEventsRequest
-	(*SessionEvent)(nil),          // 13: bridge.v1.SessionEvent
-	(*HealthRequest)(nil),         // 14: bridge.v1.HealthRequest
-	(*HealthResponse)(nil),        // 15: bridge.v1.HealthResponse
-	(*ProviderHealth)(nil),        // 16: bridge.v1.ProviderHealth
-	(*ListProvidersRequest)(nil),  // 17: bridge.v1.ListProvidersRequest
-	(*ListProvidersResponse)(nil), // 18: bridge.v1.ListProvidersResponse
-	(*ProviderInfo)(nil),          // 19: bridge.v1.ProviderInfo
-	nil,                           // 20: bridge.v1.StartSessionRequest.AgentOptsEntry
-	(*timestamppb.Timestamp)(nil), // 21: google.protobuf.Timestamp
+	(*AttachSessionRequest)(nil),  // 10: bridge.v1.AttachSessionRequest
+	(*AttachSessionEvent)(nil),    // 11: bridge.v1.AttachSessionEvent
+	(*WriteInputRequest)(nil),     // 12: bridge.v1.WriteInputRequest
+	(*WriteInputResponse)(nil),    // 13: bridge.v1.WriteInputResponse
+	(*ResizeSessionRequest)(nil),  // 14: bridge.v1.ResizeSessionRequest
+	(*ResizeSessionResponse)(nil), // 15: bridge.v1.ResizeSessionResponse
+	(*HealthRequest)(nil),         // 16: bridge.v1.HealthRequest
+	(*HealthResponse)(nil),        // 17: bridge.v1.HealthResponse
+	(*ProviderHealth)(nil),        // 18: bridge.v1.ProviderHealth
+	(*ListProvidersRequest)(nil),  // 19: bridge.v1.ListProvidersRequest
+	(*ListProvidersResponse)(nil), // 20: bridge.v1.ListProvidersResponse
+	(*ProviderInfo)(nil),          // 21: bridge.v1.ProviderInfo
+	nil,                           // 22: bridge.v1.StartSessionRequest.AgentOptsEntry
+	(*timestamppb.Timestamp)(nil), // 23: google.protobuf.Timestamp
 }
 var file_bridge_v1_bridge_proto_depIdxs = []int32{
-	20, // 0: bridge.v1.StartSessionRequest.agent_opts:type_name -> bridge.v1.StartSessionRequest.AgentOptsEntry
+	22, // 0: bridge.v1.StartSessionRequest.agent_opts:type_name -> bridge.v1.StartSessionRequest.AgentOptsEntry
 	0,  // 1: bridge.v1.StartSessionResponse.status:type_name -> bridge.v1.SessionStatus
-	21, // 2: bridge.v1.StartSessionResponse.created_at:type_name -> google.protobuf.Timestamp
+	23, // 2: bridge.v1.StartSessionResponse.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 3: bridge.v1.StopSessionResponse.status:type_name -> bridge.v1.SessionStatus
 	0,  // 4: bridge.v1.GetSessionResponse.status:type_name -> bridge.v1.SessionStatus
-	21, // 5: bridge.v1.GetSessionResponse.created_at:type_name -> google.protobuf.Timestamp
-	21, // 6: bridge.v1.GetSessionResponse.stopped_at:type_name -> google.protobuf.Timestamp
+	23, // 5: bridge.v1.GetSessionResponse.created_at:type_name -> google.protobuf.Timestamp
+	23, // 6: bridge.v1.GetSessionResponse.stopped_at:type_name -> google.protobuf.Timestamp
 	7,  // 7: bridge.v1.ListSessionsResponse.sessions:type_name -> bridge.v1.GetSessionResponse
-	21, // 8: bridge.v1.SessionEvent.timestamp:type_name -> google.protobuf.Timestamp
-	1,  // 9: bridge.v1.SessionEvent.type:type_name -> bridge.v1.EventType
-	16, // 10: bridge.v1.HealthResponse.providers:type_name -> bridge.v1.ProviderHealth
-	19, // 11: bridge.v1.ListProvidersResponse.providers:type_name -> bridge.v1.ProviderInfo
+	1,  // 8: bridge.v1.AttachSessionEvent.type:type_name -> bridge.v1.AttachEventType
+	23, // 9: bridge.v1.AttachSessionEvent.timestamp:type_name -> google.protobuf.Timestamp
+	18, // 10: bridge.v1.HealthResponse.providers:type_name -> bridge.v1.ProviderHealth
+	21, // 11: bridge.v1.ListProvidersResponse.providers:type_name -> bridge.v1.ProviderInfo
 	2,  // 12: bridge.v1.BridgeService.StartSession:input_type -> bridge.v1.StartSessionRequest
 	4,  // 13: bridge.v1.BridgeService.StopSession:input_type -> bridge.v1.StopSessionRequest
 	6,  // 14: bridge.v1.BridgeService.GetSession:input_type -> bridge.v1.GetSessionRequest
 	8,  // 15: bridge.v1.BridgeService.ListSessions:input_type -> bridge.v1.ListSessionsRequest
-	10, // 16: bridge.v1.BridgeService.SendInput:input_type -> bridge.v1.SendInputRequest
-	12, // 17: bridge.v1.BridgeService.StreamEvents:input_type -> bridge.v1.StreamEventsRequest
-	14, // 18: bridge.v1.BridgeService.Health:input_type -> bridge.v1.HealthRequest
-	17, // 19: bridge.v1.BridgeService.ListProviders:input_type -> bridge.v1.ListProvidersRequest
-	3,  // 20: bridge.v1.BridgeService.StartSession:output_type -> bridge.v1.StartSessionResponse
-	5,  // 21: bridge.v1.BridgeService.StopSession:output_type -> bridge.v1.StopSessionResponse
-	7,  // 22: bridge.v1.BridgeService.GetSession:output_type -> bridge.v1.GetSessionResponse
-	9,  // 23: bridge.v1.BridgeService.ListSessions:output_type -> bridge.v1.ListSessionsResponse
-	11, // 24: bridge.v1.BridgeService.SendInput:output_type -> bridge.v1.SendInputResponse
-	13, // 25: bridge.v1.BridgeService.StreamEvents:output_type -> bridge.v1.SessionEvent
-	15, // 26: bridge.v1.BridgeService.Health:output_type -> bridge.v1.HealthResponse
-	18, // 27: bridge.v1.BridgeService.ListProviders:output_type -> bridge.v1.ListProvidersResponse
-	20, // [20:28] is the sub-list for method output_type
-	12, // [12:20] is the sub-list for method input_type
+	10, // 16: bridge.v1.BridgeService.AttachSession:input_type -> bridge.v1.AttachSessionRequest
+	12, // 17: bridge.v1.BridgeService.WriteInput:input_type -> bridge.v1.WriteInputRequest
+	14, // 18: bridge.v1.BridgeService.ResizeSession:input_type -> bridge.v1.ResizeSessionRequest
+	16, // 19: bridge.v1.BridgeService.Health:input_type -> bridge.v1.HealthRequest
+	19, // 20: bridge.v1.BridgeService.ListProviders:input_type -> bridge.v1.ListProvidersRequest
+	3,  // 21: bridge.v1.BridgeService.StartSession:output_type -> bridge.v1.StartSessionResponse
+	5,  // 22: bridge.v1.BridgeService.StopSession:output_type -> bridge.v1.StopSessionResponse
+	7,  // 23: bridge.v1.BridgeService.GetSession:output_type -> bridge.v1.GetSessionResponse
+	9,  // 24: bridge.v1.BridgeService.ListSessions:output_type -> bridge.v1.ListSessionsResponse
+	11, // 25: bridge.v1.BridgeService.AttachSession:output_type -> bridge.v1.AttachSessionEvent
+	13, // 26: bridge.v1.BridgeService.WriteInput:output_type -> bridge.v1.WriteInputResponse
+	15, // 27: bridge.v1.BridgeService.ResizeSession:output_type -> bridge.v1.ResizeSessionResponse
+	17, // 28: bridge.v1.BridgeService.Health:output_type -> bridge.v1.HealthResponse
+	20, // 29: bridge.v1.BridgeService.ListProviders:output_type -> bridge.v1.ListProvidersResponse
+	21, // [21:30] is the sub-list for method output_type
+	12, // [12:21] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name
 	12, // [12:12] is the sub-list for extension extendee
 	0,  // [0:12] is the sub-list for field type_name
@@ -1399,7 +1629,7 @@ func file_bridge_v1_bridge_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_bridge_v1_bridge_proto_rawDesc), len(file_bridge_v1_bridge_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

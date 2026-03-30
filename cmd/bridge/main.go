@@ -33,6 +33,10 @@ func main() {
 		bootstrapLogger.Error("failed to load .env", "error", err)
 		os.Exit(1)
 	}
+	if err := config.LoadDotEnv("e2e/.env"); err != nil {
+		bootstrapLogger.Error("failed to load e2e/.env", "error", err)
+		os.Exit(1)
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -40,7 +44,8 @@ func main() {
 		os.Exit(1)
 	}
 	if err := config.ValidateProviderEnv(cfg); err != nil {
-		bootstrapLogger.Warn("some providers have missing env vars and will be unavailable at session start", "error", err)
+		bootstrapLogger.Error("provider environment validation failed", "error", err)
+		os.Exit(1)
 	}
 	redactor, err := redact.New(cfg.Logging.RedactPatterns)
 	if err != nil {
@@ -53,23 +58,20 @@ func main() {
 	registry := bridge.NewRegistry()
 	for name, pcfg := range cfg.Providers {
 		var p bridge.Provider
-		if pcfg.Mode == "exec" {
-			p = provider.NewCodexExecProvider(provider.CodexExecConfig{
-				ProviderID: name,
-				Binary:     pcfg.Binary,
-				ExtraArgs:  pcfg.Args,
-				StopGrace:  config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
-			})
-		} else {
+		switch name {
+		case "claude":
+			p = provider.NewClaudeProvider()
+		case "opencode":
+			p = provider.NewOpenCodeProvider()
+		default:
 			p = provider.NewStdioProvider(provider.StdioConfig{
 				ProviderID:     name,
 				Binary:         pcfg.Binary,
 				DefaultArgs:    pcfg.Args,
 				StartupTimeout: config.ParseDuration(pcfg.StartupTimeout, 30e9),
 				StopGrace:      config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
-				UsePTY:         pcfg.PTY,
-				StreamJSON:     pcfg.StreamJSON,
 				PromptPattern:  pcfg.PromptPattern,
+				RequiredEnv:    pcfg.RequiredEnv,
 			})
 		}
 		if err := registry.Register(p); err != nil {
@@ -92,6 +94,18 @@ func main() {
 			logger.Info("provider version", "provider", name, "version", v)
 		}
 	}
+	for name := range cfg.Providers {
+		if p, err := registry.Get(name); err == nil {
+			checkCtx, cancel := context.WithTimeout(context.Background(), p.StartupTimeout())
+			err = p.ValidateStartup(checkCtx)
+			cancel()
+			if err != nil {
+				logger.Error("provider startup validation failed", "provider", name, "error", err)
+				os.Exit(1)
+			}
+			logger.Info("provider startup validation passed", "provider", name)
+		}
+	}
 
 	// Set up policy
 	policy := bridge.Policy{
@@ -101,19 +115,9 @@ func main() {
 		AllowedPaths:  cfg.AllowedPaths,
 	}
 
-	// Set up subscriber config
-	subConfig := bridge.SubscriberConfig{
-		MaxSubscribersPerSession: cfg.Sessions.MaxSubscribersPerSession,
-		SubscriberTTL:            config.ParseDuration(cfg.Sessions.SubscriberTTL, 30*time.Minute),
-	}
-	if subConfig.MaxSubscribersPerSession == 0 {
-		subConfig.MaxSubscribersPerSession = 10
-	}
-
 	// Set up supervisor
 	idleTimeout := config.ParseDuration(cfg.Sessions.IdleTimeout, 30*time.Minute)
-	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, subConfig, idleTimeout)
-	sup.SetRedactor(redactor.Redact)
+	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, idleTimeout)
 	defer sup.Close()
 
 	// Set up JWT verifier
