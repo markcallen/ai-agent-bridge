@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup fmt run dev-run chat-example runprompt-example
+.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup fmt run dev-run chat-example
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
@@ -6,15 +6,9 @@ BRIDGE_CA := $(BIN_DIR)/bridge-ca
 CONFIG ?= config/bridge.yaml
 DEV_CONFIG ?= config/bridge-dev.yaml
 CHAT_TARGET ?= 127.0.0.1:9445
-CHAT_PROVIDER ?= claude-chat
+CHAT_PROVIDER ?= claude
 CHAT_PROJECT ?= dev
 CHAT_REPO ?= $(PWD)
-RUNPROMPT_TARGET ?= 127.0.0.1:9445
-RUNPROMPT_PROJECT ?= dev
-RUNPROMPT_AGENT ?= claude-chat
-RUNPROMPT_DIR ?= $(PWD)
-RUNPROMPT_PROMPT ?=
-
 build: proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BRIDGE) ./cmd/bridge
@@ -56,8 +50,11 @@ certs: build
 dev-certs: build
 	./scripts/dev_certs.sh
 
-dev-setup: dev-certs
+dev-setup: dev-certs agents-setup
 	@echo "Dev environment ready. Certs in certs/"
+
+agents-setup:
+	./scripts/setup_ai_agents.sh
 
 fmt:
 	gofmt -s -w .
@@ -81,22 +78,3 @@ chat-example:
 		-jwt-issuer dev \
 		-timeout 5m \
 		$(CHAT_REPO)
-
-runprompt-example:
-	@if [ -z "$(RUNPROMPT_PROMPT)" ]; then \
-		echo "RUNPROMPT_PROMPT is required"; \
-		echo "example: make runprompt-example RUNPROMPT_AGENT=claude-chat RUNPROMPT_DIR=$(PWD) RUNPROMPT_PROMPT='list 5 TODOs'"; \
-		exit 1; \
-	fi
-	go run ./examples/runprompt \
-		-target $(RUNPROMPT_TARGET) \
-		-project $(RUNPROMPT_PROJECT) \
-		-cacert certs/ca-bundle.crt \
-		-cert certs/dev-client.crt \
-		-key certs/dev-client.key \
-		-jwt-key certs/jwt-signing.key \
-		-jwt-issuer dev \
-		-timeout 5m \
-		$(RUNPROMPT_AGENT) \
-		$(RUNPROMPT_DIR) \
-		"$(RUNPROMPT_PROMPT)"

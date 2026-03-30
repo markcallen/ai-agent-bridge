@@ -499,7 +499,7 @@ ai-agent-bridge/
 │   └── server/           # gRPC service implementation + rate limiting + validation
 ├── docs/                 # Integration guides (go-websocket-integration.md)
 ├── e2e/                  # End-to-end test harness (docker-compose)
-├── examples/             # Example consumer programs (chat, runprompt)
+├── examples/             # Example consumer programs (interactive PTY example)
 ├── config/               # Default configuration
 ├── certs/                # Generated certs (gitignored)
 └── scripts/              # Dev setup scripts

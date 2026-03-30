@@ -2,18 +2,14 @@
 
 [![Smoke Tests](https://github.com/markcallen/ai-agent-bridge/actions/workflows/smoke.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/smoke.yml)
 
-A standalone gRPC daemon and Go SDK that provides a secure, zero-trust communication layer between control-plane systems and AI agent processes. It manages AI agent subprocess lifecycles (Claude Code, Codex, OpenCode, Gemini) and exposes a unified API for session management, command routing, and event streaming.
+A standalone gRPC daemon and Go SDK that provides a secure, zero-trust communication layer between control-plane systems and AI agent processes. It manages AI agent subprocess lifecycles and exposes a PTY transport so a client can see and interact with the same terminal UI the agent would show locally.
 
 ## Quick Start
 
 ### Prerequisites
 
 - [Go 1.25+](https://go.dev/dl/)
-- One or more AI agent CLIs installed and on `PATH`:
-  - `claude` — [Claude Code](https://claude.ai/code)
-  - `codex` — [OpenAI Codex CLI](https://github.com/openai/codex)
-  - `opencode` — [OpenCode](https://opencode.ai)
-  - `gemini` — [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+- `npm`
 - (Optional) `protoc` with `protoc-gen-go` and `protoc-gen-go-grpc` — only needed if modifying `.proto` files
 
 ### 1. Clone and configure
@@ -27,8 +23,9 @@ cp .env.example .env
 Edit `.env` and add your API keys:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...   # required for claude-chat provider
-# OPENAI_API_KEY=sk-...        # required for codex / opencode providers
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=...
 ```
 
 ### 2. Start the bridge
@@ -37,17 +34,11 @@ ANTHROPIC_API_KEY=sk-ant-...   # required for claude-chat provider
 make dev-run
 ```
 
-This single command builds the binaries, generates dev TLS certificates and JWT signing keys, then starts the bridge daemon on `127.0.0.1:9445` with mTLS and JWT authentication.
+This builds the binaries, installs the pinned local AI-agent CLIs into `node_modules`, generates dev TLS certificates and JWT signing keys, then starts the bridge daemon on `127.0.0.1:9445` with mTLS and JWT authentication.
 
-### 3. Run a prompt
+### 3. Run the interactive PTY example
 
 In a second terminal:
-
-```bash
-make runprompt-example RUNPROMPT_PROMPT="list 5 important TODOs in this codebase"
-```
-
-Or run an interactive chat session:
 
 ```bash
 make chat-example
@@ -57,26 +48,9 @@ make chat-example
 
 ## Running the Examples
 
-### `runprompt` — single prompt, streamed response
+### `chat` — interactive PTY passthrough session
 
-Sends one prompt to an agent and exits when the response is complete.
-
-```bash
-make runprompt-example \
-  RUNPROMPT_AGENT=claude-chat \
-  RUNPROMPT_DIR=/path/to/your/repo \
-  RUNPROMPT_PROMPT="explain the main entry point"
-```
-
-| Variable | Default | Description |
-|---|---|---|
-| `RUNPROMPT_AGENT` | `claude-chat` | Provider name from config |
-| `RUNPROMPT_DIR` | `$(PWD)` | Repo path passed to the agent |
-| `RUNPROMPT_PROMPT` | *(required)* | Prompt to send |
-
-### `chat` — interactive multi-turn session
-
-Opens a readline prompt loop. Type your messages and press Enter; responses stream back in real time.
+Opens a live PTY session against the remote bridge. The local terminal shows the same screen the provider renders on the server, and your keystrokes are written directly back to the remote PTY.
 
 ```bash
 make chat-example
@@ -84,23 +58,20 @@ make chat-example
 
 | Variable | Default | Description |
 |---|---|---|
-| `CHAT_PROVIDER` | `claude-chat` | Provider name from config |
+| `CHAT_PROVIDER` | `claude` | Provider name from config |
 | `CHAT_REPO` | `$(PWD)` | Repo path passed to the agent |
 
 ---
 
 ## Providers
 
-Providers are configured in `config/bridge-dev.yaml`. The `claude-chat` provider is enabled out of the box:
+Providers are configured in `config/bridge-dev.yaml` and resolved from pinned local binaries in `node_modules/.bin`:
 
 | Provider | Binary | Mode | Required env |
 |---|---|---|---|
-| `claude-chat` | `claude` | stream-json SDK mode (multi-turn) | `ANTHROPIC_API_KEY` |
-| `codex` | `codex` | PTY interactive | `OPENAI_API_KEY` |
-| `opencode` | `opencode` | PTY interactive | `OPENAI_API_KEY` |
-| `gemini` | `gemini` | PTY interactive | — |
-
-The bridge emits `AGENT_READY` when an agent is ready for input and `RESPONSE_COMPLETE` when it finishes responding, so client code does not need to rely on idle timers.
+| `claude` | `./node_modules/.bin/claude` | PTY interactive | `ANTHROPIC_API_KEY` |
+| `opencode` | `./node_modules/.bin/opencode` | PTY interactive | `OPENAI_API_KEY` |
+| `gemini` | `./node_modules/.bin/gemini` | PTY interactive | `GEMINI_API_KEY` |
 
 ---
 
@@ -140,7 +111,7 @@ function AgentPanel() {
 
   return (
     <>
-      <button onClick={() => bridge.startSession({ projectId: "p1", repoPath: "/repo", provider: "claude-chat" })}>
+      <button onClick={() => bridge.startSession({ projectId: "p1", repoPath: "/repo", provider: "claude" })}>
         Start
       </button>
       {bridge.events.map((ev) => <p key={ev.seq}>{ev.text}</p>)}
@@ -194,34 +165,11 @@ _, err = client.StartSession(ctx, &bridgev1.StartSessionRequest{
     ProjectId: "my-project",
     SessionId: "session-001",
     RepoPath:  "/path/to/repo",
-    Provider:  "claude-chat",
-})
-
-// Send a prompt
-client.SendInput(ctx, &bridgev1.SendInputRequest{
-    SessionId: "session-001",
-    Text:      "review the code in main.go",
-})
-
-// Stream events
-stream, _ := client.StreamEvents(ctx, &bridgev1.StreamEventsRequest{
-    SessionId:    "session-001",
-    SubscriberId: "my-subscriber",  // enables cursor-based resume on reconnect
-})
-stream.RecvAll(ctx, func(ev *bridgev1.SessionEvent) error {
-    switch ev.Type {
-    case bridgev1.EventType_EVENT_TYPE_STDOUT:
-        fmt.Print(ev.Text)
-    case bridgev1.EventType_EVENT_TYPE_RESPONSE_COMPLETE:
-        // agent finished responding — safe to send next prompt
-    case bridgev1.EventType_EVENT_TYPE_SESSION_STOPPED:
-        // session ended
-    }
-    return nil
+    Provider:  "claude",
 })
 ```
 
-See `examples/chat/main.go` and `examples/runprompt/main.go` for full working examples.
+See `examples/chat/main.go` for the full working example.
 
 ---
 
@@ -282,8 +230,7 @@ Note: `grpcurl` does not support JWT injection. For JWT-authenticated RPCs use t
 | `make test` | Run all unit tests with race detection |
 | `make test-e2e` | Run the dockerized end-to-end test suite |
 | `make test-cover` | Run tests with coverage report |
-| `make chat-example` | Run the interactive chat example against the local bridge |
-| `make runprompt-example` | Run the single-prompt example (set `RUNPROMPT_PROMPT=`) |
+| `make chat-example` | Run the interactive PTY example against the local bridge |
 | `make proto` | Regenerate protobuf Go code |
 | `make lint` | Run golangci-lint |
 | `make fmt` | Format code with gofmt and goimports |
@@ -316,8 +263,7 @@ internal/config/               YAML configuration loader and env var validation
 internal/pki/                  CA management, cert issuance, cross-signing, verification
 internal/provider/             Stdio/PTY-based provider adapters
 internal/server/               gRPC server implementation
-examples/chat/                 Interactive multi-turn chat example
-examples/runprompt/            Single-prompt streaming example
+examples/chat/                 Interactive PTY passthrough example
 docs/                          Integration guides
 config/                        Default configuration files
 scripts/                       Development helper scripts

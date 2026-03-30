@@ -7,7 +7,7 @@ func NewClaudeProvider() *StdioProvider {
 	return NewStdioProvider(StdioConfig{
 		ProviderID:     "claude",
 		Binary:         "claude",
-		DefaultArgs:    []string{"--dangerously-skip-permissions", "--verbose"},
+		DefaultArgs:    []string{"--verbose"},
 		StartupTimeout: 60 * time.Second,
 		StopGrace:      10 * time.Second,
 		StartupProbe:   "prompt",
