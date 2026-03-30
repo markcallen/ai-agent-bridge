@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -88,7 +89,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to configure local tty: %v\n", err)
 		os.Exit(1)
 	}
-	defer restoreTTY()
+	var restoreOnce sync.Once
+	restore := func() {
+		restoreOnce.Do(restoreTTY)
+	}
+	defer restore()
 
 	stream, err := client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
 		SessionId: sessionID,
@@ -102,6 +107,7 @@ func main() {
 
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGWINCH)
+	defer signal.Stop(sigCh)
 	go func() {
 		for sig := range sigCh {
 			switch sig {
@@ -114,11 +120,14 @@ func main() {
 					Rows:      rows,
 				})
 			default:
-				_, _ = client.StopSession(context.Background(), &bridgev1.StopSessionRequest{
+				cancel()
+				stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				_, _ = client.StopSession(stopCtx, &bridgev1.StopSessionRequest{
 					SessionId: sessionID,
 					Force:     true,
 				})
-				restoreTTY()
+				stopCancel()
+				restore()
 				os.Exit(0)
 			}
 		}
@@ -129,10 +138,11 @@ func main() {
 		for {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
+				data := normalizeTTYInput(buf[:n])
 				_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
 					SessionId: sessionID,
 					ClientId:  stream.ClientID(),
-					Data:      append([]byte(nil), buf[:n]...),
+					Data:      data,
 				})
 			}
 			if err != nil {
@@ -158,7 +168,7 @@ func main() {
 			return nil
 		}
 	})
-	restoreTTY()
+	restore()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\nstream failed: %v\r\n", err)
 		os.Exit(1)
@@ -174,7 +184,7 @@ func setRawTTY() (func(), error) {
 		return func() {}, err
 	}
 	state := string(bytesTrimSpace(out))
-	if err := exec.Command("stty", "-F", "/dev/tty", "raw", "-echo").Run(); err != nil {
+	if err := exec.Command("stty", "-F", "/dev/tty", "-icanon", "-echo", "min", "1", "time", "0").Run(); err != nil {
 		return func() {}, err
 	}
 	return func() {
@@ -190,6 +200,16 @@ func bytesTrimSpace(b []byte) []byte {
 		b = b[1:]
 	}
 	return b
+}
+
+func normalizeTTYInput(b []byte) []byte {
+	data := append([]byte(nil), b...)
+	for i := range data {
+		if data[i] == '\n' {
+			data[i] = '\r'
+		}
+	}
+	return data
 }
 
 func currentTTYSize() (uint32, uint32) {
