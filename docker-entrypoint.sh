@@ -136,5 +136,48 @@ state.tipsShown = state.tipsShown || 1;
 fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n");
 EOF'
 
+echo "==> Seeding Codex onboarding state..."
+su -m -s /bin/bash bridge -c 'cd /app && export HOME=/home/bridge && node <<'\''EOF'\''
+const fs = require("fs");
+const path = require("path");
+
+const codexDir = path.join(process.env.HOME, ".codex");
+const authPath = path.join(codexDir, "auth.json");
+const configPath = path.join(codexDir, "config.toml");
+
+fs.mkdirSync(codexDir, { recursive: true });
+
+const apiKey = process.env.OPENAI_API_KEY || "";
+if (apiKey) {
+  fs.writeFileSync(
+    authPath,
+    JSON.stringify(
+      {
+        auth_mode: "apikey",
+        OPENAI_API_KEY: apiKey,
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+}
+
+const configToml = [
+  "model = \"gpt-5.4\"",
+  "",
+  "[projects.\"/repos\"]",
+  "trust_level = \"trusted\"",
+  "",
+  "[projects.\"/repos/penduin\"]",
+  "trust_level = \"trusted\"",
+  "",
+  "[notice.model_migrations]",
+  "\"gpt-5.3-codex\" = \"gpt-5.4\"",
+  "",
+].join("\n");
+
+fs.writeFileSync(configPath, configToml);
+EOF'
+
 echo "==> Starting bridge as non-root user..."
 exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec bridge --config $BRIDGE_CONFIG"

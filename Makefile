@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup fmt run dev-run chat-example chat-claude chat-opencode chat-gemini
+.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup fmt run dev-run chat-example chat-claude chat-opencode chat-codex chat-gemini
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
@@ -84,6 +84,9 @@ chat-claude: chat-example
 
 chat-opencode: CHAT_PROVIDER=opencode
 chat-opencode: chat-example
+
+chat-codex: CHAT_PROVIDER=codex
+chat-codex: chat-example
 
 chat-gemini: CHAT_PROVIDER=gemini
 chat-gemini: chat-example

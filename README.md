@@ -94,6 +94,7 @@ Provider-specific shortcuts:
 ```bash
 make chat-claude
 make chat-opencode
+make chat-codex
 make chat-gemini
 ```
 
@@ -113,6 +114,7 @@ Providers are configured in `config/bridge-dev.yaml` and resolved from pinned lo
 |---|---|---|---|
 | `claude` | `./node_modules/.bin/claude` | PTY interactive | `ANTHROPIC_API_KEY` |
 | `opencode` | `./node_modules/.bin/opencode` | PTY interactive | `OPENAI_API_KEY` |
+| `codex` | `./node_modules/.bin/codex` | PTY interactive | `OPENAI_API_KEY` |
 | `gemini` | `./node_modules/.bin/gemini` | PTY interactive | `GEMINI_API_KEY` |
 
 ---
@@ -275,6 +277,7 @@ Note: `grpcurl` does not support JWT injection. For JWT-authenticated RPCs use t
 | `make chat-example` | Run the interactive PTY example using `CHAT_PROVIDER` and `CHAT_REPO` |
 | `make chat-claude` | Run the interactive PTY example with the `claude` provider |
 | `make chat-opencode` | Run the interactive PTY example with the `opencode` provider |
+| `make chat-codex` | Run the interactive PTY example with the `codex` provider |
 | `make chat-gemini` | Run the interactive PTY example with the `gemini` provider |
 | `make proto` | Regenerate protobuf Go code |
 | `make lint` | Run golangci-lint |
