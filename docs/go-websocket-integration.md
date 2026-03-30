@@ -1,5 +1,7 @@
 # Go HTTP WebSocket Integration
 
+> Machine-readable summary: This guide shows how to expose the ai-agent-bridge WebSocket JSON protocol from a Go HTTP server. Uses `pkg/bridgeclient` methods: `StartSession`, `StopSession`, `GetSession`, `ListSessions`, `AttachSession` (returns `*OutputStream`, call `RecvAll`), `WriteInput`, `ResizeSession`, `Health`, `ListProviders`.
+
 This guide shows how to expose the ai-agent-bridge WebSocket JSON protocol from a Go HTTP server using `pkg/bridgeclient`.
 
 The same JSON protocol is understood by the `useBridgeSession` React hook and the `@ai-agent-bridge/client-node` package.
@@ -46,16 +48,20 @@ type ClientMessage struct {
     Provider   string            `json:"provider,omitempty"`
     AgentOpts  map[string]string `json:"agentOpts,omitempty"`
 
-    // send_input
-    Text           string `json:"text,omitempty"`
-    IdempotencyKey string `json:"idempotencyKey,omitempty"`
+    // write_input / attach_session / resize_session
+    ClientID string `json:"clientId,omitempty"`
+    Text     string `json:"text,omitempty"`   // write_input: text to send (encoded as bytes)
+    Data     []byte `json:"data,omitempty"`   // write_input: raw bytes alternative
 
     // stop_session
     Force bool `json:"force,omitempty"`
 
-    // stream_events
-    AfterSeq     uint64 `json:"afterSeq,omitempty"`
-    SubscriberID string `json:"subscriberId,omitempty"`
+    // attach_session
+    AfterSeq uint64 `json:"afterSeq,omitempty"`
+
+    // resize_session
+    Cols uint32 `json:"cols,omitempty"`
+    Rows uint32 `json:"rows,omitempty"`
 
     // list_sessions — uses ProjectID above
 }
@@ -70,9 +76,10 @@ type ServerMessage struct {
 
     // event
     Seq       uint64 `json:"seq,omitempty"`
+    SessionID string `json:"sessionId,omitempty"`
     EventType string `json:"eventType,omitempty"`
-    Stream    string `json:"stream,omitempty"`
-    Done      bool   `json:"done,omitempty"`
+    Payload   []byte `json:"payload,omitempty"`  // raw PTY bytes
+    Replay    bool   `json:"replay,omitempty"`
 
     // input_accepted
     Accepted bool `json:"accepted,omitempty"`
@@ -134,12 +141,10 @@ func sessionStatusString(s int32) string {
     return "unspecified"
 }
 
-func eventTypeString(t int32) string {
+func attachEventTypeString(t int32) string {
     types := map[int32]string{
-        0: "unspecified", 1: "session_started", 2: "session_stopped",
-        3: "session_failed", 4: "stdout", 5: "stderr",
-        6: "input_received", 7: "buffer_overflow",
-        8: "agent_ready", 9: "response_complete",
+        0: "unspecified", 1: "attached", 2: "output",
+        3: "replay_gap", 4: "session_exit", 5: "error",
     }
     if name, ok := types[t]; ok {
         return name
@@ -241,6 +246,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         }
 
         switch msg.Type {
+        case "resize_session":
+            _, err := h.client.ResizeSession(ctx, &bridgev1.ResizeSessionRequest{
+                SessionId: msg.SessionID,
+                ClientId:  msg.ClientID,
+                Cols:      msg.Cols,
+                Rows:      msg.Rows,
+            })
+            if err != nil {
+                sendErr("resize_session_error", err.Error())
+            }
+
         case "start_session":
             resp, err := h.client.StartSession(ctx, &bridgev1.StartSessionRequest{
                 ProjectId: msg.ProjectID,
@@ -265,10 +281,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             })
 
         case "send_input":
-            resp, err := h.client.SendInput(ctx, &bridgev1.SendInputRequest{
-                SessionId:      msg.SessionID,
-                Text:           msg.Text,
-                IdempotencyKey: msg.IdempotencyKey,
+            resp, err := h.client.WriteInput(ctx, &bridgev1.WriteInputRequest{
+                SessionId: msg.SessionID,
+                ClientId:  msg.ClientID,
+                Data:      []byte(msg.Text),
             })
             if err != nil {
                 sendErr("send_input_error", err.Error())
@@ -277,7 +293,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
             send(ServerMessage{
                 Type:     "input_accepted",
                 Accepted: resp.Accepted,
-                Seq:      resp.Seq,
             })
 
         case "stop_session":
@@ -295,7 +310,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
                 Status:    sessionStatusString(int32(resp.Status)),
             })
 
-        case "stream_events":
+        case "attach_session":
             sessionID := msg.SessionID
 
             // Cancel any existing stream for this session
@@ -311,25 +326,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
                     delete(activeStreams, sessionID)
                 }()
 
-                stream, err := h.client.StreamEvents(streamCtx, &bridgev1.StreamEventsRequest{
-                    SessionId:    sessionID,
-                    AfterSeq:     msg.AfterSeq,
-                    SubscriberId: msg.SubscriberID,
+                stream, err := h.client.AttachSession(streamCtx, &bridgev1.AttachSessionRequest{
+                    SessionId: sessionID,
+                    ClientId:  msg.ClientID,
+                    AfterSeq:  msg.AfterSeq,
                 })
                 if err != nil {
-                    sendErr("stream_events_error", err.Error())
+                    sendErr("attach_session_error", err.Error())
                     return
                 }
 
-                stream.RecvAll(streamCtx, func(ev *bridgev1.SessionEvent) error {
+                stream.RecvAll(streamCtx, func(ev *bridgev1.AttachSessionEvent) error {
                     send(ServerMessage{
                         Type:      "event",
                         Seq:       ev.Seq,
                         SessionID: ev.SessionId,
-                        EventType: eventTypeString(int32(ev.Type)),
-                        Stream:    ev.Stream,
-                        Text:      ev.Text,
-                        Done:      ev.Done,
+                        EventType: attachEventTypeString(int32(ev.Type)),
+                        Payload:   ev.Payload,
+                        Replay:    ev.Replay,
                         Error:     ev.Error,
                     })
                     return nil
@@ -559,6 +573,7 @@ upgrader := websocket.Upgrader{
 
 ## 7. Related
 
-- Node.js bridge client: [`packages/bridge-client-node`](../packages/bridge-client-node/README.md)
-- Go bridge client API: [`pkg/bridgeclient`](../pkg/bridgeclient/)
-- gRPC proto definition: [`proto/bridge/v1/bridge.proto`](../proto/bridge/v1/bridge.proto)
+- [Node.js SDK reference](node-sdk.md)
+- [Go SDK reference](go-sdk.md)
+- [gRPC API reference](grpc-api.md)
+- Proto definition: [`proto/bridge/v1/bridge.proto`](../proto/bridge/v1/bridge.proto)

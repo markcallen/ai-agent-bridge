@@ -1,16 +1,41 @@
 # AI Agent Bridge
 
+[![CI](https://github.com/markcallen/ai-agent-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/ci.yml)
 [![Smoke Tests](https://github.com/markcallen/ai-agent-bridge/actions/workflows/smoke.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/smoke.yml)
+[![Release](https://github.com/markcallen/ai-agent-bridge/actions/workflows/release.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/release.yml)
+[![Docker](https://github.com/markcallen/ai-agent-bridge/actions/workflows/docker.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/docker.yml)
+[![License](https://img.shields.io/github/license/markcallen/ai-agent-bridge)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/markcallen/ai-agent-bridge)](https://github.com/markcallen/ai-agent-bridge/releases)
 
-A standalone gRPC daemon and Go SDK that provides a secure, zero-trust communication layer between control-plane systems and AI agent processes. It manages AI agent subprocess lifecycles and exposes a PTY transport so a client can see and interact with the same terminal UI the agent would show locally.
+A standalone gRPC daemon and SDK that manages AI agent subprocess lifecycles and exposes a PTY transport so any client can attach to, interact with, and replay the terminal output of a running AI agent — regardless of when it connected.
 
-## Quick Start
+Supported providers: **Claude**, **Codex**, **OpenCode**, **Gemini**
+
+---
+
+## How It Works
+
+```
+Your App (Go / Node.js / Browser)
+    ↕ Go SDK  or  Node.js SDK  or  raw gRPC
+ai-agent-bridge daemon
+    ↕ PTY
+AI Agent process (claude / codex / opencode / gemini)
+```
+
+The bridge daemon spawns AI agents inside PTYs, buffers their output in a bounded ring buffer with sequence numbers, and serves a gRPC API. Clients can attach at any time, replay buffered output, and stream live PTY bytes. Authentication uses mTLS + JWT (Ed25519).
+
+See [docs/service.md](docs/service.md) for architecture details.
+
+---
+
+## Quick Start (run the server)
 
 ### Prerequisites
 
 - [Go 1.25+](https://go.dev/dl/)
 - `npm`
-- (Optional) `protoc` with `protoc-gen-go` and `protoc-gen-go-grpc` — only needed if modifying `.proto` files
+- (optional) `protoc` + `protoc-gen-go` + `protoc-gen-go-grpc` — only if modifying `.proto` files
 
 ### 1. Clone and configure
 
@@ -22,122 +47,118 @@ cp .env.example .env
 
 Edit `.env` and add your API keys:
 
-```bash
+```
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=...
 ```
 
-### 2. Start the bridge
+### 2. Start the daemon
 
 ```bash
 make dev-run
 ```
 
-This builds the binaries, installs the pinned local AI-agent CLIs into `node_modules`, generates dev TLS certificates and JWT signing keys, then starts the bridge daemon on `127.0.0.1:9445` with mTLS and JWT authentication.
+This builds the binaries, installs the pinned AI agent CLIs into `node_modules`, generates dev TLS certificates and JWT signing keys, then starts the daemon on `127.0.0.1:9445` with mTLS + JWT.
 
-### Docker bridge
+### 3. Try an interactive session
 
-To run the bridge inside Docker with your host `~/repos` mounted at `/repos` inside the container:
+```bash
+make chat-claude     # or chat-opencode, chat-codex, chat-gemini
+```
+
+### Docker
 
 ```bash
 docker compose up --build bridge
 ```
 
-This uses `config/bridge-docker.yaml` and mounts:
-- `~/repos` -> `/repos`
-- `./certs` -> `/app/certs`
-
-If you want to start an agent inside `/repos/penduin`, use the interactive example from another terminal:
-
-```bash
-go run ./examples/chat \
-  -target 127.0.0.1:9445 \
-  -provider claude \
-  -project dev \
-  -cacert certs/ca-bundle.crt \
-  -cert certs/dev-client.crt \
-  -key certs/dev-client.key \
-  -jwt-key certs/jwt-signing.key \
-  -jwt-issuer dev \
-  -timeout 30m \
-  /repos/penduin
-```
-
-### 3. Run the interactive PTY example
-
-In a second terminal:
-
-```bash
-make chat-claude
-```
+Mounts `~/repos` → `/repos` and `./certs` → `/app/certs`. The prebuilt image is available at `ghcr.io/markcallen/ai-agent-bridge`.
 
 ---
 
-## Running the Examples
+## Installing the Go SDK
 
-### `chat` — interactive PTY passthrough session
-
-Opens a live PTY session against the remote bridge. The local terminal shows the same screen the provider renders on the server, and your keystrokes are written directly back to the remote PTY.
+Add the SDK to your Go module:
 
 ```bash
-make chat-example
+go get github.com/markcallen/ai-agent-bridge/pkg/bridgeclient
 ```
 
-| Variable | Default | Description |
-|---|---|---|
-| `CHAT_PROVIDER` | `claude` | Provider name from config |
-| `CHAT_REPO` | `/repos/penduin` | Repo path passed to the agent |
+### Minimal example
 
-Provider-specific shortcuts:
+```go
+import (
+    "context"
+    "github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+    bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+)
 
-```bash
-make chat-claude
-make chat-opencode
-make chat-codex
-make chat-gemini
+// Connect (no TLS — for local dev with auth disabled)
+client, err := bridgeclient.New(
+    bridgeclient.WithTarget("127.0.0.1:9445"),
+)
+if err != nil { ... }
+defer client.Close()
+
+ctx := context.Background()
+
+// Start an agent session
+_, err = client.StartSession(ctx, &bridgev1.StartSessionRequest{
+    ProjectId: "my-project",
+    SessionId: "session-001",
+    RepoPath:  "/path/to/repo",
+    Provider:  "claude",
+})
+
+// Attach and stream output
+stream, err := client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
+    SessionId: "session-001",
+})
+stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {
+    fmt.Print(string(ev.Payload))
+    return nil
+})
+
+// Send input
+client.WriteInput(ctx, &bridgev1.WriteInputRequest{
+    SessionId: "session-001",
+    Data:      []byte("hello\n"),
+})
 ```
 
-Override the repo path when needed:
+### With mTLS + JWT (production)
 
-```bash
-make chat-gemini CHAT_REPO=/repos/your-repo
+```go
+client, err := bridgeclient.New(
+    bridgeclient.WithTarget("bridge.internal:9445"),
+    bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
+        CABundlePath: "certs/ca-bundle.crt",
+        CertPath:     "certs/client.crt",
+        KeyPath:      "certs/client.key",
+        ServerName:   "bridge.local",
+    }),
+    bridgeclient.WithJWT(bridgeclient.JWTConfig{
+        PrivateKeyPath: "certs/jwt-signing.key",
+        Issuer:         "my-service",
+        Audience:       "bridge",
+    }),
+)
 ```
+
+Full Go SDK reference: [docs/go-sdk.md](docs/go-sdk.md)
 
 ---
 
-## Providers
-
-Providers are configured in `config/bridge-dev.yaml` and resolved from pinned local binaries in `node_modules/.bin`:
-
-| Provider | Binary | Mode | Required env |
-|---|---|---|---|
-| `claude` | `./node_modules/.bin/claude` | PTY interactive | `ANTHROPIC_API_KEY` |
-| `opencode` | `./node_modules/.bin/opencode` | PTY interactive | `OPENAI_API_KEY` |
-| `codex` | `./node_modules/.bin/codex` | PTY interactive | `OPENAI_API_KEY` |
-| `gemini` | `./node_modules/.bin/gemini` | PTY interactive | `GEMINI_API_KEY` |
-
----
-
-## Using from a Browser (Node.js + React)
-
-Browsers can't speak gRPC directly. The `packages/bridge-client-node` package provides a Node.js adapter that sits between browser clients and the bridge daemon:
-
-```
-React App (Browser)
-    ↕ WebSocket (JSON protocol)
-Next.js or Go HTTP server
-    ↕ gRPC
-ai-agent-bridge daemon
-```
-
-### Node.js quick start
+## Installing the Node.js SDK
 
 ```bash
 npm install @ai-agent-bridge/client-node
 ```
 
-**Next.js Pages Router** — create `pages/api/bridge.ts`:
+### Next.js Pages Router
+
+Create `pages/api/bridge.ts`:
 
 ```ts
 import { createNextJsBridgeRoute } from "@ai-agent-bridge/client-node";
@@ -145,7 +166,7 @@ export default createNextJsBridgeRoute({ bridgeAddr: "localhost:9445" });
 export const config = { api: { bodyParser: false } };
 ```
 
-**React hook**:
+### React hook
 
 ```tsx
 import { useBridgeSession } from "@ai-agent-bridge/client-node/react";
@@ -155,71 +176,24 @@ function AgentPanel() {
 
   return (
     <>
-      <button onClick={() => bridge.startSession({ projectId: "p1", repoPath: "/repo", provider: "claude" })}>
-        Start
-      </button>
-      {bridge.events.map((ev) => <p key={ev.seq}>{ev.text}</p>)}
+      <button onClick={() => bridge.startSession({
+        projectId: "p1",
+        repoPath: "/repo",
+        provider: "claude",
+      })}>Start</button>
+      {bridge.events.map(ev => <p key={ev.seq}>{ev.text}</p>)}
     </>
   );
 }
 ```
 
-See [`packages/bridge-client-node/README.md`](packages/bridge-client-node/README.md) for the full API, App Router custom server setup, and the Go HTTP WebSocket integration guide at [`docs/go-websocket-integration.md`](docs/go-websocket-integration.md).
-
----
-
-## Using the Go SDK
-
-Import `pkg/bridgeclient` to connect from your own Go program.
-
-### Without TLS (plain dev mode)
-
-```go
-client, err := bridgeclient.New(
-    bridgeclient.WithTarget("127.0.0.1:9445"),
-)
-```
-
-### With mTLS + JWT
-
-```go
-client, err := bridgeclient.New(
-    bridgeclient.WithTarget("127.0.0.1:9445"),
-    bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
-        CABundlePath: "certs/ca-bundle.crt",
-        CertPath:     "certs/dev-client.crt",
-        KeyPath:      "certs/dev-client.key",
-        ServerName:   "bridge.local",
-    }),
-    bridgeclient.WithJWT(bridgeclient.JWTConfig{
-        PrivateKeyPath: "certs/jwt-signing.key",
-        Issuer:         "dev",
-        Audience:       "bridge",
-    }),
-)
-```
-
-### Basic usage
-
-```go
-ctx := context.Background()
-
-// Start a session
-_, err = client.StartSession(ctx, &bridgev1.StartSessionRequest{
-    ProjectId: "my-project",
-    SessionId: "session-001",
-    RepoPath:  "/path/to/repo",
-    Provider:  "claude",
-})
-```
-
-See `examples/chat/main.go` for the full working example.
+Full Node.js SDK reference: [docs/node-sdk.md](docs/node-sdk.md)
 
 ---
 
 ## Using grpcurl
 
-Install [grpcurl](https://github.com/fullstorydev/grpcurl) to call the bridge from the shell.
+Install [grpcurl](https://github.com/fullstorydev/grpcurl) to call the bridge from a shell.
 
 **With mTLS** (after `make dev-run`):
 
@@ -233,7 +207,7 @@ grpcurl \
   127.0.0.1:9445 bridge.v1.BridgeService/Health
 ```
 
-**Without TLS** (bridge started with auth disabled):
+**Without TLS** (auth disabled):
 
 ```bash
 # Health check
@@ -242,18 +216,18 @@ grpcurl -plaintext -import-path proto -proto bridge/v1/bridge.proto \
 
 # Start a session
 grpcurl -plaintext -import-path proto -proto bridge/v1/bridge.proto \
-  -d '{"project_id":"dev","session_id":"s1","repo_path":"/tmp","provider":"claude-chat"}' \
+  -d '{"project_id":"dev","session_id":"s1","repo_path":"/tmp","provider":"claude"}' \
   127.0.0.1:9445 bridge.v1.BridgeService/StartSession
 
 # Send input
 grpcurl -plaintext -import-path proto -proto bridge/v1/bridge.proto \
-  -d '{"session_id":"s1","text":"hello"}' \
-  127.0.0.1:9445 bridge.v1.BridgeService/SendInput
+  -d '{"session_id":"s1","client_id":"c1","data":"aGVsbG8K"}' \
+  127.0.0.1:9445 bridge.v1.BridgeService/WriteInput
 
-# Stream events
+# Stream output
 grpcurl -plaintext -import-path proto -proto bridge/v1/bridge.proto \
-  -d '{"session_id":"s1"}' \
-  127.0.0.1:9445 bridge.v1.BridgeService/StreamEvents
+  -d '{"session_id":"s1","client_id":"c1"}' \
+  127.0.0.1:9445 bridge.v1.BridgeService/AttachSession
 
 # Stop a session
 grpcurl -plaintext -import-path proto -proto bridge/v1/bridge.proto \
@@ -261,84 +235,96 @@ grpcurl -plaintext -import-path proto -proto bridge/v1/bridge.proto \
   127.0.0.1:9445 bridge.v1.BridgeService/StopSession
 ```
 
-Note: `grpcurl` does not support JWT injection. For JWT-authenticated RPCs use the Go SDK.
+Note: `data` is base64-encoded bytes. `grpcurl` does not support JWT injection — use the Go SDK for JWT-authenticated calls.
+
+Full API reference: [docs/grpc-api.md](docs/grpc-api.md)
+
+---
+
+## Providers
+
+| Provider | Binary | Required env |
+|----------|--------|--------------|
+| `claude` | `./node_modules/.bin/claude` | `ANTHROPIC_API_KEY` |
+| `opencode` | `./node_modules/.bin/opencode` | `OPENAI_API_KEY` |
+| `codex` | `./node_modules/.bin/codex` | `OPENAI_API_KEY` |
+| `gemini` | `./node_modules/.bin/gemini` | `GEMINI_API_KEY` |
+
+Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs/service.md) for configuration reference.
 
 ---
 
 ## Makefile Targets
 
 | Target | Description |
-|---|---|
-| `make dev-run` | Build, generate dev certs, and start the bridge (quickest path) |
+|--------|-------------|
+| `make dev-run` | Build, generate dev certs, start the daemon |
 | `make build` | Build `bin/bridge` and `bin/bridge-ca` |
-| `make test` | Run all unit tests with race detection |
-| `make test-e2e` | Run the dockerized end-to-end test suite |
+| `make test` | Run unit tests with race detection |
+| `make test-e2e` | Run the Dockerized end-to-end test suite |
 | `make test-cover` | Run tests with coverage report |
-| `make chat-example` | Run the interactive PTY example using `CHAT_PROVIDER` and `CHAT_REPO` |
-| `make chat-claude` | Run the interactive PTY example with the `claude` provider |
-| `make chat-opencode` | Run the interactive PTY example with the `opencode` provider |
-| `make chat-codex` | Run the interactive PTY example with the `codex` provider |
-| `make chat-gemini` | Run the interactive PTY example with the `gemini` provider |
-| `make proto` | Regenerate protobuf Go code |
+| `make chat-claude` | Interactive PTY session with Claude |
+| `make chat-opencode` | Interactive PTY session with OpenCode |
+| `make chat-codex` | Interactive PTY session with Codex |
+| `make chat-gemini` | Interactive PTY session with Gemini |
+| `make proto` | Regenerate protobuf Go code (after editing `.proto`) |
 | `make lint` | Run golangci-lint |
-| `make fmt` | Format code with gofmt and goimports |
+| `make fmt` | Format code with gofmt + goimports |
 | `make dev-setup` | Build binaries and generate dev certificates |
 | `make certs` | Initialize a bridge CA in `certs/` |
 | `make clean` | Remove build artifacts |
 
-### Dockerized E2E tests
+---
+
+## bridge-ca: Certificate and Key Management
 
 ```bash
-make test-e2e
+bridge-ca init          # Initialize a new ECDSA P-384 CA
+bridge-ca issue         # Issue a server or client certificate
+bridge-ca cross-sign    # Cross-sign an external CA for multi-tenant trust
+bridge-ca bundle        # Build a trust bundle from multiple CA certs
+bridge-ca jwt-keygen    # Generate an Ed25519 keypair for JWT signing
+bridge-ca verify        # Verify a certificate against a trust bundle
 ```
 
-Builds `bridge` and `test-client` containers, starts the bridge with mTLS+JWT, and runs the full e2e scenario against it (requires `ANTHROPIC_API_KEY` in the environment).
+Run `bridge-ca <command> --help` for flags.
 
 ---
 
 ## Project Structure
 
 ```
-cmd/bridge/                    Bridge daemon binary
+cmd/bridge/                    Daemon binary
 cmd/bridge-ca/                 CA and certificate management CLI
-pkg/bridgeclient/              Go SDK for consumer integration
-packages/bridge-client-node/   Node.js gRPC→WebSocket adapter + React hook
+pkg/bridgeclient/              Go SDK
+packages/bridge-client-node/   Node.js gRPC-to-WebSocket adapter + React hook
 proto/bridge/v1/               Protobuf service definitions
-gen/bridge/v1/                 Generated protobuf Go code
-internal/auth/                 mTLS, JWT, and gRPC interceptors
-internal/bridge/               Session supervisor, event buffer, provider registry, policy
-internal/config/               YAML configuration loader and env var validation
-internal/pki/                  CA management, cert issuance, cross-signing, verification
-internal/provider/             Stdio/PTY-based provider adapters
-internal/server/               gRPC server implementation
+gen/bridge/v1/                 Generated protobuf Go code (do not edit)
+internal/auth/                 mTLS, JWT, gRPC interceptors
+internal/bridge/               Session supervisor, event buffer, registry, policy
+internal/config/               YAML configuration loader
+internal/pki/                  CA management, cert issuance, cross-signing
+internal/provider/             Stdio/PTY provider adapters
+internal/server/               gRPC server implementation + rate limiting
 examples/chat/                 Interactive PTY passthrough example
-docs/                          Integration guides
+docs/                          Integration guides and API reference
 config/                        Default configuration files
 scripts/                       Development helper scripts
 ```
 
 ---
 
-## bridge-ca Commands
+## Documentation
 
-```bash
-bridge-ca init         # Initialize a new CA
-bridge-ca issue        # Issue a server or client certificate
-bridge-ca cross-sign   # Cross-sign an external CA certificate
-bridge-ca bundle       # Build a trust bundle from multiple CA certs
-bridge-ca jwt-keygen   # Generate Ed25519 keypair for JWT signing
-bridge-ca verify       # Verify a certificate against a trust bundle
-```
-
-Run `bridge-ca <command> --help` for details.
+- [docs/service.md](docs/service.md) — Architecture, configuration reference, security
+- [docs/go-sdk.md](docs/go-sdk.md) — Go SDK reference
+- [docs/node-sdk.md](docs/node-sdk.md) — Node.js SDK and React hook reference
+- [docs/grpc-api.md](docs/grpc-api.md) — Full gRPC API reference
+- [docs/go-websocket-integration.md](docs/go-websocket-integration.md) — Go HTTP WebSocket integration guide
+- [packages/bridge-client-node/README.md](packages/bridge-client-node/README.md) — Node.js client deep dive
 
 ---
 
-## Documentation
+## License
 
-- [PRD.md](PRD.md) — Product requirements document
-- [ARCHITECTURE.md](ARCHITECTURE.md) — System architecture and design
-- [PLAN.md](PLAN.md) — Implementation plan
-- [TODO.md](TODO.md) — Current task tracking
-- [packages/bridge-client-node/README.md](packages/bridge-client-node/README.md) — Node.js client and React hook
-- [docs/go-websocket-integration.md](docs/go-websocket-integration.md) — Go HTTP WebSocket integration guide
+MIT License - see [LICENSE](LICENSE) file for details.
