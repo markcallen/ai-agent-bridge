@@ -1,0 +1,24 @@
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      BRIDGE_CONFIG: /app/config/bridge-docker.yaml
+      BRIDGE_CN: bridge.local
+      BRIDGE_SANS: bridge.local,localhost,127.0.0.1
+      BRIDGE_CLIENT_CN: dev-client
+    ports:
+      - "9445:9445"
+    volumes:
+      - ./certs:/app/certs
+      - ./config/bridge-docker.yaml:/app/config/bridge-docker.yaml:ro
+      - ${HOME}/repos:/repos
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 30s

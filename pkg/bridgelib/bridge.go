@@ -50,24 +50,16 @@ func New(cfg Config) (*Bridge, error) {
 		providers = []ProviderConfig{{ID: "claude"}}
 	}
 	for _, pc := range providers {
-		var prov bridge.Provider
-		switch pc.ID {
-		case "claude":
-			prov = provider.NewClaudeProvider()
-		case "opencode":
-			prov = provider.NewOpenCodeProvider()
-		default:
-			prov = provider.NewStdioProvider(provider.StdioConfig{
-				ProviderID:     pc.ID,
-				Binary:         pc.Binary,
-				DefaultArgs:    pc.Args,
-				StartupTimeout: pc.StartupTimeout,
-				StopGrace:      pc.StopGrace,
-				StartupProbe:   "prompt",
-				PromptPattern:  pc.PromptPattern,
-				RequiredEnv:    pc.RequiredEnv,
-			})
-		}
+		prov := provider.NewStdioProvider(provider.StdioConfig{
+			ProviderID:     pc.ID,
+			Binary:         pc.Binary,
+			DefaultArgs:    pc.Args,
+			StartupTimeout: pc.StartupTimeout,
+			StopGrace:      pc.StopGrace,
+			StartupProbe:   "prompt",
+			PromptPattern:  pc.PromptPattern,
+			RequiredEnv:    pc.RequiredEnv,
+		})
 		if err := registry.Register(prov); err != nil {
 			return nil, fmt.Errorf("register provider %q: %w", pc.ID, err)
 		}

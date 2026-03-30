@@ -36,6 +36,34 @@ make dev-run
 
 This builds the binaries, installs the pinned local AI-agent CLIs into `node_modules`, generates dev TLS certificates and JWT signing keys, then starts the bridge daemon on `127.0.0.1:9445` with mTLS and JWT authentication.
 
+### Docker bridge
+
+To run the bridge inside Docker with your host `~/repos` mounted at `/repos` inside the container:
+
+```bash
+docker compose up --build bridge
+```
+
+This uses `config/bridge-docker.yaml` and mounts:
+- `~/repos` -> `/repos`
+- `./certs` -> `/app/certs`
+
+If you want to start an agent inside `/repos/penduin`, use the interactive example from another terminal:
+
+```bash
+go run ./examples/chat \
+  -target 127.0.0.1:9445 \
+  -provider claude \
+  -project dev \
+  -cacert certs/ca-bundle.crt \
+  -cert certs/dev-client.crt \
+  -key certs/dev-client.key \
+  -jwt-key certs/jwt-signing.key \
+  -jwt-issuer dev \
+  -timeout 30m \
+  /repos/penduin
+```
+
 ### 3. Run the interactive PTY example
 
 In a second terminal:

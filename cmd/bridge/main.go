@@ -57,24 +57,16 @@ func main() {
 	// Set up provider registry
 	registry := bridge.NewRegistry()
 	for name, pcfg := range cfg.Providers {
-		var p bridge.Provider
-		switch name {
-		case "claude":
-			p = provider.NewClaudeProvider()
-		case "opencode":
-			p = provider.NewOpenCodeProvider()
-		default:
-			p = provider.NewStdioProvider(provider.StdioConfig{
-				ProviderID:     name,
-				Binary:         pcfg.Binary,
-				DefaultArgs:    pcfg.Args,
-				StartupTimeout: config.ParseDuration(pcfg.StartupTimeout, 30e9),
-				StopGrace:      config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
-				StartupProbe:   pcfg.StartupProbe,
-				PromptPattern:  pcfg.PromptPattern,
-				RequiredEnv:    pcfg.RequiredEnv,
-			})
-		}
+		p := provider.NewStdioProvider(provider.StdioConfig{
+			ProviderID:     name,
+			Binary:         pcfg.Binary,
+			DefaultArgs:    pcfg.Args,
+			StartupTimeout: config.ParseDuration(pcfg.StartupTimeout, 30e9),
+			StopGrace:      config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
+			StartupProbe:   pcfg.StartupProbe,
+			PromptPattern:  pcfg.PromptPattern,
+			RequiredEnv:    pcfg.RequiredEnv,
+		})
 		if err := registry.Register(p); err != nil {
 			logger.Error("register provider", "provider", name, "error", err)
 			os.Exit(1)

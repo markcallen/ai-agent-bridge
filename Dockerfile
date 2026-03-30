@@ -41,6 +41,7 @@ COPY --from=build /out/bridge-ca /usr/local/bin/bridge-ca
 COPY package.json package-lock.json /app/
 RUN npm ci --omit=dev
 COPY config/bridge.yaml /app/config/bridge.yaml
+COPY config/bridge-docker.yaml /app/config/bridge-docker.yaml
 COPY docker-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
