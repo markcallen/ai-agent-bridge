@@ -10,6 +10,7 @@ func NewOpenCodeProvider() *StdioProvider {
 		DefaultArgs:    nil,
 		StartupTimeout: 45 * time.Second,
 		StopGrace:      10 * time.Second,
+		StartupProbe:   "output",
 		RequiredEnv:    []string{"OPENAI_API_KEY"},
 		PromptPattern:  `❯`,
 	})

@@ -36,18 +36,21 @@ providers:
     binary: "claude"
     args: ["--dangerously-skip-permissions", "--verbose"]
     startup_timeout: "60s"
+    startup_probe: "prompt"
     required_env: ["ANTHROPIC_API_KEY"]
     prompt_pattern: "(?m)(❯|>\\s*$)"
   opencode:
     binary: "opencode"
     args: []
     startup_timeout: "45s"
+    startup_probe: "output"
     required_env: ["OPENAI_API_KEY"]
     prompt_pattern: "❯"
   gemini:
     binary: "gemini"
     args: []
     startup_timeout: "60s"
+    startup_probe: "output"
     required_env: ["GEMINI_API_KEY"]
     prompt_pattern: "^\\s*>\\s*$"
 

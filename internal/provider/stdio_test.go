@@ -35,4 +35,7 @@ func TestBuildCommandIncludesProviderArgs(t *testing.T) {
 	if cmd.Args[1] != "hello" || cmd.Args[2] != "world" {
 		t.Fatalf("unexpected args: %v", cmd.Args)
 	}
+	if cmd.SysProcAttr != nil {
+		t.Fatalf("SysProcAttr=%#v want nil for PTY launch commands", cmd.SysProcAttr)
+	}
 }

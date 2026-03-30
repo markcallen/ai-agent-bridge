@@ -63,6 +63,7 @@ func New(cfg Config) (*Bridge, error) {
 				DefaultArgs:    pc.Args,
 				StartupTimeout: pc.StartupTimeout,
 				StopGrace:      pc.StopGrace,
+				StartupProbe:   "prompt",
 				PromptPattern:  pc.PromptPattern,
 				RequiredEnv:    pc.RequiredEnv,
 			})

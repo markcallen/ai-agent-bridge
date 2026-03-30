@@ -23,6 +23,7 @@ type StdioConfig struct {
 	DefaultArgs    []string
 	StartupTimeout time.Duration
 	StopGrace      time.Duration
+	StartupProbe   string
 	PromptPattern  string
 	RequiredEnv    []string
 }
@@ -39,6 +40,9 @@ func NewStdioProvider(cfg StdioConfig) *StdioProvider {
 	}
 	if cfg.StopGrace <= 0 {
 		cfg.StopGrace = 10 * time.Second
+	}
+	if cfg.StartupProbe == "" {
+		cfg.StartupProbe = "prompt"
 	}
 	p := &StdioProvider{cfg: cfg}
 	if cfg.PromptPattern != "" {
@@ -67,7 +71,6 @@ func (p *StdioProvider) BuildCommand(ctx context.Context, cfg bridge.SessionConf
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = cfg.RepoPath
 	cmd.Env = filterEnv(os.Environ())
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return cmd, nil
 }
 
@@ -77,22 +80,38 @@ func (p *StdioProvider) ValidateStartup(ctx context.Context) error {
 			return fmt.Errorf("provider %q requires env var %q", p.cfg.ProviderID, envName)
 		}
 	}
+	if p.promptRe == nil {
+		if p.cfg.StartupProbe == "prompt" {
+			return nil
+		}
+	}
+	switch p.cfg.StartupProbe {
+	case "none":
+		return nil
+	case "output":
+		return p.validateStartupOutput(ctx)
+	case "prompt":
+		return p.validateStartupPrompt(ctx)
+	default:
+		return fmt.Errorf("provider %q has unsupported startup probe %q", p.cfg.ProviderID, p.cfg.StartupProbe)
+	}
+}
+
+func (p *StdioProvider) validateStartupPrompt(ctx context.Context) error {
+	if p.promptRe == nil {
+		return nil
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, p.cfg.StartupTimeout)
+	defer cancel()
+
 	binPath, err := resolveBinaryPath(p.cfg.Binary)
 	if err != nil {
 		return err
 	}
-	if p.promptRe == nil {
-		return nil
-	}
-
-	probeCtx, cancel := context.WithTimeout(ctx, p.cfg.StartupTimeout)
-	defer cancel()
-
 	wd, _ := os.Getwd()
 	cmd := exec.CommandContext(probeCtx, binPath, p.cfg.DefaultArgs...)
 	cmd.Dir = wd
 	cmd.Env = filterEnv(os.Environ())
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 120, Rows: 40})
 	if err != nil {
@@ -115,9 +134,55 @@ func (p *StdioProvider) ValidateStartup(ctx context.Context) error {
 		n, readErr := ptmx.Read(buf)
 		if n > 0 {
 			seen.Write(buf[:n])
-			if p.promptRe == nil || p.promptRe.Match(seen.Bytes()) {
+			if p.promptRe.Match(seen.Bytes()) {
 				return nil
 			}
+		}
+		if readErr != nil {
+			if os.IsTimeout(readErr) {
+				continue
+			}
+			return fmt.Errorf("provider %q startup probe failed: %v; output:\n%s", p.cfg.ProviderID, readErr, seen.String())
+		}
+	}
+}
+
+func (p *StdioProvider) validateStartupOutput(ctx context.Context) error {
+	probeCtx, cancel := context.WithTimeout(ctx, p.cfg.StartupTimeout)
+	defer cancel()
+
+	binPath, err := resolveBinaryPath(p.cfg.Binary)
+	if err != nil {
+		return err
+	}
+	wd, _ := os.Getwd()
+	cmd := exec.CommandContext(probeCtx, binPath, p.cfg.DefaultArgs...)
+	cmd.Dir = wd
+	cmd.Env = filterEnv(os.Environ())
+
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 120, Rows: 40})
+	if err != nil {
+		return fmt.Errorf("provider %q startup probe: %w", p.cfg.ProviderID, err)
+	}
+	defer func() {
+		_ = ptmx.Close()
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		}
+	}()
+
+	buf := make([]byte, 4096)
+	var seen bytes.Buffer
+	for {
+		if probeCtx.Err() != nil {
+			return fmt.Errorf("provider %q startup probe timed out waiting for output; output:\n%s", p.cfg.ProviderID, seen.String())
+		}
+		_ = ptmx.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		n, readErr := ptmx.Read(buf)
+		if n > 0 {
+			seen.Write(buf[:n])
+			time.Sleep(250 * time.Millisecond)
+			return nil
 		}
 		if readErr != nil {
 			if os.IsTimeout(readErr) {

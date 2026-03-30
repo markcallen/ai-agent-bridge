@@ -70,6 +70,7 @@ func main() {
 				DefaultArgs:    pcfg.Args,
 				StartupTimeout: config.ParseDuration(pcfg.StartupTimeout, 30e9),
 				StopGrace:      config.ParseDuration(cfg.Sessions.StopGracePeriod, 10e9),
+				StartupProbe:   pcfg.StartupProbe,
 				PromptPattern:  pcfg.PromptPattern,
 				RequiredEnv:    pcfg.RequiredEnv,
 			})
@@ -95,6 +96,11 @@ func main() {
 		}
 	}
 	for name := range cfg.Providers {
+		pcfg := cfg.Providers[name]
+		if !pcfg.ShouldValidateStartup() {
+			logger.Info("provider startup validation skipped by config", "provider", name)
+			continue
+		}
 		if p, err := registry.Get(name); err == nil {
 			checkCtx, cancel := context.WithTimeout(context.Background(), p.StartupTimeout())
 			err = p.ValidateStartup(checkCtx)

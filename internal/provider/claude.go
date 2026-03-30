@@ -10,6 +10,7 @@ func NewClaudeProvider() *StdioProvider {
 		DefaultArgs:    []string{"--dangerously-skip-permissions", "--verbose"},
 		StartupTimeout: 60 * time.Second,
 		StopGrace:      10 * time.Second,
+		StartupProbe:   "prompt",
 		RequiredEnv:    []string{"ANTHROPIC_API_KEY"},
 		PromptPattern:  `(?m)(❯|\>\s*$)`,
 	})

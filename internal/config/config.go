@@ -67,17 +67,23 @@ type RateLimitsConfig struct {
 }
 
 type ProviderConfig struct {
-	Binary         string   `yaml:"binary"`
-	Mode           string   `yaml:"mode"` // "exec" for one-shot exec providers (e.g. codex)
-	Args           []string `yaml:"args"`
-	StartupTimeout string   `yaml:"startup_timeout"`
-	RequiredEnv    []string `yaml:"required_env"`
-	PTY            bool     `yaml:"pty"`
-	StreamJSON     bool     `yaml:"stream_json"`
+	Binary          string   `yaml:"binary"`
+	Mode            string   `yaml:"mode"` // "exec" for one-shot exec providers (e.g. codex)
+	Args            []string `yaml:"args"`
+	StartupTimeout  string   `yaml:"startup_timeout"`
+	ValidateStartup *bool    `yaml:"validate_startup"`
+	StartupProbe    string   `yaml:"startup_probe"`
+	RequiredEnv     []string `yaml:"required_env"`
+	PTY             bool     `yaml:"pty"`
+	StreamJSON      bool     `yaml:"stream_json"`
 	// PromptPattern is a regex matched against PTY output lines. When it
 	// matches the first time, AGENT_READY is emitted; on subsequent matches
 	// after output, RESPONSE_COMPLETE is emitted.
 	PromptPattern string `yaml:"prompt_pattern"`
+}
+
+func (p ProviderConfig) ShouldValidateStartup() bool {
+	return p.ValidateStartup == nil || *p.ValidateStartup
 }
 
 type LoggingConfig struct {
@@ -217,6 +223,13 @@ func validate(cfg *Config) error {
 	for name, provider := range cfg.Providers {
 		if provider.Binary == "" {
 			return fmt.Errorf("config: providers.%s.binary is required", name)
+		}
+		if provider.StartupProbe != "" {
+			switch provider.StartupProbe {
+			case "prompt", "output", "none":
+			default:
+				return fmt.Errorf("config: providers.%s.startup_probe must be one of prompt, output, none", name)
+			}
 		}
 		if provider.StartupTimeout != "" {
 			if _, err := time.ParseDuration(provider.StartupTimeout); err != nil {
