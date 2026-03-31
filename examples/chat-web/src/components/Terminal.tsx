@@ -28,60 +28,71 @@ export const Terminal = forwardRef<TerminalHandle, Props>(
     const fitAddonRef = useRef<FitAddon | null>(null);
 
     useEffect(() => {
-      const term = new XTerm({
-        theme: {
-          background: "#0d1117",
-          foreground: "#c9d1d9",
-          cursor: "#58a6ff",
-          black: "#484f58",
-          brightBlack: "#6e7681",
-          red: "#ff7b72",
-          brightRed: "#ffa198",
-          green: "#3fb950",
-          brightGreen: "#56d364",
-          yellow: "#d29922",
-          brightYellow: "#e3b341",
-          blue: "#58a6ff",
-          brightBlue: "#79c0ff",
-          magenta: "#bc8cff",
-          brightMagenta: "#d2a8ff",
-          cyan: "#39c5cf",
-          brightCyan: "#56d4dd",
-          white: "#b1bac4",
-          brightWhite: "#f0f6fc",
-        },
-        fontFamily: '"Cascadia Code", "Fira Code", Menlo, monospace',
-        fontSize: 14,
-        lineHeight: 1.2,
-        cursorBlink: true,
-        scrollback: 5000,
-        allowProposedApi: true,
-      });
+      // Defer initialization to a RAF so React StrictMode's synchronous
+      // cleanup cycle completes before xterm schedules its own internal RAFs.
+      // Without this, xterm's viewport RAF fires on a disposed terminal.
+      let rafId: number;
+      let term: XTerm | null = null;
+      let observer: ResizeObserver | null = null;
+      let disposed = false;
 
-      const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-      term.open(containerRef.current!);
-      fitAddon.fit();
+      rafId = requestAnimationFrame(() => {
+        if (disposed || !containerRef.current) return;
 
-      xtermRef.current = term;
-      fitAddonRef.current = fitAddon;
+        term = new XTerm({
+          theme: {
+            background: "#0d1117",
+            foreground: "#c9d1d9",
+            cursor: "#58a6ff",
+            black: "#484f58",
+            brightBlack: "#6e7681",
+            red: "#ff7b72",
+            brightRed: "#ffa198",
+            green: "#3fb950",
+            brightGreen: "#56d364",
+            yellow: "#d29922",
+            brightYellow: "#e3b341",
+            blue: "#58a6ff",
+            brightBlue: "#79c0ff",
+            magenta: "#bc8cff",
+            brightMagenta: "#d2a8ff",
+            cyan: "#39c5cf",
+            brightCyan: "#56d4dd",
+            white: "#b1bac4",
+            brightWhite: "#f0f6fc",
+          },
+          fontFamily: '"Cascadia Code", "Fira Code", Menlo, monospace',
+          fontSize: 14,
+          lineHeight: 1.2,
+          cursorBlink: true,
+          scrollback: 5000,
+          allowProposedApi: true,
+        });
 
-      if (onData) {
-        term.onData(onData);
-      }
-
-      term.onResize(({ cols, rows }) => {
-        onResize?.(cols, rows);
-      });
-
-      const observer = new ResizeObserver(() => {
+        const fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(containerRef.current!);
         fitAddon.fit();
+
+        xtermRef.current = term;
+        fitAddonRef.current = fitAddon;
+
+        if (onData) term.onData(onData);
+        term.onResize(({ cols, rows }) => { onResize?.(cols, rows); });
+
+        observer = new ResizeObserver(() => {
+          if (!disposed) fitAddon.fit();
+        });
+        observer.observe(containerRef.current!);
       });
-      observer.observe(containerRef.current!);
 
       return () => {
-        observer.disconnect();
-        term.dispose();
+        disposed = true;
+        cancelAnimationFrame(rafId);
+        observer?.disconnect();
+        term?.dispose();
+        xtermRef.current = null;
+        fitAddonRef.current = null;
       };
     // onData / onResize intentionally omitted — captured via closure on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps

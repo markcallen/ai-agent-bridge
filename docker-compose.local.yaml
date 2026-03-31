@@ -22,6 +22,10 @@ services:
       timeout: 2s
       retries: 30
       start_period: 30s
+    networks:
+      default:
+        aliases:
+          - bridge.local
 
   chat-web:
     build:
@@ -32,7 +36,8 @@ services:
       - examples/chat-web/.env
     environment:
       NODE_ENV: development
-      BRIDGE_ADDR: bridge:9445
+      BRIDGE_ADDR: bridge.local:9445
+      VITE_URL: http://vite:5173
       CA_CERT: /app/certs/ca-bundle.crt
       CLIENT_CERT: /app/certs/dev-client.crt
       CLIENT_KEY: /app/certs/dev-client.key

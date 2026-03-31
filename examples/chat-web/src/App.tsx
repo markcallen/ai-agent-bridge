@@ -63,6 +63,7 @@ export function App() {
     termRef.current?.clear();
     bridge.startSession({
       projectId: "dev",
+      sessionId: crypto.randomUUID(),
       repoPath,
       provider,
       initialCols: termRef.current?.cols ?? 120,

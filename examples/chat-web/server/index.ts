@@ -7,6 +7,7 @@ import * as url from "url";
 import * as crypto from "crypto";
 import * as grpc from "@grpc/grpc-js";
 import pino from "pino";
+import { createProxyMiddleware } from "http-proxy-middleware";
 import { createBridgeWebSocketHandler } from "@ai-agent-bridge/client-node";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -21,6 +22,7 @@ const JWT_ISSUER = process.env.JWT_ISSUER ?? "dev";
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE ?? "bridge";
 const JWT_PROJECT = process.env.JWT_PROJECT ?? "dev";
 const IS_DEV = process.env.NODE_ENV === "development";
+const VITE_URL = process.env.VITE_URL ?? "http://localhost:5173";
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -151,28 +153,53 @@ const wss = createBridgeWebSocketHandler({
   credentials,
 });
 
-server.on("upgrade", (req, socket, head) => {
-  if (req.url === "/api/bridge") {
-    wss.handleUpgrade(req, socket, head, (ws: import("ws").WebSocket) => {
-      wss.emit("connection", ws, req);
-    });
-  } else {
-    socket.destroy();
-  }
-});
+if (IS_DEV) {
+  // Proxy all non-API HTTP requests to the Vite dev server.
+  // ws: false — WebSocket routing is handled entirely by the upgrade handler below.
+  const viteProxy = createProxyMiddleware({
+    target: VITE_URL,
+    changeOrigin: true,
+    ws: false,
+    logger: {
+      info: (msg: string) => logger.debug({ proxy: "vite" }, msg),
+      warn: (msg: string) => logger.warn({ proxy: "vite" }, msg),
+      error: (msg: string) => logger.error({ proxy: "vite" }, msg),
+    },
+  });
+  app.use(viteProxy);
 
-if (!IS_DEV) {
+  // Forward WebSocket upgrades: /api/bridge → bridge WSS, everything else → Vite HMR
+  server.on("upgrade", (req, socket, head) => {
+    if (req.url === "/api/bridge") {
+      wss.handleUpgrade(req, socket, head, (ws: import("ws").WebSocket) => {
+        wss.emit("connection", ws, req);
+      });
+    } else {
+      viteProxy.upgrade!(req, socket as unknown as import("net").Socket, head);
+    }
+  });
+} else {
   // Production: serve compiled Vite output
   const distDir = path.resolve(__dirname, "../dist");
   app.use(express.static(distDir));
   app.get("*", (_req, res) => {
     res.sendFile(path.join(distDir, "index.html"));
   });
+
+  server.on("upgrade", (req, socket, head) => {
+    if (req.url === "/api/bridge") {
+      wss.handleUpgrade(req, socket, head, (ws: import("ws").WebSocket) => {
+        wss.emit("connection", ws, req);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
 }
 
 server.listen(PORT, () => {
   logger.info({ port: PORT }, "server listening");
   if (IS_DEV) {
-    logger.info("dev mode — WebSocket on /api/bridge, frontend via Vite :5173");
+    logger.info({ viteUrl: VITE_URL }, "dev mode — proxying frontend to Vite");
   }
 });

@@ -7,10 +7,9 @@
  * @example
  * function App() {
  *   const bridge = useBridgeSession("ws://localhost:3000/api/bridge");
+ *   const clientId = useRef(crypto.randomUUID());
  *
  *   const start = () => {
- *     // startSession enqueues the message; the session_started response sets
- *     // bridge.sessionId. Call streamEvents once sessionId is set.
  *     bridge.startSession({
  *       projectId: "my-project",
  *       repoPath: "/repos/my-app",
@@ -18,12 +17,19 @@
  *     });
  *   };
  *
+ *   // After session starts, attach to receive output:
+ *   useEffect(() => {
+ *     if (bridge.sessionId) {
+ *       bridge.attachSession({ sessionId: bridge.sessionId, clientId: clientId.current });
+ *     }
+ *   }, [bridge.sessionId]);
+ *
  *   return (
  *     <div>
  *       <p>Status: {bridge.status}</p>
- *       {bridge.events.map((ev) => <p key={ev.seq}>{ev.text}</p>)}
+ *       {bridge.events.map((ev, i) => <pre key={i}>{ev.text}</pre>)}
  *       <button onClick={start}>Start</button>
- *       <button onClick={() => bridge.sendInput({ sessionId: bridge.sessionId!, text: "hello" })}>
+ *       <button onClick={() => bridge.sendInput({ sessionId: bridge.sessionId!, clientId: clientId.current, text: "hello\r" })}>
  *         Send
  *       </button>
  *     </div>
@@ -33,9 +39,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  AttachEventType,
   ClientMessage,
-  EventMsg,
-  EventType,
   ListSessionsMsg,
   ServerMessage,
   SessionInfo,
@@ -55,10 +60,16 @@ export type ConnectionStatus =
 export interface BridgeEvent {
   seq: number;
   sessionId: string;
-  eventType: EventType;
-  stream: string;
+  eventType: AttachEventType;
+  /** Decoded UTF-8 text from the payload bytes */
   text: string;
-  done: boolean;
+  /** Raw base64-encoded payload */
+  payloadB64: string;
+  replay: boolean;
+  oldestSeq: number;
+  lastSeq: number;
+  exitRecorded: boolean;
+  exitCode: number;
   error: string;
 }
 
@@ -92,7 +103,7 @@ export interface UseBridgeSessionReturn {
   error: string | null;
   /** The most recently started session ID */
   sessionId: string | null;
-  /** Accumulated events received via stream_events */
+  /** Accumulated output events received via attach_session */
   events: BridgeEvent[];
   /** Start a new agent session */
   startSession(opts: {
@@ -101,20 +112,25 @@ export interface UseBridgeSessionReturn {
     repoPath: string;
     provider: string;
     agentOpts?: Record<string, string>;
+    initialCols?: number;
+    initialRows?: number;
   }): void;
-  /** Send text input to a running session */
-  sendInput(opts: {
-    sessionId: string;
-    text: string;
-    idempotencyKey?: string;
-  }): void;
+  /** Send text input to a running session (clientId must match the attach call) */
+  sendInput(opts: { sessionId: string; clientId: string; text: string }): void;
   /** Stop a session */
   stopSession(opts: { sessionId: string; force?: boolean }): void;
-  /** Subscribe to event streaming for a session */
-  streamEvents(opts: {
+  /** Attach to a session to start receiving output events */
+  attachSession(opts: {
     sessionId: string;
+    clientId: string;
     afterSeq?: number;
-    subscriberId?: string;
+  }): void;
+  /** Send a resize notification */
+  resizeSession(opts: {
+    sessionId: string;
+    clientId: string;
+    cols: number;
+    rows: number;
   }): void;
   /** List sessions, optionally filtered by project */
   listSessions(opts?: { projectId?: string }): void;
@@ -128,6 +144,17 @@ export interface UseBridgeSessionReturn {
   clearEvents(): void;
   /** Sessions list from the most recent list_sessions response */
   sessions: SessionInfo[];
+}
+
+// ---------------------------------------------------------------------------
+// Helper: base64 decode in browser and Node environments
+// ---------------------------------------------------------------------------
+
+function decodeBase64(b64: string): string {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(b64, "base64").toString("utf8");
+  }
+  return atob(b64);
 }
 
 // ---------------------------------------------------------------------------
@@ -158,13 +185,16 @@ export function useBridgeSession(
   const mountedRef = useRef(true);
   const pendingRef = useRef<ClientMessage[]>([]);
 
-  const updateStatus = useCallback(
-    (s: ConnectionStatus) => {
-      setStatus(s);
-      onStatusChange?.(s);
-    },
-    [onStatusChange]
-  );
+  // Keep callback refs current on every render so they never need to be deps.
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
+  const onStatusChangeRef = useRef(onStatusChange);
+  onStatusChangeRef.current = onStatusChange;
+
+  const updateStatus = useCallback((s: ConnectionStatus) => {
+    setStatus(s);
+    onStatusChangeRef.current?.(s);
+  }, []); // stable — reads callback via ref
 
   const sendRaw = useCallback((msg: ClientMessage) => {
     const ws = wsRef.current;
@@ -207,28 +237,30 @@ export function useBridgeSession(
         return;
       }
 
-      onMessage?.(msg);
+      onMessageRef.current?.(msg);
 
       switch (msg.type) {
         case "session_started":
           setSessionId(msg.sessionId);
           break;
-        case "event": {
-          const e = msg as EventMsg;
+        case "attach_event":
           setEvents((prev: BridgeEvent[]) => [
             ...prev,
             {
-              seq: e.seq,
-              sessionId: e.sessionId,
-              eventType: e.eventType,
-              stream: e.stream,
-              text: e.text,
-              done: e.done,
-              error: e.error,
+              seq: msg.seq,
+              sessionId: msg.sessionId,
+              eventType: msg.eventType,
+              text: decodeBase64(msg.payloadB64),
+              payloadB64: msg.payloadB64,
+              replay: msg.replay,
+              oldestSeq: msg.oldestSeq,
+              lastSeq: msg.lastSeq,
+              exitRecorded: msg.exitRecorded,
+              exitCode: msg.exitCode,
+              error: msg.error,
             },
           ]);
           break;
-        }
         case "sessions_list":
           setSessions(msg.sessions);
           break;
@@ -264,7 +296,7 @@ export function useBridgeSession(
         updateStatus("disconnected");
       }
     };
-  }, [url, autoReconnect, reconnectDelayMs, maxReconnectDelayMs, onMessage, updateStatus]);
+  }, [url, autoReconnect, reconnectDelayMs, maxReconnectDelayMs, updateStatus]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -287,6 +319,8 @@ export function useBridgeSession(
       repoPath: string;
       provider: string;
       agentOpts?: Record<string, string>;
+      initialCols?: number;
+      initialRows?: number;
     }) => {
       sendRaw({ type: "start_session", ...opts });
     },
@@ -294,7 +328,7 @@ export function useBridgeSession(
   );
 
   const sendInput = useCallback(
-    (opts: { sessionId: string; text: string; idempotencyKey?: string }) => {
+    (opts: { sessionId: string; clientId: string; text: string }) => {
       sendRaw({ type: "send_input", ...opts });
     },
     [sendRaw]
@@ -307,13 +341,21 @@ export function useBridgeSession(
     [sendRaw]
   );
 
-  const streamEvents = useCallback(
+  const attachSession = useCallback(
+    (opts: { sessionId: string; clientId: string; afterSeq?: number }) => {
+      sendRaw({ type: "attach_session", ...opts });
+    },
+    [sendRaw]
+  );
+
+  const resizeSession = useCallback(
     (opts: {
       sessionId: string;
-      afterSeq?: number;
-      subscriberId?: string;
+      clientId: string;
+      cols: number;
+      rows: number;
     }) => {
-      sendRaw({ type: "stream_events", ...opts });
+      sendRaw({ type: "resize_session", ...opts });
     },
     [sendRaw]
   );
@@ -357,7 +399,8 @@ export function useBridgeSession(
     startSession,
     sendInput,
     stopSession,
-    streamEvents,
+    attachSession,
+    resizeSession,
     listSessions,
     getSession,
     health,
