@@ -1,0 +1,30 @@
+{
+  "targets": [
+    "claude"
+  ],
+  "agents": [
+    "local-dev",
+    "docs",
+    "cicd",
+    "observability",
+    "publishing",
+    "linting",
+    "logging",
+    "testing"
+  ],
+  "ballastVersion": "5.4.2",
+  "languages": [
+    "typescript",
+    "go"
+  ],
+  "paths": {
+    "go": [
+      "."
+    ],
+    "typescript": [
+      "examples/chat-ts",
+      "examples/chat-web",
+      "packages/bridge-client-node"
+    ]
+  }
+}

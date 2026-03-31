@@ -1,11 +1,11 @@
-.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup fmt run dev-run chat-example chat-claude chat-opencode chat-codex chat-gemini
+.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
 BRIDGE_CA := $(BIN_DIR)/bridge-ca
 CONFIG ?= config/bridge.yaml
 DEV_CONFIG ?= config/bridge-dev.yaml
-CHAT_TARGET ?= 127.0.0.1:9445
+CHAT_TARGET ?= bridge.local:9445
 CHAT_PROVIDER ?= claude
 CHAT_PROJECT ?= dev
 CHAT_REPO ?= /repos/penduin
@@ -50,8 +50,11 @@ certs: build
 dev-certs: build
 	./scripts/dev_certs.sh
 
-dev-setup: dev-certs agents-setup
+dev-setup: dev-certs agents-setup setup-hosts
 	@echo "Dev environment ready. Certs in certs/"
+
+setup-hosts:
+	./scripts/setup_hosts.sh
 
 agents-setup:
 	./scripts/setup_ai_agents.sh
@@ -65,6 +68,9 @@ run: build
 
 dev-run: dev-setup
 	$(BRIDGE) --config $(DEV_CONFIG)
+
+docker-run:
+	docker compose up --build bridge
 
 chat-example:
 	go run ./examples/chat \
@@ -90,3 +96,45 @@ chat-codex: chat-example
 
 chat-gemini: CHAT_PROVIDER=gemini
 chat-gemini: chat-example
+
+chat-ts-example:
+	cd examples/chat-ts && \
+	npx tsx src/index.ts \
+		--target $(CHAT_TARGET) \
+		--provider $(CHAT_PROVIDER) \
+		--project $(CHAT_PROJECT) \
+		--cacert ../../certs/ca-bundle.crt \
+		--cert ../../certs/dev-client.crt \
+		--key ../../certs/dev-client.key \
+		$(CHAT_REPO)
+
+chat-ts-claude: CHAT_PROVIDER=claude
+chat-ts-claude: chat-ts-example
+
+chat-ts-opencode: CHAT_PROVIDER=opencode
+chat-ts-opencode: chat-ts-example
+
+chat-ts-codex: CHAT_PROVIDER=codex
+chat-ts-codex: chat-ts-example
+
+chat-ts-gemini: CHAT_PROVIDER=gemini
+chat-ts-gemini: chat-ts-example
+
+chat-web-install:
+	cd packages/bridge-client-node && npm run build
+	cd examples/chat-web && pnpm install
+
+chat-web-dev: chat-web-install
+	cd examples/chat-web && pnpm dev
+
+chat-web-build: chat-web-install
+	cd examples/chat-web && pnpm build
+
+chat-web-start: chat-web-build
+	cd examples/chat-web && pnpm start
+
+chat-web-docker-dev:
+	docker compose -f docker-compose.local.yaml up --build --watch
+
+chat-web-docker-start:
+	docker compose up --build chat-web

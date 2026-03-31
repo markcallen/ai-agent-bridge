@@ -41,3 +41,4 @@ e2e/.env
 
 # Local JS dependencies
 /node_modules/
+.ballast/
