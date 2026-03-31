@@ -17,9 +17,9 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r ../../proto ./proto",
     "build:watch": "tsc --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist proto"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.11.0",

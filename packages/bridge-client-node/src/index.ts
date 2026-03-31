@@ -6,10 +6,11 @@
 
 export { BridgeGrpcClient } from "./grpc-client";
 export type {
-  SessionEvent,
+  AttachEvent,
   StartSessionResult,
   StopSessionResult,
-  SendInputResult,
+  WriteInputResult,
+  ResizeSessionResult,
   HealthResult,
   ProviderInfoResult,
 } from "./grpc-client";
@@ -25,7 +26,8 @@ export type {
   StartSessionMsg,
   SendInputMsg,
   StopSessionMsg,
-  StreamEventsMsg,
+  AttachSessionMsg,
+  ResizeSessionMsg,
   ListSessionsMsg,
   GetSessionMsg,
   HealthMsg,
@@ -33,7 +35,7 @@ export type {
   // Protocol messages — Server → Client
   ServerMessage,
   SessionStartedMsg,
-  EventMsg,
+  AttachEventMsg,
   InputAcceptedMsg,
   SessionStoppedMsg,
   SessionsListMsg,
@@ -45,7 +47,7 @@ export type {
   SessionInfo,
   ProviderInfo,
   ProviderHealth,
-  EventType,
+  AttachEventType,
   SessionStatus,
   BridgeClientOptions,
   Logger,

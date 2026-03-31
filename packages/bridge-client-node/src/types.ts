@@ -6,25 +6,22 @@
  */
 
 // ---------------------------------------------------------------------------
-// Enums (mirror proto EventType and SessionStatus)
+// Enums (mirror proto AttachEventType and SessionStatus)
 // ---------------------------------------------------------------------------
 
-export type EventType =
-  | "session_started"
-  | "session_stopped"
-  | "session_failed"
-  | "stdout"
-  | "stderr"
-  | "input_received"
-  | "buffer_overflow"
-  | "agent_ready"
-  | "response_complete"
-  | "unspecified";
+export type AttachEventType =
+  | "unspecified"
+  | "attached"
+  | "output"
+  | "replay_gap"
+  | "session_exit"
+  | "error";
 
 export type SessionStatus =
   | "unspecified"
   | "starting"
   | "running"
+  | "attached"
   | "stopping"
   | "stopped"
   | "failed";
@@ -67,13 +64,16 @@ export interface StartSessionMsg {
   repoPath: string;
   provider: string;
   agentOpts?: Record<string, string>;
+  initialCols?: number;
+  initialRows?: number;
 }
 
+/** Send text input to a running session. Text is UTF-8 encoded to bytes. */
 export interface SendInputMsg {
   type: "send_input";
   sessionId: string;
+  clientId: string;
   text: string;
-  idempotencyKey?: string;
 }
 
 export interface StopSessionMsg {
@@ -82,11 +82,19 @@ export interface StopSessionMsg {
   force?: boolean;
 }
 
-export interface StreamEventsMsg {
-  type: "stream_events";
+export interface AttachSessionMsg {
+  type: "attach_session";
   sessionId: string;
+  clientId: string;
   afterSeq?: number;
-  subscriberId?: string;
+}
+
+export interface ResizeSessionMsg {
+  type: "resize_session";
+  sessionId: string;
+  clientId: string;
+  cols: number;
+  rows: number;
 }
 
 export interface ListSessionsMsg {
@@ -111,7 +119,8 @@ export type ClientMessage =
   | StartSessionMsg
   | SendInputMsg
   | StopSessionMsg
-  | StreamEventsMsg
+  | AttachSessionMsg
+  | ResizeSessionMsg
   | ListSessionsMsg
   | GetSessionMsg
   | HealthMsg
@@ -128,21 +137,27 @@ export interface SessionStartedMsg {
   createdAt: string;
 }
 
-export interface EventMsg {
-  type: "event";
+/** Output event from an attached session. payload is base64-encoded bytes. */
+export interface AttachEventMsg {
+  type: "attach_event";
   seq: number;
   sessionId: string;
-  eventType: EventType;
-  stream: string;
-  text: string;
-  done: boolean;
+  eventType: AttachEventType;
+  payloadB64: string; // base64-encoded raw bytes
+  replay: boolean;
+  oldestSeq: number;
+  lastSeq: number;
+  exitRecorded: boolean;
+  exitCode: number;
   error: string;
+  cols: number;
+  rows: number;
 }
 
 export interface InputAcceptedMsg {
   type: "input_accepted";
   accepted: boolean;
-  seq: number;
+  bytesWritten: number;
 }
 
 export interface SessionStoppedMsg {
@@ -180,7 +195,7 @@ export interface ErrorMsg {
 
 export type ServerMessage =
   | SessionStartedMsg
-  | EventMsg
+  | AttachEventMsg
   | InputAcceptedMsg
   | SessionStoppedMsg
   | SessionsListMsg
@@ -194,46 +209,61 @@ export type ServerMessage =
 // ---------------------------------------------------------------------------
 
 /** Raw proto field names as returned by @grpc/proto-loader */
-export interface ProtoSessionEvent {
+export interface ProtoAttachSessionEvent {
+  type: string | number; // AttachEventType enum value
   seq: number | Long;
   timestamp?: { seconds: number | Long; nanos: number };
   session_id: string;
-  project_id: string;
-  provider: string;
-  type: number; // EventType enum value
-  stream: string;
-  text: string;
-  done: boolean;
+  payload: Buffer | Uint8Array;
+  replay: boolean;
+  oldest_seq: number | Long;
+  last_seq: number | Long;
+  exit_recorded: boolean;
+  exit_code: number;
   error: string;
+  cols: number;
+  rows: number;
 }
 
 export interface ProtoStartSessionResponse {
   session_id: string;
-  status: number; // SessionStatus enum value
+  status: number | string; // SessionStatus enum value
   created_at?: { seconds: number | Long; nanos: number };
 }
 
 export interface ProtoStopSessionResponse {
-  status: number;
+  status: number | string;
 }
 
 export interface ProtoGetSessionResponse {
   session_id: string;
   project_id: string;
   provider: string;
-  status: number;
+  status: number | string;
   created_at?: { seconds: number | Long; nanos: number };
   stopped_at?: { seconds: number | Long; nanos: number };
   error: string;
+  attached: boolean;
+  attached_client_id: string;
+  exit_recorded: boolean;
+  exit_code: number;
+  oldest_seq: number | Long;
+  last_seq: number | Long;
+  cols: number;
+  rows: number;
 }
 
 export interface ProtoListSessionsResponse {
   sessions: ProtoGetSessionResponse[];
 }
 
-export interface ProtoSendInputResponse {
+export interface ProtoWriteInputResponse {
   accepted: boolean;
-  seq: number | Long;
+  bytes_written: number;
+}
+
+export interface ProtoResizeSessionResponse {
+  applied: boolean;
 }
 
 export interface ProtoHealthResponse {
@@ -264,12 +294,18 @@ export interface Long {
 // ---------------------------------------------------------------------------
 
 export interface BridgeClientOptions {
-  /** gRPC target address, e.g. "localhost:50051" */
+  /** gRPC target address, e.g. "localhost:9445" */
   bridgeAddr: string;
   /** Optional gRPC channel credentials (default: insecure) */
   credentials?: object;
   /** Optional static gRPC metadata key/value pairs (e.g. for bearer tokens) */
   metadata?: Record<string, string>;
+  /**
+   * Optional gRPC channel options passed directly to the gRPC client.
+   * Useful for e.g. overriding the TLS server name when connecting via IP:
+   *   { "grpc.ssl_target_name_override": "bridge.local" }
+   */
+  channelOptions?: Record<string, string | number>;
   /** Logger interface (defaults to console) */
   logger?: Logger;
 }

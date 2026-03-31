@@ -5,7 +5,7 @@
  * Each WebSocket connection gets its own `BridgeGrpcClient` instance.
  *
  * Usage:
- *   const wss = createBridgeWebSocketHandler({ bridgeAddr: "localhost:50051" });
+ *   const wss = createBridgeWebSocketHandler({ bridgeAddr: "localhost:9445" });
  *   // attach to your HTTP server:
  *   server.on("upgrade", (req, socket, head) => {
  *     if (req.url === "/bridge") wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
@@ -24,12 +24,14 @@ import {
 } from "./types";
 
 export interface BridgeWebSocketHandlerOptions {
-  /** gRPC target, e.g. "localhost:50051" */
+  /** gRPC target, e.g. "localhost:9445" */
   bridgeAddr: string;
   /** Optional gRPC channel credentials */
   credentials?: object;
   /** Optional static metadata/headers forwarded on every gRPC call */
   metadata?: Record<string, string>;
+  /** Optional gRPC channel options, e.g. { "grpc.ssl_target_name_override": "bridge.local" } */
+  channelOptions?: Record<string, string | number>;
   /** Logger (defaults to console) */
   logger?: Logger;
   /** ws.WebSocketServer options (port, path, etc.) — omit to create a server-less WSS for use with handleUpgrade */
@@ -60,11 +62,12 @@ export function createBridgeWebSocketHandler(
       bridgeAddr: options.bridgeAddr,
       credentials: options.credentials,
       metadata: options.metadata,
+      channelOptions: options.channelOptions,
       logger,
     };
 
     const grpcClient = new BridgeGrpcClient(clientOptions);
-    const activeStreams = new Map<string, AbortController>();
+    const activeAttachments = new Map<string, AbortController>();
 
     function send(msg: ServerMessage): void {
       if (ws.readyState === WebSocket.OPEN) {
@@ -95,6 +98,8 @@ export function createBridgeWebSocketHandler(
               repoPath: msg.repoPath,
               provider: msg.provider,
               agentOpts: msg.agentOpts,
+              initialCols: msg.initialCols,
+              initialRows: msg.initialRows,
             });
             send({
               type: "session_started",
@@ -106,15 +111,17 @@ export function createBridgeWebSocketHandler(
           }
 
           case "send_input": {
-            const result = await grpcClient.sendInput({
+            // Convert text to bytes; normalize \n → \r for PTY providers.
+            const text = msg.text.replace(/\n/g, "\r");
+            const result = await grpcClient.writeInput({
               sessionId: msg.sessionId,
-              text: msg.text,
-              idempotencyKey: msg.idempotencyKey,
+              clientId: msg.clientId,
+              data: text,
             });
             send({
               type: "input_accepted",
               accepted: result.accepted,
-              seq: result.seq,
+              bytesWritten: result.bytesWritten,
             });
             break;
           }
@@ -132,49 +139,64 @@ export function createBridgeWebSocketHandler(
             break;
           }
 
-          case "stream_events": {
-            const { sessionId, afterSeq, subscriberId } = msg;
-            // Cancel any existing stream for this session
-            const existing = activeStreams.get(sessionId);
+          case "attach_session": {
+            const { sessionId, clientId, afterSeq } = msg;
+            // Cancel any existing attachment for this session
+            const existing = activeAttachments.get(sessionId);
             if (existing) {
               existing.abort();
-              activeStreams.delete(sessionId);
+              activeAttachments.delete(sessionId);
             }
 
             const ac = new AbortController();
-            activeStreams.set(sessionId, ac);
+            activeAttachments.set(sessionId, ac);
 
-            // Run the stream in background
+            // Run the attachment stream in background
             (async () => {
               try {
-                for await (const event of grpcClient.streamEvents({
+                for await (const event of grpcClient.attachSession({
                   sessionId,
+                  clientId,
                   afterSeq,
-                  subscriberId,
                   signal: ac.signal,
                 })) {
                   send({
-                    type: "event",
+                    type: "attach_event",
                     seq: event.seq,
                     sessionId: event.sessionId,
-                    eventType: event.eventType,
-                    stream: event.stream,
-                    text: event.text,
-                    done: event.done,
+                    eventType: event.type,
+                    payloadB64: event.payload.toString("base64"),
+                    replay: event.replay,
+                    oldestSeq: event.oldestSeq,
+                    lastSeq: event.lastSeq,
+                    exitRecorded: event.exitRecorded,
+                    exitCode: event.exitCode,
                     error: event.error,
+                    cols: event.cols,
+                    rows: event.rows,
                   });
                 }
               } catch (err) {
                 if (!ac.signal.aborted) {
                   const message =
                     err instanceof Error ? err.message : String(err);
-                  logger.warn("Event stream error", { sessionId, message });
+                  logger.warn("Attach stream error", { sessionId, message });
                   sendError("stream_error", message);
                 }
               } finally {
-                activeStreams.delete(sessionId);
+                activeAttachments.delete(sessionId);
               }
             })();
+            break;
+          }
+
+          case "resize_session": {
+            await grpcClient.resizeSession({
+              sessionId: msg.sessionId,
+              clientId: msg.clientId,
+              cols: msg.cols,
+              rows: msg.rows,
+            });
             break;
           }
 
@@ -235,11 +257,11 @@ export function createBridgeWebSocketHandler(
 
     ws.on("close", () => {
       logger.info("WebSocket disconnected", { connId });
-      // Cancel all active streams
-      for (const [, ac] of activeStreams) {
+      // Cancel all active attachment streams
+      for (const [, ac] of activeAttachments) {
         ac.abort();
       }
-      activeStreams.clear();
+      activeAttachments.clear();
       grpcClient.close();
     });
 

@@ -9,39 +9,46 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import * as path from "path";
 import {
+  AttachEventType,
   BridgeClientOptions,
-  EventType,
   Logger,
+  ProtoAttachSessionEvent,
   ProtoGetSessionResponse,
   ProtoHealthResponse,
   ProtoListProvidersResponse,
   ProtoListSessionsResponse,
-  ProtoSendInputResponse,
-  ProtoSessionEvent,
+  ProtoResizeSessionResponse,
   ProtoStartSessionResponse,
   ProtoStopSessionResponse,
+  ProtoWriteInputResponse,
   SessionInfo,
   SessionStatus,
 } from "./types";
 
-// Resolve the proto file relative to the package root regardless of whether
-// we are running from src/ (ts-node / tsx) or dist/src/ (compiled output).
-// Walk up from __dirname until we find a directory containing package.json,
-// then resolve the proto path relative to the repo root (two levels up).
-function resolveProtoPath(): string {
+// Resolve the proto file regardless of where the package is installed.
+//
+// Strategy: walk up from __dirname looking for a directory that contains
+// "proto/bridge/v1/bridge.proto".  The build script copies the monorepo
+// proto/ tree into the package root so it travels with the installed package.
+// In a monorepo source checkout the package root is two levels above the
+// repo's proto/, so that is checked as a fallback.
+function resolveProto(): { protoPath: string; includeDir: string } {
+  const fs = require("fs") as typeof import("fs");
   let dir = __dirname;
-  for (let i = 0; i < 5; i++) {
-    if (require("fs").existsSync(path.join(dir, "package.json"))) {
-      // dir is the package root (packages/bridge-client-node)
-      return path.resolve(dir, "../../proto/bridge/v1/bridge.proto");
+  for (let i = 0; i < 10; i++) {
+    const candidate = path.join(dir, "proto/bridge/v1/bridge.proto");
+    if (fs.existsSync(candidate)) {
+      return { protoPath: candidate, includeDir: path.join(dir, "proto") };
     }
     dir = path.dirname(dir);
   }
-  // Fallback: assume we're in src/ at dev time
-  return path.resolve(__dirname, "../../../proto/bridge/v1/bridge.proto");
+  throw new Error(
+    "Cannot locate bridge.proto. " +
+      "Run `npm run build` inside packages/bridge-client-node to bundle it."
+  );
 }
 
-const PROTO_PATH = resolveProtoPath();
+const { protoPath: PROTO_PATH, includeDir: PROTO_INCLUDE_DIR } = resolveProto();
 
 const PROTO_OPTIONS: protoLoader.Options = {
   keepCase: true,
@@ -49,49 +56,67 @@ const PROTO_OPTIONS: protoLoader.Options = {
   enums: String,
   defaults: true,
   oneofs: true,
-  includeDirs: [path.resolve(__dirname, "../../../")],
+  includeDirs: [PROTO_INCLUDE_DIR],
 };
 
 // ---------------------------------------------------------------------------
 // Proto enum conversion helpers
 // ---------------------------------------------------------------------------
 
-const EVENT_TYPE_MAP: Record<string, EventType> = {
-  EVENT_TYPE_UNSPECIFIED: "unspecified",
-  EVENT_TYPE_SESSION_STARTED: "session_started",
-  EVENT_TYPE_SESSION_STOPPED: "session_stopped",
-  EVENT_TYPE_SESSION_FAILED: "session_failed",
-  EVENT_TYPE_STDOUT: "stdout",
-  EVENT_TYPE_STDERR: "stderr",
-  EVENT_TYPE_INPUT_RECEIVED: "input_received",
-  EVENT_TYPE_BUFFER_OVERFLOW: "buffer_overflow",
-  EVENT_TYPE_AGENT_READY: "agent_ready",
-  EVENT_TYPE_RESPONSE_COMPLETE: "response_complete",
+const ATTACH_EVENT_TYPE_MAP: Record<string, AttachEventType> = {
+  ATTACH_EVENT_TYPE_UNSPECIFIED: "unspecified",
+  ATTACH_EVENT_TYPE_ATTACHED: "attached",
+  ATTACH_EVENT_TYPE_OUTPUT: "output",
+  ATTACH_EVENT_TYPE_REPLAY_GAP: "replay_gap",
+  ATTACH_EVENT_TYPE_SESSION_EXIT: "session_exit",
+  ATTACH_EVENT_TYPE_ERROR: "error",
+};
+
+const ATTACH_EVENT_TYPE_BY_NUMBER: Record<number, AttachEventType> = {
+  0: "unspecified",
+  1: "attached",
+  2: "output",
+  3: "replay_gap",
+  4: "session_exit",
+  5: "error",
 };
 
 const SESSION_STATUS_MAP: Record<string, SessionStatus> = {
   SESSION_STATUS_UNSPECIFIED: "unspecified",
   SESSION_STATUS_STARTING: "starting",
   SESSION_STATUS_RUNNING: "running",
+  SESSION_STATUS_ATTACHED: "attached",
   SESSION_STATUS_STOPPING: "stopping",
   SESSION_STATUS_STOPPED: "stopped",
   SESSION_STATUS_FAILED: "failed",
 };
 
-function toEventType(raw: string | number): EventType {
+const SESSION_STATUS_BY_NUMBER: Record<number, SessionStatus> = {
+  0: "unspecified",
+  1: "starting",
+  2: "running",
+  3: "attached",
+  4: "stopping",
+  5: "stopped",
+  6: "failed",
+};
+
+function toAttachEventType(raw: string | number): AttachEventType {
   if (typeof raw === "string") {
-    return EVENT_TYPE_MAP[raw] ?? "unspecified";
+    return ATTACH_EVENT_TYPE_MAP[raw] ?? "unspecified";
   }
-  const name = Object.keys(EVENT_TYPE_MAP)[raw];
-  return name ? EVENT_TYPE_MAP[name] : "unspecified";
+  return ATTACH_EVENT_TYPE_BY_NUMBER[raw] ?? "unspecified";
 }
 
 function toSessionStatus(raw: string | number): SessionStatus {
   if (typeof raw === "string") {
     return SESSION_STATUS_MAP[raw] ?? "unspecified";
   }
-  const name = Object.keys(SESSION_STATUS_MAP)[raw];
-  return name ? SESSION_STATUS_MAP[name] : "unspecified";
+  return SESSION_STATUS_BY_NUMBER[raw] ?? "unspecified";
+}
+
+function toLong(v: number | { toNumber(): number }): number {
+  return typeof v === "object" ? v.toNumber() : v;
 }
 
 function toTimestampString(ts?: {
@@ -119,36 +144,42 @@ function toSessionInfo(r: ProtoGetSessionResponse): SessionInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Parsed event type (returned from the async generator)
+// Parsed attach event type (returned from the async generator)
 // ---------------------------------------------------------------------------
 
-export interface SessionEvent {
+export interface AttachEvent {
+  type: AttachEventType;
   seq: number;
   sessionId: string;
-  projectId: string;
-  provider: string;
-  eventType: EventType;
-  stream: string;
-  text: string;
-  done: boolean;
+  /** Raw output bytes from the agent PTY/stdio */
+  payload: Buffer;
+  replay: boolean;
+  oldestSeq: number;
+  lastSeq: number;
+  exitRecorded: boolean;
+  exitCode: number;
   error: string;
+  cols: number;
+  rows: number;
   timestamp: string;
 }
 
-function toSessionEvent(raw: ProtoSessionEvent): SessionEvent {
+function toAttachEvent(raw: ProtoAttachSessionEvent): AttachEvent {
   return {
-    seq:
-      typeof raw.seq === "object" && raw.seq !== null && "toNumber" in raw.seq
-        ? (raw.seq as { toNumber(): number }).toNumber()
-        : (raw.seq as number),
+    type: toAttachEventType(raw.type),
+    seq: toLong(raw.seq),
     sessionId: raw.session_id,
-    projectId: raw.project_id,
-    provider: raw.provider,
-    eventType: toEventType(raw.type),
-    stream: raw.stream,
-    text: raw.text,
-    done: raw.done,
+    payload: Buffer.isBuffer(raw.payload)
+      ? raw.payload
+      : Buffer.from(raw.payload ?? []),
+    replay: raw.replay,
+    oldestSeq: toLong(raw.oldest_seq),
+    lastSeq: toLong(raw.last_seq),
+    exitRecorded: raw.exit_recorded,
+    exitCode: raw.exit_code,
     error: raw.error,
+    cols: raw.cols,
+    rows: raw.rows,
     timestamp: toTimestampString(raw.timestamp as Parameters<typeof toTimestampString>[0]),
   };
 }
@@ -178,15 +209,20 @@ interface BridgeServiceStub {
     metadata: grpc.Metadata,
     cb: grpc.requestCallback<ProtoListSessionsResponse>
   ): grpc.ClientUnaryCall;
-  SendInput(
-    req: object,
-    metadata: grpc.Metadata,
-    cb: grpc.requestCallback<ProtoSendInputResponse>
-  ): grpc.ClientUnaryCall;
-  StreamEvents(
+  AttachSession(
     req: object,
     metadata: grpc.Metadata
-  ): grpc.ClientReadableStream<ProtoSessionEvent>;
+  ): grpc.ClientReadableStream<ProtoAttachSessionEvent>;
+  WriteInput(
+    req: object,
+    metadata: grpc.Metadata,
+    cb: grpc.requestCallback<ProtoWriteInputResponse>
+  ): grpc.ClientUnaryCall;
+  ResizeSession(
+    req: object,
+    metadata: grpc.Metadata,
+    cb: grpc.requestCallback<ProtoResizeSessionResponse>
+  ): grpc.ClientUnaryCall;
   Health(
     req: object,
     metadata: grpc.Metadata,
@@ -213,9 +249,13 @@ export interface StopSessionResult {
   status: SessionStatus;
 }
 
-export interface SendInputResult {
+export interface WriteInputResult {
   accepted: boolean;
-  seq: number;
+  bytesWritten: number;
+}
+
+export interface ResizeSessionResult {
+  applied: boolean;
 }
 
 export interface HealthResult {
@@ -236,7 +276,7 @@ export class BridgeGrpcClient {
   private readonly logger: Logger;
 
   constructor(options: BridgeClientOptions) {
-    const { bridgeAddr, credentials, metadata, logger } = options;
+    const { bridgeAddr, credentials, metadata, channelOptions, logger } = options;
     this.logger = logger ?? {
       info: (msg, ...a) => console.info(msg, ...a),
       warn: (msg, ...a) => console.warn(msg, ...a),
@@ -258,7 +298,8 @@ export class BridgeGrpcClient {
 
     this.stub = new ServiceCtor(
       bridgeAddr,
-      creds
+      creds,
+      channelOptions ?? {}
     ) as unknown as BridgeServiceStub;
 
     this.metadata = new grpc.Metadata();
@@ -305,6 +346,8 @@ export class BridgeGrpcClient {
     repoPath: string;
     provider: string;
     agentOpts?: Record<string, string>;
+    initialCols?: number;
+    initialRows?: number;
   }): Promise<StartSessionResult> {
     const resp = await this.unary<object, ProtoStartSessionResponse>(
       this.stub.StartSession,
@@ -314,6 +357,8 @@ export class BridgeGrpcClient {
         repo_path: opts.repoPath,
         provider: opts.provider,
         agent_opts: opts.agentOpts ?? {},
+        initial_cols: opts.initialCols ?? 0,
+        initial_rows: opts.initialRows ?? 0,
       }
     );
     return {
@@ -354,56 +399,35 @@ export class BridgeGrpcClient {
   }
 
   // ---------------------------------------------------------------------------
-  // Input
-  // ---------------------------------------------------------------------------
-
-  async sendInput(opts: {
-    sessionId: string;
-    text: string;
-    idempotencyKey?: string;
-  }): Promise<SendInputResult> {
-    const resp = await this.unary<object, ProtoSendInputResponse>(
-      this.stub.SendInput,
-      {
-        session_id: opts.sessionId,
-        text: opts.text,
-        idempotency_key: opts.idempotencyKey ?? "",
-      }
-    );
-    const seq =
-      typeof resp.seq === "object" && resp.seq !== null && "toNumber" in resp.seq
-        ? (resp.seq as { toNumber(): number }).toNumber()
-        : (resp.seq as number);
-    return { accepted: resp.accepted, seq };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Event streaming — async generator
+  // Attach — server-streaming
   // ---------------------------------------------------------------------------
 
   /**
-   * Stream events for a session as an async generator.
+   * Attach to a running session and stream raw output events as an async
+   * generator.  The `clientId` is used for subsequent `writeInput` and
+   * `resizeSession` calls — generate a UUID before calling and reuse it.
    *
-   * The generator yields `SessionEvent` objects until the stream ends or the
-   * AbortSignal fires. Callers should wrap in a try/finally to cancel.
+   * The generator yields `AttachEvent` objects until the stream ends or the
+   * AbortSignal fires.
    *
    * @example
+   * const clientId = crypto.randomUUID();
    * const ac = new AbortController();
-   * for await (const ev of client.streamEvents({ sessionId, signal: ac.signal })) {
-   *   console.log(ev);
+   * for await (const ev of client.attachSession({ sessionId, clientId, signal: ac.signal })) {
+   *   if (ev.type === "output") process.stdout.write(ev.payload);
    * }
    */
-  async *streamEvents(opts: {
+  async *attachSession(opts: {
     sessionId: string;
+    clientId: string;
     afterSeq?: number;
-    subscriberId?: string;
     signal?: AbortSignal;
-  }): AsyncGenerator<SessionEvent> {
-    const stream = this.stub.StreamEvents(
+  }): AsyncGenerator<AttachEvent> {
+    const stream = this.stub.AttachSession(
       {
         session_id: opts.sessionId,
+        client_id: opts.clientId,
         after_seq: opts.afterSeq ?? 0,
-        subscriber_id: opts.subscriberId ?? "",
       },
       this.metadata
     );
@@ -413,12 +437,60 @@ export class BridgeGrpcClient {
 
     try {
       for await (const raw of stream) {
-        yield toSessionEvent(raw as ProtoSessionEvent);
+        yield toAttachEvent(raw as ProtoAttachSessionEvent);
       }
     } finally {
       opts.signal?.removeEventListener("abort", abort);
       stream.destroy();
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Input and resize
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Send raw input bytes to the session PTY.
+   * Accepts a `Buffer` or a `string` (which is UTF-8 encoded to bytes).
+   * For interactive PTY sessions pass `\r` (not `\n`) to send Enter.
+   */
+  async writeInput(opts: {
+    sessionId: string;
+    clientId: string;
+    data: Buffer | string;
+  }): Promise<WriteInputResult> {
+    const data =
+      typeof opts.data === "string"
+        ? Buffer.from(opts.data, "utf8")
+        : opts.data;
+    const resp = await this.unary<object, ProtoWriteInputResponse>(
+      this.stub.WriteInput,
+      {
+        session_id: opts.sessionId,
+        client_id: opts.clientId,
+        data,
+      }
+    );
+    return { accepted: resp.accepted, bytesWritten: resp.bytes_written };
+  }
+
+  /** Resize the session PTY to the given dimensions. */
+  async resizeSession(opts: {
+    sessionId: string;
+    clientId: string;
+    cols: number;
+    rows: number;
+  }): Promise<ResizeSessionResult> {
+    const resp = await this.unary<object, ProtoResizeSessionResponse>(
+      this.stub.ResizeSession,
+      {
+        session_id: opts.sessionId,
+        client_id: opts.clientId,
+        cols: opts.cols,
+        rows: opts.rows,
+      }
+    );
+    return { applied: resp.applied };
   }
 
   // ---------------------------------------------------------------------------
