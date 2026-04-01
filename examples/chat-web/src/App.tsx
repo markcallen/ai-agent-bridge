@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useBridgeSession } from "@ai-agent-bridge/client-node/react";
 import type { HealthResponseMsg, ProvidersListMsg } from "@ai-agent-bridge/client-node";
+import { ErrorSummary } from "./components/ErrorSummary";
 import { HealthStatus } from "./components/HealthStatus";
 import { MobileGate } from "./components/MobileGate";
 import { SessionControls } from "./components/SessionControls";
@@ -111,6 +112,7 @@ export function App() {
           health={health}
           providers={providers}
         />
+        <ErrorSummary bridgeError={bridge.error} health={health} />
         <SessionControls
           provider={provider}
           repoPath={repoPath}
