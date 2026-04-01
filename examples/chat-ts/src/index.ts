@@ -20,40 +20,21 @@
  *   --key      <path>      Client private key for mTLS
  */
 
-import * as fs from "fs";
 import * as path from "path";
-import * as grpc from "@grpc/grpc-js";
 import { BridgeGrpcClient } from "@ai-agent-bridge/client-node";
 import { randomUUID } from "crypto";
+import { buildCredentials, currentTTYSize, normalizeTTYInput, parseArgs } from "./lib";
 
 // ---------------------------------------------------------------------------
-// CLI flag parsing
+// Main
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv: string[]): {
-  target: string;
-  project: string;
-  provider: string;
-  cacert: string;
-  cert: string;
-  key: string;
-  repoPath: string;
-} {
-  const args = argv.slice(2);
-  const flags: Record<string, string> = {};
-  const positional: string[] = [];
-
-  for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith("--")) {
-      const key = args[i].slice(2);
-      flags[key] = args[++i] ?? "";
-    } else {
-      positional.push(args[i]);
-    }
-  }
-
-  if (positional.length < 1) {
-    console.error("usage: chat-ts [options] <repo-path>");
+async function main(): Promise<void> {
+  let opts;
+  try {
+    opts = parseArgs(process.argv);
+  } catch (error) {
+    console.error((error as Error).message);
     console.error("  --target   <addr>   gRPC address (default: 127.0.0.1:9445)");
     console.error("  --project  <id>     Project ID (default: dev)");
     console.error("  --provider <name>   Provider (default: claude)");
@@ -62,74 +43,6 @@ function parseArgs(argv: string[]): {
     console.error("  --key      <path>   Client private key for mTLS");
     process.exit(1);
   }
-
-  return {
-    target: flags["target"] ?? "127.0.0.1:9445",
-    project: flags["project"] ?? "dev",
-    provider: flags["provider"] ?? "claude",
-    cacert: flags["cacert"] ?? "",
-    cert: flags["cert"] ?? "",
-    key: flags["key"] ?? "",
-    repoPath: positional[0],
-  };
-}
-
-// ---------------------------------------------------------------------------
-// mTLS credentials
-// ---------------------------------------------------------------------------
-
-function buildCredentials(
-  cacert: string,
-  cert: string,
-  key: string
-): grpc.ChannelCredentials {
-  if (cacert && cert && key) {
-    return grpc.credentials.createSsl(
-      fs.readFileSync(cacert),
-      fs.readFileSync(key),
-      fs.readFileSync(cert)
-    );
-  }
-  return grpc.credentials.createInsecure();
-}
-
-// ---------------------------------------------------------------------------
-// TTY helpers
-// ---------------------------------------------------------------------------
-
-function currentTTYSize(): { cols: number; rows: number } {
-  return {
-    cols: process.stdout.columns ?? 120,
-    rows: process.stdout.rows ?? 40,
-  };
-}
-
-/**
- * Normalize TTY input: replace bare \n with \r so PTY providers receive
- * carriage return when the user presses Enter (matches Go example behaviour).
- */
-function normalizeTTYInput(data: Buffer): Buffer {
-  let hasNewline = false;
-  for (let i = 0; i < data.length; i++) {
-    if (data[i] === 0x0a) {
-      hasNewline = true;
-      break;
-    }
-  }
-  if (!hasNewline) return data;
-  const out = Buffer.allocUnsafe(data.length);
-  for (let i = 0; i < data.length; i++) {
-    out[i] = data[i] === 0x0a ? 0x0d : data[i];
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-async function main(): Promise<void> {
-  const opts = parseArgs(process.argv);
   const creds = buildCredentials(opts.cacert, opts.cert, opts.key);
 
   const client = new BridgeGrpcClient({
