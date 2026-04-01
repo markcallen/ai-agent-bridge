@@ -22,7 +22,8 @@
   "scripts": {
     "build": "tsc && cp -r ../../proto ./proto",
     "build:watch": "tsc --watch",
-    "clean": "rm -rf dist proto"
+    "clean": "rm -rf dist proto",
+    "test": "npm run build && node --test nextjs.test.cjs"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.11.0",

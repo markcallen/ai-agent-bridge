@@ -230,6 +230,7 @@ async function main(): Promise<void> {
           if (process.stdin.isTTY) process.stdin.setRawMode(false);
           client.close();
           process.exit(exitCode);
+          return;
         }
 
         case "error":
