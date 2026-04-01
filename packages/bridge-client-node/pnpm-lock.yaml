@@ -15,8 +15,8 @@ importers:
         specifier: ^0.8.0
         version: 0.8.0
       uuid:
-        specifier: ^10.0.0
-        version: 10.0.0
+        specifier: ^13.0.0
+        version: 13.0.0
       ws:
         specifier: ^8.20.0
         version: 8.20.0
@@ -361,8 +361,8 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
-  uuid@10.0.0:
-    resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
+  uuid@13.0.0:
+    resolution: {integrity: sha512-XQegIaBTVUjSHliKqcnFqYypAd4S+WCYt5NIeRs6w/UAry7z8Y9j5ZwRRL4kzq9U3sD6v+85er9FvkEaBpji2w==}
     hasBin: true
 
   v8-to-istanbul@9.3.0:
@@ -710,7 +710,7 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  uuid@10.0.0: {}
+  uuid@13.0.0: {}
 
   v8-to-istanbul@9.3.0:
     dependencies:
