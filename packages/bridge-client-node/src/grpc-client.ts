@@ -7,6 +7,7 @@
 
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
+import * as fs from "fs";
 import * as path from "path";
 import {
   AttachEventType,
@@ -33,7 +34,6 @@ import {
 // In a monorepo source checkout the package root is two levels above the
 // repo's proto/, so that is checked as a fallback.
 function resolveProto(): { protoPath: string; includeDir: string } {
-  const fs = require("fs") as typeof import("fs");
   let dir = __dirname;
   for (let i = 0; i < 10; i++) {
     const candidate = path.join(dir, "proto/bridge/v1/bridge.proto");

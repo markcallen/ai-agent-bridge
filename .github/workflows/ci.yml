@@ -40,13 +40,22 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run tests
-        run: make test
+      - name: Run tests with coverage
+        run: ./scripts/test-go-coverage.sh
 
       - name: Enforce maintained package coverage
         run: make test-cover-maintained
 
-  typescript-build:
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: markcallen/ai-agent-bridge
+          files: ./coverage.out
+          flags: go
+          name: go-coverage
+
+  typescript-lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,22 +72,71 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
 
       - name: Install root dependencies
         run: npm ci
 
       - name: Install SDK dependencies
-        run: npm --prefix packages/bridge-client-node install
+        run: npm --prefix packages/bridge-client-node ci
 
       - name: Install chat-ts dependencies
-        run: npm --prefix examples/chat-ts install
+        run: npm --prefix examples/chat-ts ci
 
       - name: Install chat-web dependencies
         run: pnpm --dir examples/chat-web install --frozen-lockfile
 
-      - name: Build TypeScript packages
-        run: |
-          npm --prefix packages/bridge-client-node run build
-          npm --prefix examples/chat-ts run build
-          pnpm --dir examples/chat-web run build
+      - name: Lint TypeScript packages and examples
+        run: npm run lint:ts
+
+  typescript-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/bridge-client-node/package-lock.json
+            examples/chat-ts/package-lock.json
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install SDK dependencies
+        run: npm --prefix packages/bridge-client-node ci
+
+      - name: Install chat-ts dependencies
+        run: npm --prefix examples/chat-ts ci
+
+      - name: Install chat-web dependencies
+        run: pnpm --dir examples/chat-web install --frozen-lockfile
+
+      - name: Build TypeScript packages and examples
+        run: npm run build:ts
+
+      - name: Run TypeScript tests
+        run: npm run test:ts
+
+      - name: Generate TypeScript coverage reports
+        run: npm run test:ts:coverage
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: markcallen/ai-agent-bridge
+          files: |
+            ./packages/bridge-client-node/coverage/lcov.info
+            ./examples/chat-ts/coverage/lcov.info
+            ./examples/chat-web/coverage/lcov.info
+          flags: typescript
+          name: typescript-coverage

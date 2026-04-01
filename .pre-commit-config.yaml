@@ -3,9 +3,17 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        stages: [pre-commit]
+        exclude: ^\.codex/rules/
       - id: end-of-file-fixer
+        stages: [pre-commit]
+        exclude: ^\.codex/rules/
       - id: check-yaml
+        stages: [pre-commit]
+        exclude: ^\.codex/rules/
       - id: check-merge-conflict
+        stages: [pre-commit]
+        exclude: ^\.codex/rules/
 
   - repo: local
     hooks:
@@ -14,22 +22,37 @@ repos:
         entry: gofmt -w
         language: system
         types: [go]
+        stages: [pre-commit]
 
       - id: goimports
         name: goimports
         entry: goimports -w
         language: system
         types: [go]
+        stages: [pre-commit]
 
       - id: golangci-lint
         name: golangci-lint
         entry: ./scripts/lint-go.sh
         language: system
         pass_filenames: false
+        stages: [pre-commit]
 
-      - id: pre-push-checks
-        name: pre-push checks
-        entry: ./scripts/pre-push-checks.sh
+      - id: ts-lint
+        name: ts-lint
+        entry: npm run lint:ts
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: go-test
+        name: go-test
+        entry: ./scripts/test-go.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+      - id: ts-test
+        name: ts-test
+        entry: npm run test:ts
         language: system
         pass_filenames: false
         stages: [pre-push]

@@ -37,12 +37,11 @@ export const Terminal = forwardRef<TerminalHandle, Props>(
       // Defer initialization to a RAF so React StrictMode's synchronous
       // cleanup cycle completes before xterm schedules its own internal RAFs.
       // Without this, xterm's viewport RAF fires on a disposed terminal.
-      let rafId: number;
       let term: XTerm | null = null;
       let observer: ResizeObserver | null = null;
       let disposed = false;
 
-      rafId = requestAnimationFrame(() => {
+      const rafId = requestAnimationFrame(() => {
         if (disposed || !containerRef.current) return;
 
         term = new XTerm({
