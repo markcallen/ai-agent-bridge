@@ -39,7 +39,7 @@
 |-----------|----------|----------------|
 | gRPC Server | `internal/server/` | Request routing, rate limiting, input validation |
 | Supervisor | `internal/bridge/supervisor.go` | Session lifecycle state machine, single-client enforcement |
-| Event Buffer | `internal/bridge/eventbuf.go` | Bounded ring buffer with sequence numbers and replay-to-live |
+| Event Buffer | `internal/bridge/bytebuf.go` | Bounded ring buffer with sequence numbers and replay-to-live |
 | Provider Adapters | `internal/provider/` | Spawn agents in PTYs, emit typed events |
 | Auth | `internal/auth/` | mTLS transport + JWT per-RPC interceptors |
 | Config | `internal/config/` | YAML loader with env var override |

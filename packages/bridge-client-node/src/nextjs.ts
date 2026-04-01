@@ -72,7 +72,8 @@ export function createNextJsBridgeRoute(
     const wss = server.bridgeWss;
 
     if (req.url !== path && !req.url?.startsWith(path + "?")) {
-      // Not our path — do nothing (let Next.js handle it)
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("WebSocket endpoint not found.");
       return;
     }
 
@@ -81,7 +82,6 @@ export function createNextJsBridgeRoute(
     wss.handleUpgrade(
       req,
       rawSocket as import("stream").Duplex,
-      // eslint-disable-next-line node/no-buffer-constructor
       Buffer.from([]),
       (ws: WsWebSocket) => {
         wss.emit("connection", ws, req);

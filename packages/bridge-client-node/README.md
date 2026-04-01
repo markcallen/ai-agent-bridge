@@ -163,10 +163,11 @@ All messages are JSON-encoded. The same protocol is supported by both the Node.j
 
 | `type` | Fields | Description |
 |--------|--------|-------------|
-| `start_session` | `projectId`, `repoPath`, `provider`, `sessionId?`, `agentOpts?` | Start a new session |
-| `send_input` | `sessionId`, `text`, `idempotencyKey?` | Send text input |
+| `start_session` | `projectId`, `repoPath`, `provider`, `sessionId?`, `agentOpts?`, `initialCols?`, `initialRows?` | Start a new session |
+| `send_input` | `sessionId`, `clientId`, `text` | Send text input |
 | `stop_session` | `sessionId`, `force?` | Stop a session |
-| `stream_events` | `sessionId`, `afterSeq?`, `subscriberId?` | Subscribe to events |
+| `attach_session` | `sessionId`, `clientId`, `afterSeq?` | Subscribe to session output |
+| `resize_session` | `sessionId`, `clientId`, `cols`, `rows` | Resize the attached session |
 | `list_sessions` | `projectId?` | List sessions |
 | `get_session` | `sessionId` | Get session info |
 | `health` | — | Check daemon health |
@@ -177,16 +178,16 @@ All messages are JSON-encoded. The same protocol is supported by both the Node.j
 | `type` | Fields | Description |
 |--------|--------|-------------|
 | `session_started` | `sessionId`, `status`, `createdAt` | Session created |
-| `event` | `seq`, `sessionId`, `eventType`, `stream`, `text`, `done`, `error` | Streamed event |
-| `input_accepted` | `accepted`, `seq` | Input acknowledgement |
+| `attach_event` | `seq`, `sessionId`, `eventType`, `payloadB64`, `replay`, `oldestSeq`, `lastSeq`, `exitRecorded`, `exitCode`, `error`, `cols`, `rows` | Streamed output |
+| `input_accepted` | `accepted`, `bytesWritten` | Input acknowledgement |
 | `session_stopped` | `sessionId`, `status` | Session stopped |
 | `sessions_list` | `sessions[]` | List of sessions |
 | `session_info` | `session` | Single session info |
-| `health_response` | `status`, `providers[]` | Health info |
-| `providers_list` | `providers[]` | Provider list |
+| `health_response` | `status`, `providers[]` (`provider`, `available`, `error?`) | Health info |
+| `providers_list` | `providers[]` (`provider`, `available`, `binary`, `version`) | Provider list |
 | `error` | `code`, `message` | Error response |
 
-`eventType` values mirror the proto `EventType` enum (lowercased): `session_started`, `session_stopped`, `session_failed`, `stdout`, `stderr`, `input_received`, `buffer_overflow`, `agent_ready`, `response_complete`.
+`eventType` values mirror the proto `AttachEventType` enum: `unspecified`, `attached`, `output`, `replay_gap`, `session_exit`, `error`.
 
 ## Authentication
 

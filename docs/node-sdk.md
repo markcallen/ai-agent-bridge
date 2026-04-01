@@ -191,8 +191,8 @@ The wire protocol between the browser and the Node.js adapter is JSON over WebSo
   "repoPath": "/repos/my-app",
   "provider": "claude",
   "agentOpts": {},
-  "cols": 220,
-  "rows": 50
+  "initialCols": 220,
+  "initialRows": 50
 }
 ```
 
@@ -202,13 +202,13 @@ The wire protocol between the browser and the Node.js adapter is JSON over WebSo
 { "type": "stop_session", "sessionId": "uuid-...", "force": false }
 ```
 
-#### `write_input`
+#### `send_input`
 
 ```json
-{ "type": "write_input", "sessionId": "uuid-...", "clientId": "...", "data": "aGVsbG8K" }
+{ "type": "send_input", "sessionId": "uuid-...", "clientId": "...", "text": "hello\n" }
 ```
 
-`data` is base64-encoded bytes.
+`text` is UTF-8 text that the adapter converts to bytes for the PTY.
 
 #### `attach_session`
 
@@ -264,20 +264,27 @@ The wire protocol between the browser and the Node.js adapter is JSON over WebSo
 }
 ```
 
-#### `event`
+#### `attach_event`
 
 ```json
 {
-  "type": "event",
+  "type": "attach_event",
   "seq": 42,
   "sessionId": "uuid-...",
   "eventType": "output",
-  "payload": "aGVsbG8K",
-  "replay": false
+  "payloadB64": "aGVsbG8K",
+  "replay": false,
+  "oldestSeq": 0,
+  "lastSeq": 42,
+  "exitRecorded": false,
+  "exitCode": 0,
+  "error": "",
+  "cols": 240,
+  "rows": 60
 }
 ```
 
-`payload` is base64-encoded raw PTY bytes.
+`payloadB64` is base64-encoded raw PTY bytes.
 
 #### `session_stopped`
 
@@ -295,7 +302,16 @@ The wire protocol between the browser and the Node.js adapter is JSON over WebSo
     "projectId": "my-project",
     "provider": "claude",
     "status": "running",
-    "createdAt": "2026-01-01T00:00:00Z"
+    "createdAt": "2026-01-01T00:00:00Z",
+    "error": "",
+    "attached": false,
+    "attachedClientId": "",
+    "exitRecorded": false,
+    "exitCode": 0,
+    "oldestSeq": 0,
+    "lastSeq": 42,
+    "cols": 240,
+    "rows": 60
   }
 }
 ```
@@ -316,7 +332,7 @@ The wire protocol between the browser and the Node.js adapter is JSON over WebSo
   "type": "health_response",
   "status": "ok",
   "providers": [
-    { "provider": "claude", "available": true }
+    { "provider": "claude", "available": true, "error": "" }
   ]
 }
 ```
@@ -327,7 +343,7 @@ The wire protocol between the browser and the Node.js adapter is JSON over WebSo
 {
   "type": "providers_list",
   "providers": [
-    { "provider": "claude", "available": true, "binary": "./node_modules/.bin/claude" }
+    { "provider": "claude", "available": true, "binary": "./node_modules/.bin/claude", "version": "1.0.0" }
   ]
 }
 ```
