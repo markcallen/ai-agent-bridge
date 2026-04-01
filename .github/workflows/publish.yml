@@ -74,6 +74,17 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists locally; continuing with the existing tag."
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists on origin; continuing with the existing tag."
+            exit 0
+          fi
+
           git tag "$RELEASE_TAG"
           git push origin "refs/tags/$RELEASE_TAG"
 
@@ -146,6 +157,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -161,6 +175,7 @@ jobs:
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           build-args: |
             BUILD_FROM=source
           tags: ${{ steps.meta.outputs.tags }}
@@ -207,7 +222,6 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
-          append_body: true
           body: |
             ## Published artifacts
 
