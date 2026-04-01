@@ -59,9 +59,13 @@ func LoadDotEnv(path string) error {
 	return nil
 }
 
-// ValidateProviderEnv ensures all configured providers have required env vars set.
+// ValidateProviderEnv ensures providers that validate startup eagerly have their
+// required env vars set before the bridge starts.
 func ValidateProviderEnv(cfg *Config) error {
 	for name, pcfg := range cfg.Providers {
+		if !pcfg.ShouldValidateStartup() {
+			continue
+		}
 		for _, envName := range pcfg.RequiredEnv {
 			v := strings.TrimSpace(os.Getenv(envName))
 			if v == "" {

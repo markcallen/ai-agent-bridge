@@ -36,6 +36,7 @@ providers:
     binary: "./node_modules/.bin/claude"
     args: ["--verbose"]
     startup_timeout: "60s"
+    validate_startup: false
     startup_probe: "prompt"
     required_env: ["ANTHROPIC_API_KEY"]
     prompt_pattern: "(?m)(❯|>\\s*$)"
@@ -43,6 +44,7 @@ providers:
     binary: "./node_modules/.bin/opencode"
     args: []
     startup_timeout: "45s"
+    validate_startup: false
     startup_probe: "output"
     required_env: ["OPENAI_API_KEY"]
     prompt_pattern: "❯"
@@ -50,6 +52,7 @@ providers:
     binary: "./node_modules/.bin/codex"
     args: []
     startup_timeout: "60s"
+    validate_startup: false
     startup_probe: "output"
     required_env: ["OPENAI_API_KEY"]
     prompt_pattern: "(?m)(>\\s*$|›)"
@@ -57,6 +60,7 @@ providers:
     binary: "./node_modules/.bin/gemini"
     args: []
     startup_timeout: "60s"
+    validate_startup: false
     startup_probe: "output"
     required_env: ["GEMINI_API_KEY"]
     prompt_pattern: "^\\s*>\\s*$"
