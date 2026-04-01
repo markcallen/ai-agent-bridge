@@ -26,6 +26,12 @@ export const Terminal = forwardRef<TerminalHandle, Props>(
     const containerRef = useRef<HTMLDivElement>(null);
     const xtermRef = useRef<XTerm | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
+    // Keep latest callbacks in refs so xterm always calls the current version
+    // even though the event listeners are registered once at mount.
+    const onDataRef = useRef(onData);
+    const onResizeRef = useRef(onResize);
+    onDataRef.current = onData;
+    onResizeRef.current = onResize;
 
     useEffect(() => {
       // Defer initialization to a RAF so React StrictMode's synchronous
@@ -77,8 +83,8 @@ export const Terminal = forwardRef<TerminalHandle, Props>(
         xtermRef.current = term;
         fitAddonRef.current = fitAddon;
 
-        if (onData) term.onData(onData);
-        term.onResize(({ cols, rows }) => { onResize?.(cols, rows); });
+        term.onData((data) => onDataRef.current?.(data));
+        term.onResize(({ cols, rows }) => onResizeRef.current?.(cols, rows));
 
         observer = new ResizeObserver(() => {
           if (!disposed) fitAddon.fit();
@@ -94,8 +100,6 @@ export const Terminal = forwardRef<TerminalHandle, Props>(
         xtermRef.current = null;
         fitAddonRef.current = null;
       };
-    // onData / onResize intentionally omitted — captured via closure on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useImperativeHandle(ref, () => ({

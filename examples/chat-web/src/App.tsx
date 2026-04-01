@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useBridgeSession } from "@ai-agent-bridge/client-node/react";
 import type { HealthResponseMsg, ProvidersListMsg } from "@ai-agent-bridge/client-node";
 import { HealthStatus } from "./components/HealthStatus";
+import { MobileGate } from "./components/MobileGate";
 import { SessionControls } from "./components/SessionControls";
 import { Terminal, type TerminalHandle } from "./components/Terminal";
-import { InputBar } from "./components/InputBar";
 
 const WS_URL = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/bridge`;
 
@@ -45,6 +45,11 @@ export function App() {
     });
   }, [bridge.sessionId]);
 
+  // Clear terminal when session_stopped is received (sessionId goes null)
+  useEffect(() => {
+    if (!bridge.sessionId) termRef.current?.clear();
+  }, [bridge.sessionId]);
+
   // Write new attach_event output to the terminal
   useEffect(() => {
     const newEvents = bridge.events.slice(lastEventIndex.current);
@@ -77,12 +82,12 @@ export function App() {
     }
   }
 
-  function sendInput(text: string) {
+  function sendInput(data: string) {
     if (bridge.sessionId) {
       bridge.sendInput({
         sessionId: bridge.sessionId,
         clientId: clientId.current,
-        text,
+        text: data,
       });
     }
   }
@@ -99,32 +104,30 @@ export function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-gray-100">
-      <HealthStatus
-        connectionStatus={bridge.status}
-        health={health}
-        providers={providers}
-      />
-      <SessionControls
-        provider={provider}
-        repoPath={repoPath}
-        sessionId={bridge.sessionId}
-        onProviderChange={setProvider}
-        onRepoPathChange={setRepoPath}
-        onStart={handleStart}
-        onStop={handleStop}
-      />
-      <div className="flex-1 min-h-0 p-2 bg-gray-900">
-        <Terminal
-          ref={termRef}
-          onData={sendInput}
-          onResize={handleTerminalResize}
+    <MobileGate>
+      <div className="flex flex-col h-screen bg-gray-900 text-gray-100">
+        <HealthStatus
+          connectionStatus={bridge.status}
+          health={health}
+          providers={providers}
         />
+        <SessionControls
+          provider={provider}
+          repoPath={repoPath}
+          sessionId={bridge.sessionId}
+          onProviderChange={setProvider}
+          onRepoPathChange={setRepoPath}
+          onStart={handleStart}
+          onStop={handleStop}
+        />
+        <div className="flex-1 min-h-0 p-2 bg-gray-900">
+          <Terminal
+            ref={termRef}
+            onData={sendInput}
+            onResize={handleTerminalResize}
+          />
+        </div>
       </div>
-      <InputBar
-        disabled={!bridge.sessionId}
-        onSubmit={(text) => sendInput(text + "\r")}
-      />
-    </div>
+    </MobileGate>
   );
 }

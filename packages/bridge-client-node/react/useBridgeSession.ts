@@ -243,6 +243,10 @@ export function useBridgeSession(
         case "session_started":
           setSessionId(msg.sessionId);
           break;
+        case "session_stopped":
+          setSessionId(null);
+          setEvents([]);
+          break;
         case "attach_event":
           setEvents((prev: BridgeEvent[]) => [
             ...prev,
