@@ -1,0 +1,216 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Semantic version increment to release
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+  push:
+    tags:
+      - "v*.*.*"
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bump_and_tag:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.select.outputs.version }}
+      tag: ${{ steps.select.outputs.tag }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch previous tag
+        id: previous
+        uses: WyriHaximus/github-action-get-previous-tag@v2
+        with:
+          fallback: v0.0.0
+          pattern: v*[0-9].*[0-9].*[0-9]
+
+      - name: Compute next semantic versions
+        id: semvers
+        uses: WyriHaximus/github-action-next-semvers@v1
+        with:
+          version: ${{ steps.previous.outputs.tag }}
+
+      - name: Select release version
+        id: select
+        env:
+          RELEASE_TYPE: ${{ github.event.inputs.release_type }}
+          PATCH_VERSION: ${{ steps.semvers.outputs.patch }}
+          MINOR_VERSION: ${{ steps.semvers.outputs.minor }}
+          MAJOR_VERSION: ${{ steps.semvers.outputs.major }}
+        run: |
+          case "$RELEASE_TYPE" in
+            patch) version="$PATCH_VERSION" ;;
+            minor) version="$MINOR_VERSION" ;;
+            major) version="$MAJOR_VERSION" ;;
+            *)
+              echo "unsupported release_type: $RELEASE_TYPE" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push release tag
+        env:
+          RELEASE_TAG: ${{ steps.select.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$RELEASE_TAG"
+          git push origin "refs/tags/$RELEASE_TAG"
+
+  verify_release:
+    name: Verify release inputs
+    runs-on: ubuntu-latest
+    needs:
+      - bump_and_tag
+    if: >-
+      always() && (
+        (github.event_name == 'workflow_dispatch' && needs.bump_and_tag.result == 'success') ||
+        (github.event_name == 'push' && github.actor != 'github-actions[bot]')
+      )
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && needs.bump_and_tag.outputs.tag || github.ref_name }}
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify tests pass from release tag
+        run: go test ./...
+
+      - name: Verify Go packages build from release tag
+        run: go build ./...
+
+      - name: Summarize release target
+        run: |
+          echo "Publishing from $RELEASE_TAG"
+
+  publish_container:
+    name: Publish GHCR image
+    runs-on: ubuntu-latest
+    needs:
+      - bump_and_tag
+      - verify_release
+    if: always() && needs.verify_release.result == 'success'
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.tags }}
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && needs.bump_and_tag.outputs.tag || github.ref_name }}
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ env.RELEASE_TAG }}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            BUILD_FROM=source
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summarize published image
+        run: |
+          echo "Image tags:"
+          echo "${{ steps.meta.outputs.tags }}"
+          echo "Digest: ${{ steps.build.outputs.digest }}"
+
+  publish_go_sdk:
+    name: Publish Go SDK release
+    runs-on: ubuntu-latest
+    needs:
+      - bump_and_tag
+      - verify_release
+      - publish_container
+    if: always() && needs.verify_release.result == 'success' && needs.publish_container.result == 'success'
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && needs.bump_and_tag.outputs.tag || github.ref_name }}
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify SDK package still builds
+        run: go build ./pkg/bridgeclient
+
+      - name: Create GitHub release for Go SDK tag
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          append_body: true
+          body: |
+            ## Published artifacts
+
+            - Go SDK module tag: `${{ env.RELEASE_TAG }}`
+            - Docker image: `ghcr.io/${{ github.repository }}:${{ env.RELEASE_TAG }}`
+            - Docker image digest: `${{ needs.publish_container.outputs.digest }}`
