@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
+.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
@@ -37,6 +37,9 @@ test-e2e:
 test-cover:
 	go test -race -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
+
+test-cover-maintained:
+	./scripts/check-go-coverage.sh
 
 lint:
 	./scripts/lint-go.sh

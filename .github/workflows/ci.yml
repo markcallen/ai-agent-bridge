@@ -43,6 +43,9 @@ jobs:
       - name: Run tests
         run: make test
 
+      - name: Enforce maintained package coverage
+        run: make test-cover-maintained
+
   typescript-build:
     runs-on: ubuntu-latest
     steps:
