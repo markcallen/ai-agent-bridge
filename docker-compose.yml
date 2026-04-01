@@ -3,8 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    env_file:
-      - .env
     environment:
       BRIDGE_CONFIG: /app/config/bridge-docker.yaml
       BRIDGE_CN: bridge.local
@@ -28,8 +26,6 @@ services:
       context: .
       dockerfile: examples/chat-web/Dockerfile
       target: production
-    env_file:
-      - examples/chat-web/.env
     environment:
       BRIDGE_ADDR: bridge:9445
       CA_CERT: /app/certs/ca-bundle.crt

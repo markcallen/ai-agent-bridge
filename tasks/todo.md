@@ -1,3 +1,73 @@
+## 2026-04-01 Rule Alignment Remediation Plan
+
+# Task: Align ai-agent-bridge with global and Ballast local rules
+
+## Context
+- Owner: Codex
+- Date: 2026-04-01
+- Mode: Approval-Required
+
+## Scope
+- In scope:
+- Bring repository workflow, tests, docs, release automation, and local-dev setup into line with `~/.agents/AGENTS.md`, `~/.agents/EXECUTION_FRAMEWORK.md`, and repo-local `.codex/rules/`.
+- Cover both Go and TypeScript surfaces defined in `.rulesrc.json`.
+- Out of scope:
+- Feature work unrelated to rule compliance.
+- Deep product redesign unless required to satisfy testability, release, or security rules.
+
+## Constraints
+- Preserve existing public APIs unless a separate approval is given for breaking changes.
+- Do not remove existing Docker, release, or docs flows without a compatible replacement.
+- Keep generated protobuf code generated from `proto/`, not manually edited.
+
+## Risks and Tradeoffs
+- Risk: Raising coverage from the current baseline to the mandated 75% will require non-trivial test investment across server, provider, and client packages.
+- Tradeoff: Prioritize coverage in high-value runtime paths first, then backfill lower-risk packages.
+- Risk: Replacing `.env`-based local workflows with `env-secrets` touches docs, startup code, Docker Compose, and contributor workflow at once.
+- Tradeoff: Migrate in stages so local development remains usable throughout the transition.
+- Risk: Tightening CI, hooks, and release gates may initially slow iteration until the repo is clean.
+- Tradeoff: Short-term friction is required to enforce the rule set consistently.
+
+## Execution Checklist
+- [ ] Baseline the repo against all applicable rules and convert this plan into tracked implementation issues/workstreams.
+- [ ] Replace `.env`-centric local-dev guidance with `env-secrets` guidance and examples; remove any committed workflow assumptions that require plaintext `.env` files.
+- [ ] Add or update repo automation for Go linting and testing: `.golangci*`, root `.pre-commit-config.yaml`, installed `pre-commit` hooks, and CI lint plus coverage gates.
+- [ ] Raise automated Go coverage to at least 75% overall, with new deterministic regression tests in low-coverage runtime packages (`internal/server`, `internal/bridge`, `internal/provider`, `pkg/bridgeclient`, and command entrypoints where practical).
+- [ ] Strengthen GitHub Actions so CI runs build, lint, race tests, coverage enforcement, and smoke checks with clear separation of responsibilities.
+- [ ] Bring release automation in line with publishing rules: add workflow-dispatch semver bumping/tagging, validate from tags, and keep app versus SDK/library release paths explicit.
+- [ ] Add missing repo automation for dependency maintenance, especially `.github/dependabot.yml` covering npm ecosystems and GitHub Actions.
+- [ ] Align docs with the documentation rules: create `docs/README.md` as the index, update `README.md` quick-start and prerequisites, document local-dev, release, troubleshooting, and architecture paths, and verify all commands/paths.
+- [ ] Align TypeScript package standards for `packages/bridge-client-node`, `examples/chat-ts`, and `examples/chat-web`: Node version policy, `engines`, lint/test scripts, and CI coverage for the maintained package surfaces.
+- [ ] Review structured logging fields and secret-redaction coverage in Go and TypeScript paths; standardize request/session identifiers and avoid leaking secrets in logs.
+- [ ] Re-run full verification and capture evidence in this file before opening follow-up PRs.
+
+## Test Strategy
+- Unit:
+- Add table-driven tests for config, auth, bridge/session logic, provider command construction, websocket/grpc client helpers, and request validation.
+- Integration:
+- Add focused server/client integration tests for session lifecycle, attach/replay semantics, auth interceptors, and Docker/runtime smoke paths.
+- E2E:
+- Keep the existing smoke path, but make it validate deployability rather than re-running the generic unit suite.
+- Failure-path tests:
+- Cover auth failures, invalid config, provider validation failures, replay/attach edge cases, and release workflow misconfiguration where scriptable.
+
+## Rollback Strategy
+- Trigger:
+- CI hardening or local-dev migration blocks contributors or breaks release workflows without a compatible replacement.
+- Rollback steps:
+- Revert the specific workflow/hook/doc migration commit while keeping isolated test additions that remain valid.
+- Restore prior local-dev entrypoints temporarily, but keep the remediation checklist open.
+- Validation after rollback:
+- Confirm the previous `make build`, `make test`, Docker, and release paths still work.
+
+## Outcome
+- Result:
+- Pending.
+- Evidence links/commands:
+- Pending.
+
+---
+
 # Task: PTY Transport Cutover
 
 ## Context

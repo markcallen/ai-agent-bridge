@@ -7,7 +7,7 @@
 /runprompt
 *.exe
 
-# Local environment (secrets — use .env.example as template)
+# Local environment (load secrets with env-secrets)
 .env
 
 # Certificates (generated)

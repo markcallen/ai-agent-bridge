@@ -114,7 +114,9 @@ func TestSetProject_NilJWT(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() {
+		_ = c.Close()
+	}()
 	// SetProject should not panic when jwtCred is nil.
 	c.SetProject("my-project")
 }

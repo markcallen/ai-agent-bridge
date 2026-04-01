@@ -29,15 +29,6 @@ func main() {
 
 	bootstrapLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	if err := config.LoadDotEnv(".env"); err != nil {
-		bootstrapLogger.Error("failed to load .env", "error", err)
-		os.Exit(1)
-	}
-	if err := config.LoadDotEnv("e2e/.env"); err != nil {
-		bootstrapLogger.Error("failed to load e2e/.env", "error", err)
-		os.Exit(1)
-	}
-
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		bootstrapLogger.Error("failed to load config", "error", err)

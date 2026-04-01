@@ -17,7 +17,9 @@ func LoadDotEnv(path string) error {
 		}
 		return fmt.Errorf("open dotenv file %q: %w", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	scanner := bufio.NewScanner(f)
 	for lineNo := 1; scanner.Scan(); lineNo++ {

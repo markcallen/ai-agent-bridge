@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "TypeScript interactive chat example for ai-agent-bridge",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "tsx src/index.ts",
     "build": "tsc"

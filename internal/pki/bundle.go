@@ -11,7 +11,9 @@ func BuildBundle(outPath string, certPaths ...string) error {
 	if err != nil {
 		return fmt.Errorf("create bundle: %w", err)
 	}
-	defer out.Close()
+	defer func() {
+		_ = out.Close()
+	}()
 
 	for _, p := range certPaths {
 		data, err := os.ReadFile(p)

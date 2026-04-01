@@ -74,8 +74,8 @@ func TestCrossSign(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()
 
-	InitCA("ca-a", dirA)
-	InitCA("ca-b", dirB)
+	_, _, _ = InitCA("ca-a", dirA)
+	_, _, _ = InitCA("ca-b", dirB)
 
 	caCertA, caKeyA, _ := LoadCA(filepath.Join(dirA, "ca.crt"), filepath.Join(dirA, "ca.key"))
 	caCertB, _, _ := LoadCA(filepath.Join(dirB, "ca.crt"), filepath.Join(dirB, "ca.key"))
@@ -100,10 +100,10 @@ func TestCrossSign(t *testing.T) {
 
 func TestBuildBundle(t *testing.T) {
 	dir := t.TempDir()
-	InitCA("ca-1", dir)
+	_, _, _ = InitCA("ca-1", dir)
 
 	dir2 := t.TempDir()
-	InitCA("ca-2", dir2)
+	_, _, _ = InitCA("ca-2", dir2)
 
 	bundlePath := filepath.Join(dir, "bundle.crt")
 	err := BuildBundle(bundlePath, filepath.Join(dir, "ca.crt"), filepath.Join(dir2, "ca.crt"))

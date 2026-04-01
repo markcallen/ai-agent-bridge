@@ -34,7 +34,8 @@ See [docs/service.md](docs/service.md) for architecture details.
 ### Prerequisites
 
 - [Go 1.25+](https://go.dev/dl/)
-- `npm`
+- [nvm](https://github.com/nvm-sh/nvm)
+- Node.js 22 (LTS) or 24 (Active LTS). Use the version in `.nvmrc`.
 - (optional) `protoc` + `protoc-gen-go` + `protoc-gen-go-grpc` — only if modifying `.proto` files
 
 ### 1. Clone and configure
@@ -42,16 +43,20 @@ See [docs/service.md](docs/service.md) for architecture details.
 ```bash
 git clone https://github.com/markcallen/ai-agent-bridge.git
 cd ai-agent-bridge
-cp .env.example .env
+nvm install
+nvm use
+eval "$(env-secrets export)"
 ```
 
-Edit `.env` and add your API keys:
+Store required API keys with `env-secrets`:
 
+```bash
+env-secrets set ANTHROPIC_API_KEY sk-ant-...
+env-secrets set OPENAI_API_KEY sk-...
+env-secrets set GEMINI_API_KEY ...
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-GEMINI_API_KEY=...
-```
+
+The expected secret names are listed in `env-secrets.example`. Do not commit `.env` files.
 
 ### 2. Start the daemon
 
@@ -70,10 +75,20 @@ make chat-claude     # or chat-opencode, chat-codex, chat-gemini
 ### Docker
 
 ```bash
-docker compose up --build bridge
+eval "$(env-secrets export)"
+make up
 ```
 
 Mounts `~/repos` → `/repos` and `./certs` → `/app/certs`. The prebuilt image is available at `ghcr.io/markcallen/ai-agent-bridge`.
+
+### Smoke Test
+
+```bash
+eval "$(env-secrets export)"
+make smoke
+```
+
+This validates the repo Dockerfile and Compose stack by starting the bridge in Docker and running an authenticated gRPC health check.
 
 ---
 
@@ -238,6 +253,8 @@ grpcurl -plaintext -import-path proto -proto bridge/v1/bridge.proto \
 Note: `data` is base64-encoded bytes. `grpcurl` does not support JWT injection — use the Go SDK for JWT-authenticated calls.
 
 Full API reference: [docs/grpc-api.md](docs/grpc-api.md)
+
+Full documentation index: [docs/README.md](docs/README.md)
 
 ---
 

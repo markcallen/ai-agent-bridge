@@ -4,6 +4,9 @@
   "description": "React/Express web example for ai-agent-bridge",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "tsx scripts/dev.ts",
     "build": "vite build",

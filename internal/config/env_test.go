@@ -22,9 +22,9 @@ func TestLoadDotEnv(t *testing.T) {
 	}
 
 	t.Setenv("DOTENV_TEST_KEEP", "existing")
-	os.Unsetenv("DOTENV_TEST_FOO")
-	os.Unsetenv("DOTENV_TEST_BAR")
-	os.Unsetenv("DOTENV_TEST_ZED")
+	_ = os.Unsetenv("DOTENV_TEST_FOO")
+	_ = os.Unsetenv("DOTENV_TEST_BAR")
+	_ = os.Unsetenv("DOTENV_TEST_ZED")
 
 	if err := LoadDotEnv(path); err != nil {
 		t.Fatalf("LoadDotEnv: %v", err)

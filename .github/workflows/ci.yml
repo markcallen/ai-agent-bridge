@@ -9,7 +9,29 @@ on:
       - main
 
 jobs:
-  test:
+  go-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "29.3"
+
+      - name: Install Go tooling
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+
+      - name: Run lint
+        run: make lint
+
+  go-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,4 +41,41 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
-        run: go test -race ./...
+        run: make test
+
+  typescript-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/bridge-client-node/package-lock.json
+            examples/chat-ts/package-lock.json
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install SDK dependencies
+        run: npm --prefix packages/bridge-client-node install
+
+      - name: Install chat-ts dependencies
+        run: npm --prefix examples/chat-ts install
+
+      - name: Install chat-web dependencies
+        run: pnpm --dir examples/chat-web install --frozen-lockfile
+
+      - name: Build TypeScript packages
+        run: |
+          npm --prefix packages/bridge-client-node run build
+          npm --prefix examples/chat-ts run build
+          pnpm --dir examples/chat-web run build

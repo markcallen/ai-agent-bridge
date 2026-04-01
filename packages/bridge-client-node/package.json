@@ -2,6 +2,9 @@
   "name": "@ai-agent-bridge/client-node",
   "version": "0.1.0",
   "description": "Node.js bridge client: gRPC → WebSocket adapter for the ai-agent-bridge daemon",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
   "exports": {

@@ -59,7 +59,10 @@ func cmdInit() {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	name := fs.String("name", "", "CA common name (required)")
 	out := fs.String("out", "certs/", "Output directory")
-	fs.Parse(os.Args[1:])
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "error: parse init flags: %v\n", err)
+		os.Exit(1)
+	}
 
 	if *name == "" {
 		fmt.Fprintln(os.Stderr, "error: --name is required")
@@ -83,7 +86,10 @@ func cmdIssue() {
 	caCert := fs.String("ca", "", "CA certificate path (required)")
 	caKey := fs.String("ca-key", "", "CA private key path (required)")
 	out := fs.String("out", "certs/", "Output directory")
-	fs.Parse(os.Args[1:])
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "error: parse issue flags: %v\n", err)
+		os.Exit(1)
+	}
 
 	if *certType == "" || *cn == "" || *caCert == "" || *caKey == "" {
 		fmt.Fprintln(os.Stderr, "error: --type, --cn, --ca, and --ca-key are required")
@@ -127,7 +133,10 @@ func cmdCrossSign() {
 	signerKey := fs.String("signer-key", "", "Signer CA private key path (required)")
 	targetCA := fs.String("target-ca", "", "Target CA certificate to cross-sign (required)")
 	out := fs.String("out", "", "Output path for cross-signed cert (required)")
-	fs.Parse(os.Args[1:])
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "error: parse cross-sign flags: %v\n", err)
+		os.Exit(1)
+	}
 
 	if *signerCA == "" || *signerKey == "" || *targetCA == "" || *out == "" {
 		fmt.Fprintln(os.Stderr, "error: --signer-ca, --signer-key, --target-ca, and --out are required")
@@ -156,7 +165,10 @@ func cmdCrossSign() {
 func cmdBundle() {
 	fs := flag.NewFlagSet("bundle", flag.ExitOnError)
 	out := fs.String("out", "", "Output bundle path (required)")
-	fs.Parse(os.Args[1:])
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "error: parse bundle flags: %v\n", err)
+		os.Exit(1)
+	}
 
 	args := fs.Args()
 	if *out == "" || len(args) == 0 {
@@ -175,7 +187,10 @@ func cmdBundle() {
 func cmdJWTKeygen() {
 	fs := flag.NewFlagSet("jwt-keygen", flag.ExitOnError)
 	out := fs.String("out", "certs/jwt-signing", "Output base path (creates .key and .pub)")
-	fs.Parse(os.Args[1:])
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "error: parse jwt-keygen flags: %v\n", err)
+		os.Exit(1)
+	}
 
 	dir := "."
 	base := *out
@@ -197,7 +212,10 @@ func cmdVerify() {
 	fs := flag.NewFlagSet("verify", flag.ExitOnError)
 	certPath := fs.String("cert", "", "Certificate to verify (required)")
 	bundlePath := fs.String("bundle", "", "Trust bundle (required)")
-	fs.Parse(os.Args[1:])
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "error: parse verify flags: %v\n", err)
+		os.Exit(1)
+	}
 
 	if *certPath == "" || *bundlePath == "" {
 		fmt.Fprintln(os.Stderr, "error: --cert and --bundle are required")

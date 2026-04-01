@@ -199,7 +199,9 @@ func (s *BridgeServer) AttachSession(req *bridgev1.AttachSessionRequest, stream 
 	if err != nil {
 		return mapBridgeError(err, "attach session")
 	}
-	defer s.supervisor.Detach(req.SessionId, clientID)
+	defer func() {
+		_ = s.supervisor.Detach(req.SessionId, clientID)
+	}()
 
 	if err := stream.Send(&bridgev1.AttachSessionEvent{
 		Type:         bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED,

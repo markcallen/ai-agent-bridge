@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
+.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
@@ -39,7 +39,7 @@ test-cover:
 	go tool cover -html=coverage.out -o coverage.html
 
 lint:
-	golangci-lint run ./...
+	./scripts/lint-go.sh
 
 clean:
 	rm -rf $(BIN_DIR) coverage.out coverage.html
@@ -71,6 +71,27 @@ dev-run: dev-setup
 
 docker-run:
 	docker compose up --build bridge
+
+smoke:
+	./scripts/smoke.sh
+
+up:
+	docker compose up --build
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f
+
+up-local:
+	docker compose -f docker-compose.yml -f docker-compose.local.yaml up --build --watch
+
+down-local:
+	docker compose -f docker-compose.yml -f docker-compose.local.yaml down
+
+logs-local:
+	docker compose -f docker-compose.yml -f docker-compose.local.yaml logs -f
 
 chat-example:
 	go run ./examples/chat \
@@ -134,7 +155,7 @@ chat-web-start: chat-web-build
 	cd examples/chat-web && pnpm start
 
 chat-web-docker-dev:
-	docker compose -f docker-compose.local.yaml up --build --watch
+	docker compose -f docker-compose.yml -f docker-compose.local.yaml up --build --watch
 
 chat-web-docker-start:
 	docker compose up --build chat-web
