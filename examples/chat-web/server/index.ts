@@ -9,6 +9,7 @@ import * as grpc from "@grpc/grpc-js";
 import pino from "pino";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import { createBridgeWebSocketHandler } from "@ai-agent-bridge/client-node";
+import { buildBridgeChannelOptions } from "../src/lib/bridge-config";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -151,6 +152,7 @@ const server = http.createServer(app);
 const wss = createBridgeWebSocketHandler({
   bridgeAddr: BRIDGE_ADDR,
   credentials,
+  channelOptions: buildBridgeChannelOptions(BRIDGE_ADDR),
 });
 
 if (IS_DEV) {
