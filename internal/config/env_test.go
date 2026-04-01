@@ -81,3 +81,25 @@ func TestValidateProviderEnv(t *testing.T) {
 		t.Fatalf("ValidateProviderEnv: %v", err)
 	}
 }
+
+func TestValidateProviderEnvSkipsProvidersWithStartupValidationDisabled(t *testing.T) {
+	disabled := false
+	cfg := &Config{
+		Providers: map[string]ProviderConfig{
+			"claude": {
+				RequiredEnv:     []string{"ANTHROPIC_API_KEY"},
+				ValidateStartup: &disabled,
+			},
+			"codex": {
+				RequiredEnv: []string{"OPENAI_API_KEY"},
+			},
+		},
+	}
+
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "present")
+
+	if err := ValidateProviderEnv(cfg); err != nil {
+		t.Fatalf("ValidateProviderEnv: %v", err)
+	}
+}

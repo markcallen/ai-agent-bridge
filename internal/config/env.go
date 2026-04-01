@@ -62,6 +62,9 @@ func LoadDotEnv(path string) error {
 // ValidateProviderEnv ensures all configured providers have required env vars set.
 func ValidateProviderEnv(cfg *Config) error {
 	for name, pcfg := range cfg.Providers {
+		if !pcfg.ShouldValidateStartup() {
+			continue
+		}
 		for _, envName := range pcfg.RequiredEnv {
 			v := strings.TrimSpace(os.Getenv(envName))
 			if v == "" {
