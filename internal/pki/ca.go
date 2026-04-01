@@ -132,6 +132,8 @@ func writePEM(path, blockType string, data []byte, perm os.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 	return pem.Encode(f, &pem.Block{Type: blockType, Bytes: data})
 }

@@ -2,14 +2,16 @@ package provider
 
 import "time"
 
-// NewClaudeProvider creates a provider adapter for Anthropic Claude CLI.
+// NewClaudeProvider creates the interactive PTY-backed Claude provider.
 func NewClaudeProvider() *StdioProvider {
 	return NewStdioProvider(StdioConfig{
 		ProviderID:     "claude",
 		Binary:         "claude",
-		DefaultArgs:    []string{"--output-format", "stream-json", "--verbose"},
-		StreamJSON:     true,
-		StartupTimeout: 30 * time.Second,
+		DefaultArgs:    []string{"--verbose"},
+		StartupTimeout: 60 * time.Second,
 		StopGrace:      10 * time.Second,
+		StartupProbe:   "prompt",
+		RequiredEnv:    []string{"ANTHROPIC_API_KEY"},
+		PromptPattern:  `(?m)(❯|\>\s*$)`,
 	})
 }

@@ -8,6 +8,7 @@ package bridgev1
 
 import (
 	context "context"
+
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -23,8 +24,9 @@ const (
 	BridgeService_StopSession_FullMethodName   = "/bridge.v1.BridgeService/StopSession"
 	BridgeService_GetSession_FullMethodName    = "/bridge.v1.BridgeService/GetSession"
 	BridgeService_ListSessions_FullMethodName  = "/bridge.v1.BridgeService/ListSessions"
-	BridgeService_SendInput_FullMethodName     = "/bridge.v1.BridgeService/SendInput"
-	BridgeService_StreamEvents_FullMethodName  = "/bridge.v1.BridgeService/StreamEvents"
+	BridgeService_AttachSession_FullMethodName = "/bridge.v1.BridgeService/AttachSession"
+	BridgeService_WriteInput_FullMethodName    = "/bridge.v1.BridgeService/WriteInput"
+	BridgeService_ResizeSession_FullMethodName = "/bridge.v1.BridgeService/ResizeSession"
 	BridgeService_Health_FullMethodName        = "/bridge.v1.BridgeService/Health"
 	BridgeService_ListProviders_FullMethodName = "/bridge.v1.BridgeService/ListProviders"
 )
@@ -32,19 +34,14 @@ const (
 // BridgeServiceClient is the client API for BridgeService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// BridgeService manages AI agent sessions across providers.
 type BridgeServiceClient interface {
-	// Session lifecycle
 	StartSession(ctx context.Context, in *StartSessionRequest, opts ...grpc.CallOption) (*StartSessionResponse, error)
 	StopSession(ctx context.Context, in *StopSessionRequest, opts ...grpc.CallOption) (*StopSessionResponse, error)
 	GetSession(ctx context.Context, in *GetSessionRequest, opts ...grpc.CallOption) (*GetSessionResponse, error)
 	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
-	// Command routing
-	SendInput(ctx context.Context, in *SendInputRequest, opts ...grpc.CallOption) (*SendInputResponse, error)
-	// Event streaming
-	StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SessionEvent], error)
-	// Health and discovery
+	AttachSession(ctx context.Context, in *AttachSessionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[AttachSessionEvent], error)
+	WriteInput(ctx context.Context, in *WriteInputRequest, opts ...grpc.CallOption) (*WriteInputResponse, error)
+	ResizeSession(ctx context.Context, in *ResizeSessionRequest, opts ...grpc.CallOption) (*ResizeSessionResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 	ListProviders(ctx context.Context, in *ListProvidersRequest, opts ...grpc.CallOption) (*ListProvidersResponse, error)
 }
@@ -97,23 +94,13 @@ func (c *bridgeServiceClient) ListSessions(ctx context.Context, in *ListSessions
 	return out, nil
 }
 
-func (c *bridgeServiceClient) SendInput(ctx context.Context, in *SendInputRequest, opts ...grpc.CallOption) (*SendInputResponse, error) {
+func (c *bridgeServiceClient) AttachSession(ctx context.Context, in *AttachSessionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[AttachSessionEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SendInputResponse)
-	err := c.cc.Invoke(ctx, BridgeService_SendInput_FullMethodName, in, out, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &BridgeService_ServiceDesc.Streams[0], BridgeService_AttachSession_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
-}
-
-func (c *bridgeServiceClient) StreamEvents(ctx context.Context, in *StreamEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SessionEvent], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &BridgeService_ServiceDesc.Streams[0], BridgeService_StreamEvents_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[StreamEventsRequest, SessionEvent]{ClientStream: stream}
+	x := &grpc.GenericClientStream[AttachSessionRequest, AttachSessionEvent]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -124,7 +111,27 @@ func (c *bridgeServiceClient) StreamEvents(ctx context.Context, in *StreamEvents
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type BridgeService_StreamEventsClient = grpc.ServerStreamingClient[SessionEvent]
+type BridgeService_AttachSessionClient = grpc.ServerStreamingClient[AttachSessionEvent]
+
+func (c *bridgeServiceClient) WriteInput(ctx context.Context, in *WriteInputRequest, opts ...grpc.CallOption) (*WriteInputResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WriteInputResponse)
+	err := c.cc.Invoke(ctx, BridgeService_WriteInput_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *bridgeServiceClient) ResizeSession(ctx context.Context, in *ResizeSessionRequest, opts ...grpc.CallOption) (*ResizeSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResizeSessionResponse)
+	err := c.cc.Invoke(ctx, BridgeService_ResizeSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 func (c *bridgeServiceClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -149,19 +156,14 @@ func (c *bridgeServiceClient) ListProviders(ctx context.Context, in *ListProvide
 // BridgeServiceServer is the server API for BridgeService service.
 // All implementations must embed UnimplementedBridgeServiceServer
 // for forward compatibility.
-//
-// BridgeService manages AI agent sessions across providers.
 type BridgeServiceServer interface {
-	// Session lifecycle
 	StartSession(context.Context, *StartSessionRequest) (*StartSessionResponse, error)
 	StopSession(context.Context, *StopSessionRequest) (*StopSessionResponse, error)
 	GetSession(context.Context, *GetSessionRequest) (*GetSessionResponse, error)
 	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
-	// Command routing
-	SendInput(context.Context, *SendInputRequest) (*SendInputResponse, error)
-	// Event streaming
-	StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[SessionEvent]) error
-	// Health and discovery
+	AttachSession(*AttachSessionRequest, grpc.ServerStreamingServer[AttachSessionEvent]) error
+	WriteInput(context.Context, *WriteInputRequest) (*WriteInputResponse, error)
+	ResizeSession(context.Context, *ResizeSessionRequest) (*ResizeSessionResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	ListProviders(context.Context, *ListProvidersRequest) (*ListProvidersResponse, error)
 	mustEmbedUnimplementedBridgeServiceServer()
@@ -186,11 +188,14 @@ func (UnimplementedBridgeServiceServer) GetSession(context.Context, *GetSessionR
 func (UnimplementedBridgeServiceServer) ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSessions not implemented")
 }
-func (UnimplementedBridgeServiceServer) SendInput(context.Context, *SendInputRequest) (*SendInputResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SendInput not implemented")
+func (UnimplementedBridgeServiceServer) AttachSession(*AttachSessionRequest, grpc.ServerStreamingServer[AttachSessionEvent]) error {
+	return status.Error(codes.Unimplemented, "method AttachSession not implemented")
 }
-func (UnimplementedBridgeServiceServer) StreamEvents(*StreamEventsRequest, grpc.ServerStreamingServer[SessionEvent]) error {
-	return status.Error(codes.Unimplemented, "method StreamEvents not implemented")
+func (UnimplementedBridgeServiceServer) WriteInput(context.Context, *WriteInputRequest) (*WriteInputResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WriteInput not implemented")
+}
+func (UnimplementedBridgeServiceServer) ResizeSession(context.Context, *ResizeSessionRequest) (*ResizeSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResizeSession not implemented")
 }
 func (UnimplementedBridgeServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
@@ -291,34 +296,52 @@ func _BridgeService_ListSessions_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
-func _BridgeService_SendInput_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SendInputRequest)
+func _BridgeService_AttachSession_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(AttachSessionRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(BridgeServiceServer).AttachSession(m, &grpc.GenericServerStream[AttachSessionRequest, AttachSessionEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type BridgeService_AttachSessionServer = grpc.ServerStreamingServer[AttachSessionEvent]
+
+func _BridgeService_WriteInput_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WriteInputRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(BridgeServiceServer).SendInput(ctx, in)
+		return srv.(BridgeServiceServer).WriteInput(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: BridgeService_SendInput_FullMethodName,
+		FullMethod: BridgeService_WriteInput_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BridgeServiceServer).SendInput(ctx, req.(*SendInputRequest))
+		return srv.(BridgeServiceServer).WriteInput(ctx, req.(*WriteInputRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _BridgeService_StreamEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(StreamEventsRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
+func _BridgeService_ResizeSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResizeSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
 	}
-	return srv.(BridgeServiceServer).StreamEvents(m, &grpc.GenericServerStream[StreamEventsRequest, SessionEvent]{ServerStream: stream})
+	if interceptor == nil {
+		return srv.(BridgeServiceServer).ResizeSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BridgeService_ResizeSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BridgeServiceServer).ResizeSession(ctx, req.(*ResizeSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type BridgeService_StreamEventsServer = grpc.ServerStreamingServer[SessionEvent]
 
 func _BridgeService_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HealthRequest)
@@ -380,8 +403,12 @@ var BridgeService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _BridgeService_ListSessions_Handler,
 		},
 		{
-			MethodName: "SendInput",
-			Handler:    _BridgeService_SendInput_Handler,
+			MethodName: "WriteInput",
+			Handler:    _BridgeService_WriteInput_Handler,
+		},
+		{
+			MethodName: "ResizeSession",
+			Handler:    _BridgeService_ResizeSession_Handler,
 		},
 		{
 			MethodName: "Health",
@@ -394,8 +421,8 @@ var BridgeService_ServiceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "StreamEvents",
-			Handler:       _BridgeService_StreamEvents_Handler,
+			StreamName:    "AttachSession",
+			Handler:       _BridgeService_AttachSession_Handler,
 			ServerStreams: true,
 		},
 	},

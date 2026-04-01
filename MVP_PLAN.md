@@ -86,7 +86,7 @@ ai-agent-bridge/
 │   ├── chat/                    # Interactive chat example
 │   │   ├── main.go
 │   │   └── main_e2e_test.go
-│   └── runprompt/               # Single-prompt example
+│   └── chat/                    # Interactive PTY example
 │       └── main.go
 ├── certs/                       # Generated certs (gitignored)
 ├── config/
@@ -319,7 +319,7 @@ ai-agent-bridge/
 - [x] `Makefile` target: `make dev-setup` - one-command dev environment
 - [x] `Makefile` target: `make test-e2e` - dockerized end-to-end validation
 - [x] `e2e/cmd/e2e-test/main.go` - E2E test runner
-- [x] `examples/chat/` and `examples/runprompt/` - Working usage examples
+- [x] `examples/chat/` - Working usage example
 
 ---
 

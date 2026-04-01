@@ -3,8 +3,6 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    env_file:
-      - .env
     environment:
       BRIDGE_CONFIG: /app/config/bridge-e2e.yaml
       BRIDGE_CLIENT_CN: e2e-client
@@ -23,8 +21,6 @@ services:
     build:
       context: ..
       dockerfile: e2e/Dockerfile.client
-    env_file:
-      - .env
     environment:
       E2E_ONLY: ${E2E_ONLY:-}
     depends_on:

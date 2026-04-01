@@ -2,314 +2,192 @@ package server
 
 import (
 	"context"
-	"io"
+	"errors"
 	"log/slog"
+	"os/exec"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
-	jwt "github.com/golang-jwt/jwt/v5"
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/auth"
 	"github.com/markcallen/ai-agent-bridge/internal/bridge"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-type testProvider struct {
-	id string
+type serverTestProvider struct {
+	id        string
+	healthErr error
+	version   string
 }
 
-func (p *testProvider) ID() string { return p.id }
-func (p *testProvider) Health(ctx context.Context) error {
-	return nil
-}
-func (p *testProvider) Version(ctx context.Context) (string, error) {
-	return "test-1.0", nil
-}
-func (p *testProvider) Start(ctx context.Context, cfg bridge.SessionConfig) (bridge.SessionHandle, error) {
-	h := &testHandle{id: cfg.SessionID, events: make(chan bridge.Event, 32)}
-	h.events <- bridge.Event{
-		Type:      bridge.EventTypeSessionStarted,
-		Stream:    "system",
-		Text:      "started",
-		SessionID: cfg.SessionID,
-		ProjectID: cfg.ProjectID,
-		Provider:  p.id,
+func (p *serverTestProvider) ID() string                    { return p.id }
+func (p *serverTestProvider) Binary() string                { return "/bin/true" }
+func (p *serverTestProvider) PromptPattern() *regexp.Regexp { return nil }
+func (p *serverTestProvider) StartupTimeout() time.Duration { return time.Second }
+func (p *serverTestProvider) StopGrace() time.Duration      { return time.Second }
+func (p *serverTestProvider) BuildCommand(context.Context, bridge.SessionConfig) (*exec.Cmd, error) {
+	if p.id == "cat" {
+		return exec.Command("/bin/cat"), nil
 	}
-	return h, nil
+	return exec.Command("/bin/true"), nil
 }
-func (p *testProvider) Send(handle bridge.SessionHandle, text string) error {
-	return nil
+func (p *serverTestProvider) ValidateStartup(context.Context) error { return nil }
+func (p *serverTestProvider) Health(context.Context) error          { return p.healthErr }
+func (p *serverTestProvider) Version(context.Context) (string, error) {
+	return p.version, nil
 }
-func (p *testProvider) Stop(handle bridge.SessionHandle) error {
-	h := handle.(*testHandle)
-	h.events <- bridge.Event{
-		Type:   bridge.EventTypeSessionStopped,
-		Stream: "system",
-		Text:   "stopped",
-		Done:   true,
+
+func TestValidationHelpers(t *testing.T) {
+	if err := validateStringField("field", "ok", 10, false); err != nil {
+		t.Fatalf("validateStringField: %v", err)
 	}
-	close(h.events)
-	return nil
-}
-func (p *testProvider) Events(handle bridge.SessionHandle) <-chan bridge.Event {
-	return handle.(*testHandle).events
-}
-
-type testHandle struct {
-	id     string
-	events chan bridge.Event
-}
-
-func (h *testHandle) ID() string { return h.id }
-func (h *testHandle) PID() int   { return 1 }
-
-type testStream struct {
-	ctx context.Context
-}
-
-func (t *testStream) SetHeader(md metadata.MD) error  { return nil }
-func (t *testStream) SendHeader(md metadata.MD) error { return nil }
-func (t *testStream) SetTrailer(md metadata.MD)       {}
-func (t *testStream) Context() context.Context        { return t.ctx }
-func (t *testStream) SendMsg(m any) error             { return nil }
-func (t *testStream) RecvMsg(m any) error             { return nil }
-func (t *testStream) Send(*bridgev1.SessionEvent) error {
-	return nil
-}
-
-func testCtx(projectID string) context.Context {
-	claims := &auth.BridgeClaims{
-		ProjectID: projectID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject: "test-user",
-		},
+	if err := validateStringField("field", "", 10, false); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("empty string code=%v want %v", status.Code(err), codes.InvalidArgument)
 	}
-	return auth.ContextWithClaims(context.Background(), claims)
-}
-
-func newTestServer(t *testing.T, policy bridge.Policy) *BridgeServer {
-	t.Helper()
-	reg := bridge.NewRegistry()
-	if err := reg.Register(&testProvider{id: "test"}); err != nil {
-		t.Fatalf("register provider: %v", err)
+	if err := validateOptionalStringField("field", "", 10, false); err != nil {
+		t.Fatalf("validateOptionalStringField empty: %v", err)
 	}
-	sup := bridge.NewSupervisor(reg, policy, 64, bridge.DefaultSubscriberConfig(), 0)
-	t.Cleanup(func() { sup.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(sup, reg, logger, RateLimitConfig{
-		GlobalRPS:                  1000,
-		GlobalBurst:                1000,
-		StartSessionPerClientRPS:   1000,
-		StartSessionPerClientBurst: 1000,
-		SendInputPerSessionRPS:     1000,
-		SendInputPerSessionBurst:   1000,
-	})
+	if err := validateByteField("data", []byte("x"), 1); err != nil {
+		t.Fatalf("validateByteField: %v", err)
+	}
+	if err := validateUUIDField("session_id", "not-a-uuid"); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("validateUUIDField code=%v want %v", status.Code(err), codes.InvalidArgument)
+	}
 }
 
-func mustStartSession(t *testing.T, s *BridgeServer, projectID, sessionID string) {
-	t.Helper()
-	_, err := s.StartSession(testCtx(projectID), &bridgev1.StartSessionRequest{
-		ProjectId: projectID,
-		SessionId: sessionID,
-		RepoPath:  t.TempDir(),
-		Provider:  "test",
-	})
+func TestRateLimiters(t *testing.T) {
+	now := time.Now()
+	bucket := newTokenBucket(1, 1, now)
+	if !bucket.allow(now) {
+		t.Fatal("first allow was false")
+	}
+	if bucket.allow(now) {
+		t.Fatal("second allow was true without refill")
+	}
+	if !bucket.allow(now.Add(1100 * time.Millisecond)) {
+		t.Fatal("allow after refill was false")
+	}
+
+	limiter := newKeyedLimiter(1, 1)
+	limiter.ttl = time.Millisecond
+	if !limiter.allow("client-a") {
+		t.Fatal("keyed limiter first allow was false")
+	}
+	limiter.mu.Lock()
+	limiter.buckets["client-a"].lastSeen = time.Now().Add(-time.Hour)
+	limiter.cleanupLocked(time.Now())
+	_, exists := limiter.buckets["client-a"]
+	limiter.mu.Unlock()
+	if exists {
+		t.Fatal("stale bucket still existed after cleanup")
+	}
+}
+
+func TestBridgeHelpersAndProviderResponses(t *testing.T) {
+	registry := bridge.NewRegistry()
+	if err := registry.Register(&serverTestProvider{id: "healthy", version: "v1.2.3"}); err != nil {
+		t.Fatalf("Register healthy: %v", err)
+	}
+	if err := registry.Register(&serverTestProvider{id: "broken", healthErr: errors.New("down")}); err != nil {
+		t.Fatalf("Register broken: %v", err)
+	}
+
+	s := New(nil, registry, slog.Default(), RateLimitConfig{})
+	health, err := s.Health(context.Background(), &bridgev1.HealthRequest{})
 	if err != nil {
-		t.Fatalf("start session: %v", err)
+		t.Fatalf("Health: %v", err)
 	}
-}
+	if health.Status != "serving" || len(health.Providers) != 2 {
+		t.Fatalf("Health=%+v", health)
+	}
 
-func TestStartSessionRejectsProjectMismatch(t *testing.T) {
-	s := newTestServer(t, bridge.DefaultPolicy())
-	_, err := s.StartSession(testCtx("project-a"), &bridgev1.StartSessionRequest{
-		ProjectId: "project-b",
-		SessionId: "00000000-0000-0000-0000-000000000001",
-		RepoPath:  t.TempDir(),
-		Provider:  "test",
-	})
-	if status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("code=%s want=%s err=%v", status.Code(err), codes.PermissionDenied, err)
-	}
-}
-
-func TestSessionScopedRPCsRejectProjectMismatch(t *testing.T) {
-	s := newTestServer(t, bridge.DefaultPolicy())
-	mustStartSession(t, s, "project-a", "00000000-0000-0000-0000-000000000002")
-
-	if _, err := s.GetSession(testCtx("project-b"), &bridgev1.GetSessionRequest{SessionId: "00000000-0000-0000-0000-000000000002"}); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("GetSession code=%s err=%v", status.Code(err), err)
-	}
-	if _, err := s.SendInput(testCtx("project-b"), &bridgev1.SendInputRequest{SessionId: "00000000-0000-0000-0000-000000000002", Text: "hi"}); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("SendInput code=%s err=%v", status.Code(err), err)
-	}
-	if _, err := s.StopSession(testCtx("project-b"), &bridgev1.StopSessionRequest{SessionId: "00000000-0000-0000-0000-000000000002"}); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("StopSession code=%s err=%v", status.Code(err), err)
-	}
-	if err := s.StreamEvents(&bridgev1.StreamEventsRequest{SessionId: "00000000-0000-0000-0000-000000000002"}, &testStream{ctx: testCtx("project-b")}); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("StreamEvents code=%s err=%v", status.Code(err), err)
-	}
-}
-
-func TestListSessionsUsesClaimProjectScope(t *testing.T) {
-	s := newTestServer(t, bridge.DefaultPolicy())
-	mustStartSession(t, s, "project-a", "00000000-0000-0000-0000-000000000003")
-	mustStartSession(t, s, "project-b", "00000000-0000-0000-0000-000000000004")
-
-	resp, err := s.ListSessions(testCtx("project-a"), &bridgev1.ListSessionsRequest{})
+	providers, err := s.ListProviders(context.Background(), &bridgev1.ListProvidersRequest{})
 	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
+		t.Fatalf("ListProviders: %v", err)
 	}
-	if len(resp.Sessions) != 1 || resp.Sessions[0].ProjectId != "project-a" {
-		t.Fatalf("sessions=%v", resp.Sessions)
-	}
-
-	_, err = s.ListSessions(testCtx("project-a"), &bridgev1.ListSessionsRequest{ProjectId: "project-b"})
-	if status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("code=%s want=%s err=%v", status.Code(err), codes.PermissionDenied, err)
-	}
-}
-
-func TestErrorMapping(t *testing.T) {
-	policy := bridge.DefaultPolicy()
-	policy.MaxInputBytes = 1
-	s := newTestServer(t, policy)
-
-	_, err := s.StartSession(testCtx("project-a"), &bridgev1.StartSessionRequest{
-		ProjectId: "project-a",
-		SessionId: "00000000-0000-0000-0000-000000000005",
-		RepoPath:  t.TempDir(),
-		Provider:  "unknown",
-	})
-	if status.Code(err) != codes.Unavailable {
-		t.Fatalf("unknown provider code=%s err=%v", status.Code(err), err)
+	if len(providers.Providers) != 2 {
+		t.Fatalf("providers len=%d want 2", len(providers.Providers))
 	}
 
-	mustStartSession(t, s, "project-a", "00000000-0000-0000-0000-000000000006")
-	_, err = s.StartSession(testCtx("project-a"), &bridgev1.StartSessionRequest{
-		ProjectId: "project-a",
-		SessionId: "00000000-0000-0000-0000-000000000006",
-		RepoPath:  t.TempDir(),
-		Provider:  "test",
-	})
-	if status.Code(err) != codes.AlreadyExists {
-		t.Fatalf("duplicate code=%s err=%v", status.Code(err), err)
-	}
-
-	_, err = s.SendInput(testCtx("project-a"), &bridgev1.SendInputRequest{
-		SessionId: "00000000-0000-0000-0000-000000000006",
-		Text:      "too big",
-	})
-	if status.Code(err) != codes.ResourceExhausted {
-		t.Fatalf("input too large code=%s err=%v", status.Code(err), err)
-	}
-}
-
-func TestStartSessionRejectsInvalidUUID(t *testing.T) {
-	s := newTestServer(t, bridge.DefaultPolicy())
-	_, err := s.StartSession(testCtx("project-a"), &bridgev1.StartSessionRequest{
-		ProjectId: "project-a",
-		SessionId: "not-a-uuid",
-		RepoPath:  t.TempDir(),
-		Provider:  "test",
-	})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("code=%s want=%s err=%v", status.Code(err), codes.InvalidArgument, err)
-	}
-}
-
-func TestSendInputRejectsControlCharacters(t *testing.T) {
-	s := newTestServer(t, bridge.DefaultPolicy())
-	sessionID := "11111111-1111-1111-1111-111111111111"
-	mustStartSession(t, s, "project-a", sessionID)
-
-	_, err := s.SendInput(testCtx("project-a"), &bridgev1.SendInputRequest{
-		SessionId: sessionID,
-		Text:      "bad\x00input",
-	})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("code=%s want=%s err=%v", status.Code(err), codes.InvalidArgument, err)
-	}
-}
-
-func TestRateLimitStartSessionPerClient(t *testing.T) {
-	reg := bridge.NewRegistry()
-	if err := reg.Register(&testProvider{id: "test"}); err != nil {
-		t.Fatalf("register provider: %v", err)
-	}
-	sup := bridge.NewSupervisor(reg, bridge.DefaultPolicy(), 64, bridge.DefaultSubscriberConfig(), 0)
-	t.Cleanup(func() { sup.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := New(sup, reg, logger, RateLimitConfig{
-		GlobalRPS:                  1000,
-		GlobalBurst:                1000,
-		StartSessionPerClientRPS:   1,
-		StartSessionPerClientBurst: 1,
-		SendInputPerSessionRPS:     1000,
-		SendInputPerSessionBurst:   1000,
-	})
-	ctx := testCtx("project-a")
-
-	_, err := s.StartSession(ctx, &bridgev1.StartSessionRequest{
-		ProjectId: "project-a",
-		SessionId: "11111111-1111-1111-1111-111111111111",
-		RepoPath:  t.TempDir(),
-		Provider:  "test",
-	})
+	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "project-a"})
+	claims, err := mustClaims(ctx)
 	if err != nil {
-		t.Fatalf("first StartSession: %v", err)
+		t.Fatalf("mustClaims: %v", err)
 	}
-	_, err = s.StartSession(ctx, &bridgev1.StartSessionRequest{
-		ProjectId: "project-a",
-		SessionId: "22222222-2222-2222-2222-222222222222",
-		RepoPath:  t.TempDir(),
-		Provider:  "test",
-	})
-	if status.Code(err) != codes.ResourceExhausted {
-		t.Fatalf("second StartSession code=%s want=%s err=%v", status.Code(err), codes.ResourceExhausted, err)
+	if err := authorizeProject(claims, "project-a"); err != nil {
+		t.Fatalf("authorizeProject: %v", err)
+	}
+	if err := authorizeProject(claims, "project-b"); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("authorizeProject mismatch code=%v want %v", status.Code(err), codes.PermissionDenied)
+	}
+	if _, err := mustClaims(context.Background()); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("mustClaims missing code=%v want %v", status.Code(err), codes.Unauthenticated)
+	}
+
+	info := &bridge.SessionInfo{
+		SessionID:        "session-a",
+		ProjectID:        "project-a",
+		Provider:         "healthy",
+		State:            bridge.SessionStateAttached,
+		CreatedAt:        time.Unix(10, 0),
+		StoppedAt:        time.Unix(20, 0),
+		Error:            "boom",
+		Attached:         true,
+		AttachedClientID: "client-a",
+		ExitRecorded:     true,
+		ExitCode:         9,
+		OldestSeq:        1,
+		LastSeq:          2,
+		Cols:             80,
+		Rows:             24,
+	}
+	resp := sessionInfoToProto(info)
+	if resp.GetSessionId() != "session-a" || resp.GetStatus() != bridgev1.SessionStatus_SESSION_STATUS_ATTACHED {
+		t.Fatalf("sessionInfoToProto=%+v", resp)
+	}
+
+	chunk := chunkToProto("session-a", bridge.OutputChunk{
+		Seq:       7,
+		Timestamp: time.Unix(30, 0),
+		Payload:   []byte("hello"),
+	}, true)
+	if chunk.GetSeq() != 7 || !chunk.GetReplay() {
+		t.Fatalf("chunkToProto=%+v", chunk)
 	}
 }
 
-func TestRateLimitSendInputPerSession(t *testing.T) {
-	reg := bridge.NewRegistry()
-	if err := reg.Register(&testProvider{id: "test"}); err != nil {
-		t.Fatalf("register provider: %v", err)
+func TestMapBridgeErrorAndState(t *testing.T) {
+	cases := []struct {
+		err  error
+		code codes.Code
+	}{
+		{err: bridge.ErrInvalidArgument, code: codes.InvalidArgument},
+		{err: bridge.ErrSessionNotFound, code: codes.NotFound},
+		{err: bridge.ErrSessionAlreadyExists, code: codes.AlreadyExists},
+		{err: bridge.ErrSessionAlreadyAttached, code: codes.ResourceExhausted},
+		{err: bridge.ErrClientMismatch, code: codes.PermissionDenied},
+		{err: bridge.ErrProviderUnavailable, code: codes.Unavailable},
+		{err: bridge.ErrSessionLimitReached, code: codes.ResourceExhausted},
+		{err: errors.New("boom"), code: codes.Internal},
 	}
-	sup := bridge.NewSupervisor(reg, bridge.DefaultPolicy(), 64, bridge.DefaultSubscriberConfig(), 0)
-	t.Cleanup(func() { sup.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := New(sup, reg, logger, RateLimitConfig{
-		GlobalRPS:                  1000,
-		GlobalBurst:                1000,
-		StartSessionPerClientRPS:   1000,
-		StartSessionPerClientBurst: 1000,
-		SendInputPerSessionRPS:     1,
-		SendInputPerSessionBurst:   1,
-	})
-	sessionID := "33333333-3333-3333-3333-333333333333"
-	mustStartSession(t, s, "project-a", sessionID)
+	for _, tc := range cases {
+		if got := status.Code(mapBridgeError(tc.err, "op")); got != tc.code {
+			t.Fatalf("mapBridgeError(%v) code=%v want %v", tc.err, got, tc.code)
+		}
+	}
 
-	_, err := s.SendInput(testCtx("project-a"), &bridgev1.SendInputRequest{
-		SessionId: sessionID,
-		Text:      "one",
-	})
-	if err != nil {
-		t.Fatalf("first SendInput: %v", err)
+	if got := mapState(bridge.SessionStateFailed); got != bridgev1.SessionStatus_SESSION_STATUS_FAILED {
+		t.Fatalf("mapState failed=%v", got)
 	}
-	_, err = s.SendInput(testCtx("project-a"), &bridgev1.SendInputRequest{
-		SessionId: sessionID,
-		Text:      "two",
-	})
-	if status.Code(err) != codes.ResourceExhausted {
-		t.Fatalf("second SendInput code=%s want=%s err=%v", status.Code(err), codes.ResourceExhausted, err)
+	if got := mapState(bridge.SessionState(999)); got != bridgev1.SessionStatus_SESSION_STATUS_UNSPECIFIED {
+		t.Fatalf("mapState unknown=%v", got)
 	}
-	time.Sleep(1100 * time.Millisecond)
-	_, err = s.SendInput(testCtx("project-a"), &bridgev1.SendInputRequest{
-		SessionId: sessionID,
-		Text:      "three",
-	})
-	if err != nil {
-		t.Fatalf("third SendInput after refill: %v", err)
+
+	errText := mapBridgeError(bridge.ErrProviderUnavailable, "list")
+	if !strings.Contains(errText.Error(), "list:") {
+		t.Fatalf("mapBridgeError text=%q want op prefix", errText.Error())
 	}
 }

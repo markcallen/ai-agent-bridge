@@ -1,0 +1,19 @@
+{
+  "name": "ai-agent-bridge",
+  "private": true,
+  "description": "Pinned local AI agent CLIs for ai-agent-bridge",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup:agents": "bash ./scripts/setup_ai_agents.sh",
+    "build:ts": "npm --prefix packages/bridge-client-node run build && npm --prefix examples/chat-ts run build && corepack pnpm --dir examples/chat-web run build",
+    "verify:ts": "npm run build:ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.79",
+    "@google/gemini-cli": "0.35.3",
+    "@openai/codex": "0.117.0",
+    "opencode-ai": "1.3.6"
+  }
+}

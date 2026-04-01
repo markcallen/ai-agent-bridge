@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+/* xterm.js needs its own styles */
+@import "@xterm/xterm/css/xterm.css";
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Ensure the xterm viewport fills its container */
+.xterm {
+  height: 100%;
+}
+
+.xterm-viewport {
+  overflow-y: auto !important;
+}

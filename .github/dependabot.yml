@@ -1,0 +1,72 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      ai-agent-clis:
+        patterns:
+          - "@anthropic-ai/*"
+          - "@google/*"
+          - "@openai/*"
+          - "opencode-ai"
+
+  - package-ecosystem: "npm"
+    directory: "/packages/bridge-client-node"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      grpc-and-ws:
+        patterns:
+          - "@grpc/*"
+          - "ws"
+      typescript:
+        patterns:
+          - "typescript"
+          - "@types/*"
+
+  - package-ecosystem: "npm"
+    directory: "/examples/chat-ts"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      grpc-and-runtime:
+        patterns:
+          - "@ai-agent-bridge/*"
+          - "@grpc/*"
+          - "tsx"
+      typescript:
+        patterns:
+          - "typescript"
+          - "@types/*"
+
+  - package-ecosystem: "npm"
+    directory: "/examples/chat-web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+      vite:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "@tailwindcss/*"
+          - "tailwindcss"
+      logging:
+        patterns:
+          - "pino"
+          - "pino-*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

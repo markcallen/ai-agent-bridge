@@ -1,20 +1,14 @@
-.PHONY: build proto test test-e2e test-cover lint clean certs dev-certs dev-setup fmt run dev-run chat-example runprompt-example
+.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
 BRIDGE_CA := $(BIN_DIR)/bridge-ca
 CONFIG ?= config/bridge.yaml
 DEV_CONFIG ?= config/bridge-dev.yaml
-CHAT_TARGET ?= 127.0.0.1:9445
-CHAT_PROVIDER ?= claude-chat
+CHAT_TARGET ?= bridge.local:9445
+CHAT_PROVIDER ?= claude
 CHAT_PROJECT ?= dev
-CHAT_REPO ?= $(PWD)
-RUNPROMPT_TARGET ?= 127.0.0.1:9445
-RUNPROMPT_PROJECT ?= dev
-RUNPROMPT_AGENT ?= claude-chat
-RUNPROMPT_DIR ?= $(PWD)
-RUNPROMPT_PROMPT ?=
-
+CHAT_REPO ?= /repos/penduin
 build: proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BRIDGE) ./cmd/bridge
@@ -31,9 +25,11 @@ proto:
 test:
 	go test -race -count=1 ./...
 
+E2E_ONLY ?=
+
 test-e2e:
 	@set +e; \
-	docker compose -f e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-client; \
+	E2E_ONLY=$(E2E_ONLY) docker compose -f e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-client; \
 	rc=$$?; \
 	docker compose -f e2e/docker-compose.yml down -v; \
 	exit $$rc
@@ -42,8 +38,11 @@ test-cover:
 	go test -race -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 
+test-cover-maintained:
+	./scripts/check-go-coverage.sh
+
 lint:
-	golangci-lint run ./...
+	./scripts/lint-go.sh
 
 clean:
 	rm -rf $(BIN_DIR) coverage.out coverage.html
@@ -54,8 +53,14 @@ certs: build
 dev-certs: build
 	./scripts/dev_certs.sh
 
-dev-setup: dev-certs
+dev-setup: dev-certs agents-setup setup-hosts
 	@echo "Dev environment ready. Certs in certs/"
+
+setup-hosts:
+	./scripts/setup_hosts.sh
+
+agents-setup:
+	./scripts/setup_ai_agents.sh
 
 fmt:
 	gofmt -s -w .
@@ -66,6 +71,30 @@ run: build
 
 dev-run: dev-setup
 	$(BRIDGE) --config $(DEV_CONFIG)
+
+docker-run:
+	docker compose up --build bridge
+
+smoke:
+	./scripts/smoke.sh
+
+up:
+	docker compose up --build
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f
+
+up-local:
+	docker compose -f docker-compose.yml -f docker-compose.local.yaml up --build --watch
+
+down-local:
+	docker compose -f docker-compose.yml -f docker-compose.local.yaml down
+
+logs-local:
+	docker compose -f docker-compose.yml -f docker-compose.local.yaml logs -f
 
 chat-example:
 	go run ./examples/chat \
@@ -80,21 +109,56 @@ chat-example:
 		-timeout 5m \
 		$(CHAT_REPO)
 
-runprompt-example:
-	@if [ -z "$(RUNPROMPT_PROMPT)" ]; then \
-		echo "RUNPROMPT_PROMPT is required"; \
-		echo "example: make runprompt-example RUNPROMPT_AGENT=claude-chat RUNPROMPT_DIR=$(PWD) RUNPROMPT_PROMPT='list 5 TODOs'"; \
-		exit 1; \
-	fi
-	go run ./examples/runprompt \
-		-target $(RUNPROMPT_TARGET) \
-		-project $(RUNPROMPT_PROJECT) \
-		-cacert certs/ca-bundle.crt \
-		-cert certs/dev-client.crt \
-		-key certs/dev-client.key \
-		-jwt-key certs/jwt-signing.key \
-		-jwt-issuer dev \
-		-timeout 5m \
-		$(RUNPROMPT_AGENT) \
-		$(RUNPROMPT_DIR) \
-		"$(RUNPROMPT_PROMPT)"
+chat-claude: CHAT_PROVIDER=claude
+chat-claude: chat-example
+
+chat-opencode: CHAT_PROVIDER=opencode
+chat-opencode: chat-example
+
+chat-codex: CHAT_PROVIDER=codex
+chat-codex: chat-example
+
+chat-gemini: CHAT_PROVIDER=gemini
+chat-gemini: chat-example
+
+chat-ts-example:
+	cd examples/chat-ts && \
+	npx tsx src/index.ts \
+		--target $(CHAT_TARGET) \
+		--provider $(CHAT_PROVIDER) \
+		--project $(CHAT_PROJECT) \
+		--cacert ../../certs/ca-bundle.crt \
+		--cert ../../certs/dev-client.crt \
+		--key ../../certs/dev-client.key \
+		$(CHAT_REPO)
+
+chat-ts-claude: CHAT_PROVIDER=claude
+chat-ts-claude: chat-ts-example
+
+chat-ts-opencode: CHAT_PROVIDER=opencode
+chat-ts-opencode: chat-ts-example
+
+chat-ts-codex: CHAT_PROVIDER=codex
+chat-ts-codex: chat-ts-example
+
+chat-ts-gemini: CHAT_PROVIDER=gemini
+chat-ts-gemini: chat-ts-example
+
+chat-web-install:
+	cd packages/bridge-client-node && npm run build
+	cd examples/chat-web && pnpm install
+
+chat-web-dev: chat-web-install
+	cd examples/chat-web && pnpm dev
+
+chat-web-build: chat-web-install
+	cd examples/chat-web && pnpm build
+
+chat-web-start: chat-web-build
+	cd examples/chat-web && pnpm start
+
+chat-web-docker-dev:
+	docker compose -f docker-compose.yml -f docker-compose.local.yaml up --build --watch
+
+chat-web-docker-start:
+	docker compose up --build chat-web

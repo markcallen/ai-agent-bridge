@@ -1,0 +1,86 @@
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      BRIDGE_CONFIG: /app/config/bridge-docker.yaml
+      BRIDGE_CN: bridge.local
+      BRIDGE_SANS: bridge.local,localhost,127.0.0.1
+      BRIDGE_CLIENT_CN: dev-client
+    ports:
+      - "9445:9445"
+    volumes:
+      - ./certs:/app/certs
+      - ./config/bridge-docker.yaml:/app/config/bridge-docker.yaml:ro
+      - ${HOME}/repos:/repos
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 30s
+    networks:
+      default:
+        aliases:
+          - bridge.local
+
+  chat-web:
+    build:
+      context: .
+      dockerfile: examples/chat-web/Dockerfile
+      target: server-dev
+    environment:
+      NODE_ENV: development
+      BRIDGE_ADDR: bridge.local:9445
+      VITE_URL: http://vite:5173
+      CA_CERT: /app/certs/ca-bundle.crt
+      CLIENT_CERT: /app/certs/dev-client.crt
+      CLIENT_KEY: /app/certs/dev-client.key
+      JWT_KEY: /app/certs/jwt-signing.key
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      bridge:
+        condition: service_healthy
+    develop:
+      watch:
+        - action: sync+restart
+          path: examples/chat-web/server
+          target: /app/examples/chat-web/server
+        - action: sync+restart
+          path: packages/bridge-client-node/src
+          target: /app/packages/bridge-client-node/src
+        - action: rebuild
+          path: examples/chat-web/package.json
+        - action: rebuild
+          path: packages/bridge-client-node/package.json
+
+  vite:
+    build:
+      context: .
+      dockerfile: examples/chat-web/Dockerfile
+      target: vite-dev
+    environment:
+      VITE_SERVER_TARGET: http://chat-web:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - chat-web
+    develop:
+      watch:
+        - action: sync+restart
+          path: examples/chat-web/src
+          target: /app/examples/chat-web/src
+        - action: sync+restart
+          path: packages/bridge-client-node/src
+          target: /app/packages/bridge-client-node/src
+        - action: sync+restart
+          path: packages/bridge-client-node/react
+          target: /app/packages/bridge-client-node/react
+        - action: rebuild
+          path: examples/chat-web/package.json
+        - action: rebuild
+          path: packages/bridge-client-node/package.json

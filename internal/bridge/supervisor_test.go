@@ -1,333 +1,195 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
-	"fmt"
-	"strings"
+	"errors"
+	"os/exec"
+	"regexp"
 	"testing"
 	"time"
 )
 
-// mockProvider implements Provider for testing.
-type mockProvider struct {
-	id string
+type testProvider struct {
+	id        string
+	healthErr error
 }
 
-func newMockProvider(id string) *mockProvider {
-	return &mockProvider{id: id}
+func (p *testProvider) ID() string                            { return p.id }
+func (p *testProvider) Binary() string                        { return "/bin/cat" }
+func (p *testProvider) PromptPattern() *regexp.Regexp         { return nil }
+func (p *testProvider) StartupTimeout() time.Duration         { return time.Second }
+func (p *testProvider) StopGrace() time.Duration              { return 50 * time.Millisecond }
+func (p *testProvider) ValidateStartup(context.Context) error { return nil }
+func (p *testProvider) Health(context.Context) error          { return p.healthErr }
+func (p *testProvider) Version(context.Context) (string, error) {
+	return "test-provider", nil
+}
+func (p *testProvider) BuildCommand(ctx context.Context, cfg SessionConfig) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, "/bin/cat")
+	cmd.Dir = cfg.RepoPath
+	return cmd, nil
 }
 
-func (m *mockProvider) ID() string                                        { return m.id }
-func (m *mockProvider) Health(ctx context.Context) error                  { return nil }
-func (m *mockProvider) Version(ctx context.Context) (string, error)       { return "mock-1.0", nil }
-func (m *mockProvider) Send(handle SessionHandle, text string) error       { return nil }
-
-func (m *mockProvider) Events(handle SessionHandle) <-chan Event {
-	h := handle.(*mockHandle)
-	return h.events
-}
-
-func (m *mockProvider) Start(ctx context.Context, cfg SessionConfig) (SessionHandle, error) {
-	h := &mockHandle{id: cfg.SessionID, events: make(chan Event, 64)}
-	h.events <- Event{
-		Type:      EventTypeSessionStarted,
-		Stream:    "system",
-		Text:      "started",
-		Timestamp: time.Now(),
-		SessionID: cfg.SessionID,
-		ProjectID: cfg.ProjectID,
-		Provider:  m.id,
+func TestSupervisorSessionLifecycle(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
 	}
-	return h, nil
-}
 
-func (m *mockProvider) Stop(handle SessionHandle) error {
-	h := handle.(*mockHandle)
-	h.events <- Event{
-		Type:   EventTypeSessionStopped,
-		Stream: "system",
-		Text:   "stopped",
-		Done:   true,
-	}
-	close(h.events)
-	return nil
-}
+	supervisor := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute)
+	defer supervisor.Close()
 
-type mockHandle struct {
-	id     string
-	events chan Event
-}
-
-func (h *mockHandle) ID() string { return h.id }
-func (h *mockHandle) PID() int   { return 0 }
-
-func TestSupervisorStartGetStop(t *testing.T) {
-	reg := NewRegistry()
-	mp := newMockProvider("test")
-	reg.Register(mp)
-
-	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig(), 0)
-	defer sup.Close()
-
-	info, err := sup.Start(context.Background(), SessionConfig{
-		SessionID: "s1",
-		ProjectID: "p1",
-		RepoPath:  "/tmp",
-		Options:   map[string]string{"provider": "test"},
+	info, err := supervisor.Start(context.Background(), SessionConfig{
+		ProjectID:   "project-a",
+		SessionID:   "session-a",
+		RepoPath:    t.TempDir(),
+		Options:     map[string]string{"provider": "fake"},
+		InitialCols: 80,
+		InitialRows: 24,
 	})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if info.SessionID != "s1" {
-		t.Errorf("SessionID = %q, want %q", info.SessionID, "s1")
-	}
-	if info.State != SessionStateRunning {
-		t.Errorf("State = %d, want Running", info.State)
+	if info.Provider != "fake" {
+		t.Fatalf("Provider=%q want %q", info.Provider, "fake")
 	}
 
-	// Get
-	got, err := sup.Get("s1")
+	state, err := supervisor.Attach("session-a", "client-a", 0)
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if _, err := supervisor.Attach("session-a", "client-b", 0); !errors.Is(err, ErrSessionAlreadyAttached) {
+		t.Fatalf("Attach while attached error=%v want %v", err, ErrSessionAlreadyAttached)
+	}
+
+	if _, err := supervisor.WriteInput("session-a", "wrong-client", []byte("hello\n")); !errors.Is(err, ErrClientMismatch) {
+		t.Fatalf("WriteInput wrong client error=%v want %v", err, ErrClientMismatch)
+	}
+	if err := supervisor.Resize("session-a", "wrong-client", 100, 40); !errors.Is(err, ErrClientMismatch) {
+		t.Fatalf("Resize wrong client error=%v want %v", err, ErrClientMismatch)
+	}
+
+	if _, err := supervisor.WriteInput("session-a", "client-a", []byte("hello\n")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	chunk := waitForChunk(t, state.Live, "hello")
+	if !bytes.Contains(chunk.Payload, []byte("hello")) {
+		t.Fatalf("chunk payload=%q does not contain hello", string(chunk.Payload))
+	}
+
+	if err := supervisor.Resize("session-a", "client-a", 100, 40); err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+	got, err := supervisor.Get("session-a")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.ProjectID != "p1" {
-		t.Errorf("ProjectID = %q, want %q", got.ProjectID, "p1")
+	if got.Cols != 100 || got.Rows != 40 {
+		t.Fatalf("size=%dx%d want 100x40", got.Cols, got.Rows)
 	}
 
-	// List
-	list := sup.List("p1")
-	if len(list) != 1 {
-		t.Errorf("List(p1) = %d, want 1", len(list))
+	if err := supervisor.Detach("session-a", "client-a"); err != nil {
+		t.Fatalf("Detach: %v", err)
+	}
+	replayState, err := supervisor.Attach("session-a", "client-b", 0)
+	if err != nil {
+		t.Fatalf("Attach replay: %v", err)
+	}
+	if len(replayState.Replay) == 0 {
+		t.Fatal("Replay was empty, want buffered output")
+	}
+	if err := supervisor.Detach("session-a", "client-b"); err != nil {
+		t.Fatalf("Detach replay client: %v", err)
 	}
 
-	// Stop
-	if err := sup.Stop("s1", false); err != nil {
+	items := supervisor.List("project-a")
+	if len(items) != 1 {
+		t.Fatalf("List len=%d want 1", len(items))
+	}
+
+	if err := supervisor.Stop("session-a", true); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
+	waitForStopped(t, supervisor, "session-a")
+}
 
-	// Wait for state update
-	time.Sleep(50 * time.Millisecond)
-
-	got, err = sup.Get("s1")
-	if err != nil {
-		t.Fatalf("Get after stop: %v", err)
+func TestSupervisorStartValidationAndLimits(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
 	}
-	if got.State != SessionStateStopped {
-		t.Errorf("State after stop = %d, want Stopped", got.State)
+	if err := registry.Register(&testProvider{id: "bad", healthErr: errors.New("down")}); err != nil {
+		t.Fatalf("Register bad: %v", err)
+	}
+
+	supervisor := NewSupervisor(registry, Policy{MaxPerProject: 1, MaxGlobal: 1}, 1024, time.Minute)
+	defer supervisor.Close()
+
+	if _, err := supervisor.Start(context.Background(), SessionConfig{}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("Start empty error=%v want %v", err, ErrInvalidArgument)
+	}
+
+	repo := t.TempDir()
+	if _, err := supervisor.Start(context.Background(), SessionConfig{
+		ProjectID: "project-a",
+		SessionID: "session-a",
+		RepoPath:  repo,
+		Options:   map[string]string{"provider": "bad"},
+	}); !errors.Is(err, ErrProviderUnavailable) {
+		t.Fatalf("Start bad provider error=%v want %v", err, ErrProviderUnavailable)
+	}
+
+	if _, err := supervisor.Start(context.Background(), SessionConfig{
+		ProjectID: "project-a",
+		SessionID: "session-a",
+		RepoPath:  repo,
+		Options:   map[string]string{"provider": "fake"},
+	}); err != nil {
+		t.Fatalf("Start first: %v", err)
+	}
+	if _, err := supervisor.Start(context.Background(), SessionConfig{
+		ProjectID: "project-a",
+		SessionID: "session-a",
+		RepoPath:  repo,
+		Options:   map[string]string{"provider": "fake"},
+	}); !errors.Is(err, ErrSessionAlreadyExists) {
+		t.Fatalf("Start duplicate error=%v want %v", err, ErrSessionAlreadyExists)
+	}
+	if _, err := supervisor.Start(context.Background(), SessionConfig{
+		ProjectID: "project-a",
+		SessionID: "session-b",
+		RepoPath:  repo,
+		Options:   map[string]string{"provider": "fake"},
+	}); !errors.Is(err, ErrSessionLimitReached) {
+		t.Fatalf("Start limit error=%v want %v", err, ErrSessionLimitReached)
 	}
 }
 
-func TestSupervisorDuplicateSession(t *testing.T) {
-	reg := NewRegistry()
-	reg.Register(newMockProvider("test"))
-	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig(), 0)
-	defer sup.Close()
-
-	_, err := sup.Start(context.Background(), SessionConfig{
-		SessionID: "dup",
-		ProjectID: "p1",
-		RepoPath:  "/tmp",
-		Options:   map[string]string{"provider": "test"},
-	})
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	_, err = sup.Start(context.Background(), SessionConfig{
-		SessionID: "dup",
-		ProjectID: "p1",
-		RepoPath:  "/tmp",
-		Options:   map[string]string{"provider": "test"},
-	})
-	if err == nil {
-		t.Error("expected error for duplicate session")
-	}
-}
-
-func TestSupervisorSessionLimits(t *testing.T) {
-	reg := NewRegistry()
-	reg.Register(newMockProvider("test"))
-
-	policy := DefaultPolicy()
-	policy.MaxPerProject = 2
-	policy.MaxGlobal = 3
-
-	sup := NewSupervisor(reg, policy, 100, DefaultSubscriberConfig(), 0)
-	defer sup.Close()
-
-	for i := 0; i < 2; i++ {
-		_, err := sup.Start(context.Background(), SessionConfig{
-			SessionID: fmt.Sprintf("s%d", i),
-			ProjectID: "p1",
-			RepoPath:  "/tmp",
-			Options:   map[string]string{"provider": "test"},
-		})
-		if err != nil {
-			t.Fatalf("Start s%d: %v", i, err)
+func waitForChunk(t *testing.T, ch <-chan OutputChunk, needle string) OutputChunk {
+	t.Helper()
+	timeout := time.After(3 * time.Second)
+	for {
+		select {
+		case chunk := <-ch:
+			if bytes.Contains(chunk.Payload, []byte(needle)) {
+				return chunk
+			}
+		case <-timeout:
+			t.Fatalf("timed out waiting for chunk containing %q", needle)
 		}
 	}
-
-	// Should fail: per-project limit
-	_, err := sup.Start(context.Background(), SessionConfig{
-		SessionID: "s-extra",
-		ProjectID: "p1",
-		RepoPath:  "/tmp",
-		Options:   map[string]string{"provider": "test"},
-	})
-	if err == nil {
-		t.Error("expected per-project limit error")
-	}
-
-	// Different project should work (global limit not hit)
-	_, err = sup.Start(context.Background(), SessionConfig{
-		SessionID: "s-other",
-		ProjectID: "p2",
-		RepoPath:  "/tmp",
-		Options:   map[string]string{"provider": "test"},
-	})
-	if err != nil {
-		t.Fatalf("Start for p2: %v", err)
-	}
-
-	// Should fail: global limit (3 total)
-	_, err = sup.Start(context.Background(), SessionConfig{
-		SessionID: "s-global",
-		ProjectID: "p3",
-		RepoPath:  "/tmp",
-		Options:   map[string]string{"provider": "test"},
-	})
-	if err == nil {
-		t.Error("expected global limit error")
-	}
 }
 
-func TestSupervisorEventBuffer(t *testing.T) {
-	reg := NewRegistry()
-	reg.Register(newMockProvider("test"))
-	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig(), 0)
-	defer sup.Close()
-
-	_, err := sup.Start(context.Background(), SessionConfig{
-		SessionID: "ev1",
-		ProjectID: "p1",
-		RepoPath:  "/tmp",
-		Options:   map[string]string{"provider": "test"},
-	})
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Give event forwarding goroutine time to process
-	time.Sleep(50 * time.Millisecond)
-
-	buf, err := sup.EventBuffer("ev1")
-	if err != nil {
-		t.Fatalf("EventBuffer: %v", err)
-	}
-
-	if buf.Len() == 0 {
-		t.Error("expected at least one event in buffer")
-	}
-
-	events := buf.After(0)
-	if events[0].Type != EventTypeSessionStarted {
-		t.Errorf("first event type = %d, want SessionStarted", events[0].Type)
-	}
-}
-
-func TestSupervisorRedactsBufferedEvents(t *testing.T) {
-	reg := NewRegistry()
-	reg.Register(newMockProvider("test"))
-	sup := NewSupervisor(reg, DefaultPolicy(), 100, DefaultSubscriberConfig(), 0)
-	sup.SetRedactor(func(text string) string {
-		return strings.ReplaceAll(text, "secret=abc", "[REDACTED]")
-	})
-	defer sup.Close()
-
-	_, err := sup.Start(context.Background(), SessionConfig{
-		SessionID: "ev2",
-		ProjectID: "p1",
-		RepoPath:  "/tmp",
-		Options:   map[string]string{"provider": "test"},
-	})
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	_, err = sup.Send("ev2", "secret=abc\n")
-	if err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-
-	time.Sleep(50 * time.Millisecond)
-	buf, err := sup.EventBuffer("ev2")
-	if err != nil {
-		t.Fatalf("EventBuffer: %v", err)
-	}
-	events := buf.After(0)
-	foundRedactedInput := false
-	for _, event := range events {
-		if event.Type == EventTypeInputReceived && strings.Contains(event.Text, "[REDACTED]") {
-			foundRedactedInput = true
-		}
-	}
-	if !foundRedactedInput {
-		t.Fatalf("did not find redacted input event in %+v", events)
-	}
-}
-
-// newSupervisorWithCleanupInterval constructs a supervisor with a custom
-// cleanup interval so the idle check fires quickly in tests, without racing
-// on struct fields after the cleanup goroutine has already started.
-func newSupervisorWithCleanupInterval(reg *Registry, policy Policy, idleTimeout, cleanupInterval time.Duration) *Supervisor {
-	s := &Supervisor{
-		registry:        reg,
-		policy:          policy,
-		bufSize:         100,
-		subConfig:       DefaultSubscriberConfig(),
-		idleTimeout:     idleTimeout,
-		cleanupInterval: cleanupInterval,
-		sessions:        make(map[string]*managedSession),
-		done:            make(chan struct{}),
-	}
-	go s.cleanupLoop()
-	return s
-}
-
-func TestIdleTimeout(t *testing.T) {
-	reg := NewRegistry()
-	reg.Register(newMockProvider("test"))
-
-	// Very short idle timeout; cleanup runs every 50ms so the idle check fires quickly.
-	idleTimeout := 100 * time.Millisecond
-	sup := newSupervisorWithCleanupInterval(reg, DefaultPolicy(), idleTimeout, 50*time.Millisecond)
-	defer sup.Close()
-
-	_, err := sup.Start(context.Background(), SessionConfig{
-		SessionID: "idle-session",
-		ProjectID: "p1",
-		RepoPath:  "/tmp",
-		Options:   map[string]string{"provider": "test"},
-	})
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	// Wait for the idle timeout to fire and the session to be stopped.
-	buf, err := sup.EventBuffer("idle-session")
-	if err != nil {
-		t.Fatalf("EventBuffer: %v", err)
-	}
-
+func waitForStopped(t *testing.T, supervisor *Supervisor, sessionID string) {
+	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		events := buf.After(0)
-		for _, e := range events {
-			if e.Type == EventTypeSessionStopped && e.Done && e.Text == "idle_timeout" {
-				return // success
-			}
+		info, err := supervisor.Get(sessionID)
+		if err == nil && info.ExitRecorded {
+			return
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatal("timed out waiting for idle_timeout SESSION_STOPPED event")
+	t.Fatalf("timed out waiting for %s to stop", sessionID)
 }

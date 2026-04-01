@@ -1,0 +1,6 @@
+services:
+  bridge:
+    environment:
+      BRIDGE_CONFIG: /app/config/bridge-smoke.yaml
+    volumes:
+      - ./config/bridge-smoke.yaml:/app/config/bridge-smoke.yaml:ro

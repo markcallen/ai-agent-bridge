@@ -1,0 +1,9 @@
+.git
+.gitignore
+bin
+certs
+coverage.out
+coverage.html
+node_modules
+e2e/.env
+.env

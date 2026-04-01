@@ -7,7 +7,7 @@
 /runprompt
 *.exe
 
-# Local environment (secrets — use .env.example as template)
+# Local environment (load secrets with env-secrets)
 .env
 
 # Certificates (generated)
@@ -38,3 +38,7 @@ e2e/.env
 
 # Build
 /dist/
+
+# Local JS dependencies
+/node_modules/
+.ballast/

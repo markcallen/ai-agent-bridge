@@ -1,0 +1,50 @@
+{
+  "name": "@ai-agent-bridge/client-node",
+  "version": "0.1.0",
+  "description": "Node.js bridge client: gRPC → WebSocket adapter for the ai-agent-bridge daemon",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/src/index.js",
+      "require": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.js",
+      "types": "./dist/react/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc && cp -r ../../proto ./proto",
+    "build:watch": "tsc --watch",
+    "clean": "rm -rf dist proto"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.11.0",
+    "@grpc/proto-loader": "^0.7.13",
+    "uuid": "^10.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.12",
+    "react": "^19.0.0",
+    "typescript": "^5.6.0"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "license": "MIT"
+}

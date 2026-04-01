@@ -1,0 +1,45 @@
+server:
+  listen: "0.0.0.0:9445"
+
+tls:
+  ca_bundle: "/run/bridge-certs/ca-bundle.crt"
+  cert: "/run/bridge-certs/bridge.local.crt"
+  key: "/run/bridge-certs/bridge.local.key"
+
+auth:
+  jwt_public_keys:
+    - issuer: "dev"
+      key_path: "/run/bridge-certs/jwt-signing.pub"
+  jwt_audience: "bridge"
+  jwt_max_ttl: "5m"
+
+sessions:
+  max_per_project: 2
+  max_global: 2
+  idle_timeout: "5m"
+  stop_grace_period: "5s"
+  event_buffer_size: 1048576
+
+input:
+  max_size_bytes: 65536
+
+rate_limits:
+  global_rps: 20
+  global_burst: 20
+  start_session_per_client_rps: 1
+  start_session_per_client_burst: 2
+  send_input_per_session_rps: 5
+  send_input_per_session_burst: 10
+
+providers:
+  smoke:
+    binary: "/bin/true"
+    args: []
+    validate_startup: false
+
+allowed_paths:
+  - "/repos"
+
+logging:
+  level: "info"
+  format: "json"

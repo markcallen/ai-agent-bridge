@@ -1,0 +1,41 @@
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      BRIDGE_CONFIG: /app/config/bridge-docker.yaml
+      BRIDGE_CN: bridge.local
+      BRIDGE_SANS: bridge.local,localhost,127.0.0.1
+      BRIDGE_CLIENT_CN: dev-client
+    ports:
+      - "9445:9445"
+    volumes:
+      - ./certs:/app/certs
+      - ./config/bridge-docker.yaml:/app/config/bridge-docker.yaml:ro
+      - ${HOME}/repos:/repos
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 30s
+
+  chat-web:
+    build:
+      context: .
+      dockerfile: examples/chat-web/Dockerfile
+      target: production
+    environment:
+      BRIDGE_ADDR: bridge:9445
+      CA_CERT: /app/certs/ca-bundle.crt
+      CLIENT_CERT: /app/certs/dev-client.crt
+      CLIENT_KEY: /app/certs/dev-client.key
+      JWT_KEY: /app/certs/jwt-signing.key
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      bridge:
+        condition: service_healthy

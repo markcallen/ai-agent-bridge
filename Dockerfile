@@ -24,27 +24,24 @@ FROM ${BUILD_FROM} AS build
 # Runtime stage
 FROM ubuntu:24.04
 
+WORKDIR /app
+
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl && \
+    apt-get install -y --no-install-recommends bubblewrap ca-certificates curl && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
-    npm install -g \
-      @anthropic-ai/claude-code \
-      @openai/codex \
-      @google/gemini-cli \
-      opencode-ai && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN printf '#!/bin/bash\nexec claude "$@" < /dev/null\n' > /usr/local/bin/claude-print && \
-    chmod +x /usr/local/bin/claude-print
-
-RUN useradd -m -s /bin/bash bridge
-
-WORKDIR /app
+RUN useradd -m -s /bin/bash bridge && \
+    mkdir -p /home/bridge/.gemini && \
+    chown -R bridge:bridge /home/bridge/.gemini
 
 COPY --from=build /out/bridge /usr/local/bin/bridge
 COPY --from=build /out/bridge-ca /usr/local/bin/bridge-ca
+COPY package.json package-lock.json /app/
+RUN npm ci --omit=dev
 COPY config/bridge.yaml /app/config/bridge.yaml
+COPY config/bridge-docker.yaml /app/config/bridge-docker.yaml
 COPY docker-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

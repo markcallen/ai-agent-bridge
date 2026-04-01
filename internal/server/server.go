@@ -21,7 +21,6 @@ func generateID() string {
 	return fmt.Sprintf("%x", b)
 }
 
-// BridgeServer implements the bridge.v1.BridgeService gRPC service.
 type BridgeServer struct {
 	bridgev1.UnimplementedBridgeServiceServer
 
@@ -30,10 +29,9 @@ type BridgeServer struct {
 	logger     *slog.Logger
 	globalRL   *keyedLimiter
 	startRL    *keyedLimiter
-	sendRL     *keyedLimiter
+	writeRL    *keyedLimiter
 }
 
-// RateLimitConfig controls RPC throttling behavior.
 type RateLimitConfig struct {
 	GlobalRPS                  float64
 	GlobalBurst                int
@@ -43,7 +41,6 @@ type RateLimitConfig struct {
 	SendInputPerSessionBurst   int
 }
 
-// New creates a new BridgeServer.
 func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger, rl RateLimitConfig) *BridgeServer {
 	return &BridgeServer{
 		supervisor: supervisor,
@@ -51,7 +48,7 @@ func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.
 		logger:     logger,
 		globalRL:   newKeyedLimiter(rl.GlobalRPS, rl.GlobalBurst),
 		startRL:    newKeyedLimiter(rl.StartSessionPerClientRPS, rl.StartSessionPerClientBurst),
-		sendRL:     newKeyedLimiter(rl.SendInputPerSessionRPS, rl.SendInputPerSessionBurst),
+		writeRL:    newKeyedLimiter(rl.SendInputPerSessionRPS, rl.SendInputPerSessionBurst),
 	}
 }
 
@@ -59,12 +56,10 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 	if !s.globalRL.allow("global") {
 		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
 	}
-
 	claims, err := mustClaims(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	if err := validateStringField("project_id", req.ProjectId, maxProjectIDLen, false); err != nil {
 		return nil, err
 	}
@@ -77,13 +72,8 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 	if err := validateStringField("provider", req.Provider, maxProviderLen, false); err != nil {
 		return nil, err
 	}
-	for key, value := range req.AgentOpts {
-		if err := validateStringField("agent_opts key", key, maxAgentOptKey, false); err != nil {
-			return nil, err
-		}
-		if err := validateOptionalStringField("agent_opts value", value, maxAgentOptValue, true); err != nil {
-			return nil, err
-		}
+	if err := authorizeProject(claims, req.ProjectId); err != nil {
+		return nil, err
 	}
 
 	clientID := claims.Subject
@@ -94,34 +84,22 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 		return nil, status.Error(codes.ResourceExhausted, "start session rate limit exceeded for client")
 	}
 
-	// Authorization: JWT project_id must match request
-	if err := authorizeProject(claims, req.ProjectId); err != nil {
-		return nil, err
-	}
-
 	opts := map[string]string{"provider": req.Provider}
 	for k, v := range req.AgentOpts {
 		opts[k] = v
 	}
 
 	info, err := s.supervisor.Start(ctx, bridge.SessionConfig{
-		SessionID: req.SessionId,
-		ProjectID: req.ProjectId,
-		RepoPath:  req.RepoPath,
-		Options:   opts,
+		SessionID:   req.SessionId,
+		ProjectID:   req.ProjectId,
+		RepoPath:    req.RepoPath,
+		Options:     opts,
+		InitialCols: req.InitialCols,
+		InitialRows: req.InitialRows,
 	})
 	if err != nil {
-		s.logger.Error("start session failed", "session_id", req.SessionId, "error", err)
 		return nil, mapBridgeError(err, "start session")
 	}
-
-	s.logger.Info("session started",
-		"session_id", info.SessionID,
-		"project_id", info.ProjectID,
-		"provider", info.Provider,
-		"caller", claims.Subject,
-	)
-
 	return &bridgev1.StartSessionResponse{
 		SessionId: info.SessionID,
 		Status:    mapState(info.State),
@@ -133,53 +111,40 @@ func (s *BridgeServer) StopSession(ctx context.Context, req *bridgev1.StopSessio
 	if !s.globalRL.allow("global") {
 		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
 	}
-
 	claims, err := mustClaims(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	if err := validateUUIDField("session_id", req.SessionId); err != nil {
 		return nil, err
 	}
-
 	if err := s.authorizeSession(claims, req.SessionId); err != nil {
 		return nil, err
 	}
-
 	if err := s.supervisor.Stop(req.SessionId, req.Force); err != nil {
 		return nil, mapBridgeError(err, "stop session")
 	}
-
-	s.logger.Info("session stopped", "session_id", req.SessionId)
-	return &bridgev1.StopSessionResponse{
-		Status: bridgev1.SessionStatus_SESSION_STATUS_STOPPED,
-	}, nil
+	return &bridgev1.StopSessionResponse{Status: bridgev1.SessionStatus_SESSION_STATUS_STOPPING}, nil
 }
 
 func (s *BridgeServer) GetSession(ctx context.Context, req *bridgev1.GetSessionRequest) (*bridgev1.GetSessionResponse, error) {
 	if !s.globalRL.allow("global") {
 		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
 	}
-
 	claims, err := mustClaims(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	if err := validateUUIDField("session_id", req.SessionId); err != nil {
 		return nil, err
 	}
-
 	if err := s.authorizeSession(claims, req.SessionId); err != nil {
 		return nil, err
 	}
-
 	info, err := s.supervisor.Get(req.SessionId)
 	if err != nil {
 		return nil, mapBridgeError(err, "get session")
 	}
-
 	return sessionInfoToProto(info), nil
 }
 
@@ -187,12 +152,8 @@ func (s *BridgeServer) ListSessions(ctx context.Context, req *bridgev1.ListSessi
 	if !s.globalRL.allow("global") {
 		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
 	}
-
 	claims, err := mustClaims(ctx)
 	if err != nil {
-		return nil, err
-	}
-	if err := validateOptionalStringField("project_id", req.ProjectId, maxListProjectID, false); err != nil {
 		return nil, err
 	}
 	projectID := req.ProjectId
@@ -202,133 +163,148 @@ func (s *BridgeServer) ListSessions(ctx context.Context, req *bridgev1.ListSessi
 		}
 		projectID = claims.ProjectID
 	}
-	sessions := s.supervisor.List(projectID)
+	items := s.supervisor.List(projectID)
 	resp := &bridgev1.ListSessionsResponse{
-		Sessions: make([]*bridgev1.GetSessionResponse, 0, len(sessions)),
+		Sessions: make([]*bridgev1.GetSessionResponse, 0, len(items)),
 	}
-	for i := range sessions {
-		resp.Sessions = append(resp.Sessions, sessionInfoToProto(&sessions[i]))
+	for i := range items {
+		info := items[i]
+		resp.Sessions = append(resp.Sessions, sessionInfoToProto(&info))
 	}
 	return resp, nil
 }
 
-func (s *BridgeServer) SendInput(ctx context.Context, req *bridgev1.SendInputRequest) (*bridgev1.SendInputResponse, error) {
-	if !s.globalRL.allow("global") {
-		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
-	}
-
-	claims, err := mustClaims(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := validateUUIDField("session_id", req.SessionId); err != nil {
-		return nil, err
-	}
-	if err := validateStringField("text", req.Text, 1<<20, true); err != nil {
-		return nil, err
-	}
-
-	if !s.sendRL.allow(req.SessionId) {
-		return nil, status.Error(codes.ResourceExhausted, "send input rate limit exceeded for session")
-	}
-
-	if err := s.authorizeSession(claims, req.SessionId); err != nil {
-		return nil, err
-	}
-
-	seq, err := s.supervisor.Send(req.SessionId, req.Text)
-	if err != nil {
-		return nil, mapBridgeError(err, "send input")
-	}
-
-	return &bridgev1.SendInputResponse{
-		Accepted: true,
-		Seq:      seq,
-	}, nil
-}
-
-func (s *BridgeServer) StreamEvents(req *bridgev1.StreamEventsRequest, stream bridgev1.BridgeService_StreamEventsServer) error {
+func (s *BridgeServer) AttachSession(req *bridgev1.AttachSessionRequest, stream bridgev1.BridgeService_AttachSessionServer) error {
 	if !s.globalRL.allow("global") {
 		return status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
 	}
-
 	claims, err := mustClaims(stream.Context())
 	if err != nil {
 		return err
 	}
-
 	if err := validateUUIDField("session_id", req.SessionId); err != nil {
 		return err
 	}
-	if err := validateOptionalStringField("subscriber_id", req.SubscriberId, maxSessionIDLen, false); err != nil {
+	if err := validateOptionalStringField("client_id", req.ClientId, maxSessionIDLen, false); err != nil {
 		return err
 	}
-
 	if err := s.authorizeSession(claims, req.SessionId); err != nil {
 		return err
 	}
-
-	subMgr, err := s.supervisor.SubscriberManager(req.SessionId)
+	clientID := req.ClientId
+	if clientID == "" {
+		clientID = generateID()
+	}
+	state, err := s.supervisor.Attach(req.SessionId, clientID, req.AfterSeq)
 	if err != nil {
-		return mapBridgeError(err, "stream events")
+		return mapBridgeError(err, "attach session")
 	}
+	defer func() {
+		_ = s.supervisor.Detach(req.SessionId, clientID)
+	}()
 
-	// Default subscriber_id to a UUID for backward compatibility.
-	subscriberID := req.SubscriberId
-	if subscriberID == "" {
-		subscriberID = generateID()
+	if err := stream.Send(&bridgev1.AttachSessionEvent{
+		Type:         bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED,
+		SessionId:    req.SessionId,
+		OldestSeq:    state.OldestSeq,
+		LastSeq:      state.LastSeq,
+		ExitRecorded: state.ExitRecorded,
+		ExitCode:     int32(state.ExitCode),
+		Cols:         state.Cols,
+		Rows:         state.Rows,
+	}); err != nil {
+		return err
 	}
-
-	result, err := subMgr.Attach(subscriberID, req.AfterSeq)
-	if err != nil {
-		if errors.Is(err, bridge.ErrSubscriberLimitReached) {
-			return status.Errorf(codes.ResourceExhausted, "stream events: %v", err)
-		}
-		return mapBridgeError(err, "stream events")
-	}
-	defer subMgr.Detach(subscriberID, result.Live)
-
-	// If the subscriber fell behind the buffer, send an overflow marker.
-	if result.Overflow {
-		overflow := &bridgev1.SessionEvent{
+	if state.ReplayGap {
+		if err := stream.Send(&bridgev1.AttachSessionEvent{
+			Type:      bridgev1.AttachEventType_ATTACH_EVENT_TYPE_REPLAY_GAP,
 			SessionId: req.SessionId,
-			Type:      bridgev1.EventType_EVENT_TYPE_BUFFER_OVERFLOW,
-		}
-		if err := stream.Send(overflow); err != nil {
+			OldestSeq: state.OldestSeq,
+			LastSeq:   state.LastSeq,
+		}); err != nil {
 			return err
 		}
 	}
-
-	// Send replay events.
 	lastSeq := req.AfterSeq
-	for _, se := range result.Replay {
-		if err := stream.Send(seqEventToProto(se)); err != nil {
+	for _, chunk := range state.Replay {
+		if err := stream.Send(chunkToProto(req.SessionId, chunk, true)); err != nil {
 			return err
 		}
-		lastSeq = se.Seq
-		subMgr.Ack(subscriberID, se.Seq)
+		lastSeq = chunk.Seq
 	}
-
-	// Switch to live streaming.
 	for {
 		select {
 		case <-stream.Context().Done():
 			return nil
-		case se, ok := <-result.Live:
+		case chunk, ok := <-state.Live:
 			if !ok {
 				return nil
 			}
-			if se.Seq <= lastSeq {
+			if chunk.Seq <= lastSeq {
 				continue
 			}
-			lastSeq = se.Seq
-			if err := stream.Send(seqEventToProto(se)); err != nil {
+			lastSeq = chunk.Seq
+			if err := stream.Send(chunkToProto(req.SessionId, chunk, false)); err != nil {
 				return err
 			}
-			subMgr.Ack(subscriberID, se.Seq)
 		}
 	}
+}
+
+func (s *BridgeServer) WriteInput(ctx context.Context, req *bridgev1.WriteInputRequest) (*bridgev1.WriteInputResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+	claims, err := mustClaims(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUIDField("session_id", req.SessionId); err != nil {
+		return nil, err
+	}
+	if err := validateStringField("client_id", req.ClientId, maxSessionIDLen, false); err != nil {
+		return nil, err
+	}
+	if err := validateByteField("data", req.Data, 1<<20); err != nil {
+		return nil, err
+	}
+	if !s.writeRL.allow(req.SessionId) {
+		return nil, status.Error(codes.ResourceExhausted, "write input rate limit exceeded for session")
+	}
+	if err := s.authorizeSession(claims, req.SessionId); err != nil {
+		return nil, err
+	}
+	n, err := s.supervisor.WriteInput(req.SessionId, req.ClientId, req.Data)
+	if err != nil {
+		return nil, mapBridgeError(err, "write input")
+	}
+	return &bridgev1.WriteInputResponse{Accepted: true, BytesWritten: uint32(n)}, nil
+}
+
+func (s *BridgeServer) ResizeSession(ctx context.Context, req *bridgev1.ResizeSessionRequest) (*bridgev1.ResizeSessionResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+	claims, err := mustClaims(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUIDField("session_id", req.SessionId); err != nil {
+		return nil, err
+	}
+	if err := validateStringField("client_id", req.ClientId, maxSessionIDLen, false); err != nil {
+		return nil, err
+	}
+	if req.Cols == 0 || req.Rows == 0 {
+		return nil, status.Error(codes.InvalidArgument, "cols and rows must be > 0")
+	}
+	if err := s.authorizeSession(claims, req.SessionId); err != nil {
+		return nil, err
+	}
+	if err := s.supervisor.Resize(req.SessionId, req.ClientId, req.Cols, req.Rows); err != nil {
+		return nil, mapBridgeError(err, "resize session")
+	}
+	return &bridgev1.ResizeSessionResponse{Applied: true}, nil
 }
 
 func mustClaims(ctx context.Context) (*auth.BridgeClaims, error) {
@@ -362,9 +338,13 @@ func mapBridgeError(err error, op string) error {
 		return status.Errorf(codes.NotFound, "%s: %v", op, err)
 	case errors.Is(err, bridge.ErrSessionAlreadyExists):
 		return status.Errorf(codes.AlreadyExists, "%s: %v", op, err)
+	case errors.Is(err, bridge.ErrSessionAlreadyAttached), errors.Is(err, bridge.ErrInputTooLarge):
+		return status.Errorf(codes.ResourceExhausted, "%s: %v", op, err)
+	case errors.Is(err, bridge.ErrClientNotAttached), errors.Is(err, bridge.ErrClientMismatch):
+		return status.Errorf(codes.PermissionDenied, "%s: %v", op, err)
 	case errors.Is(err, bridge.ErrProviderUnavailable):
 		return status.Errorf(codes.Unavailable, "%s: %v", op, err)
-	case errors.Is(err, bridge.ErrSessionLimitReached), errors.Is(err, bridge.ErrInputTooLarge):
+	case errors.Is(err, bridge.ErrSessionLimitReached):
 		return status.Errorf(codes.ResourceExhausted, "%s: %v", op, err)
 	default:
 		return status.Errorf(codes.Internal, "%s: %v", op, err)
@@ -372,68 +352,53 @@ func mapBridgeError(err error, op string) error {
 }
 
 func (s *BridgeServer) Health(ctx context.Context, req *bridgev1.HealthRequest) (*bridgev1.HealthResponse, error) {
-	if !s.globalRL.allow("global") {
-		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
-	}
-
 	results := s.registry.HealthAll(ctx)
-
 	providers := make([]*bridgev1.ProviderHealth, 0, len(results))
 	for id, err := range results {
-		ph := &bridgev1.ProviderHealth{
-			Provider:  id,
-			Available: err == nil,
-		}
+		item := &bridgev1.ProviderHealth{Provider: id, Available: err == nil}
 		if err != nil {
-			ph.Error = err.Error()
+			item.Error = err.Error()
 		}
-		providers = append(providers, ph)
+		providers = append(providers, item)
 	}
-
-	return &bridgev1.HealthResponse{
-		Status:    "serving",
-		Providers: providers,
-	}, nil
+	return &bridgev1.HealthResponse{Status: "serving", Providers: providers}, nil
 }
 
 func (s *BridgeServer) ListProviders(ctx context.Context, req *bridgev1.ListProvidersRequest) (*bridgev1.ListProvidersResponse, error) {
-	if !s.globalRL.allow("global") {
-		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
-	}
-
 	ids := s.registry.List()
 	results := s.registry.HealthAll(ctx)
-
-	providers := make([]*bridgev1.ProviderInfo, 0, len(ids))
+	items := make([]*bridgev1.ProviderInfo, 0, len(ids))
 	for _, id := range ids {
-		available := results[id] == nil
 		var version string
-		if available {
-			if p, err := s.registry.Get(id); err == nil {
-				version, _ = p.Version(ctx)
-			}
+		if p, err := s.registry.Get(id); err == nil && results[id] == nil {
+			version, _ = p.Version(ctx)
 		}
-		pi := &bridgev1.ProviderInfo{
+		items = append(items, &bridgev1.ProviderInfo{
 			Provider:  id,
-			Available: available,
+			Available: results[id] == nil,
+			Binary:    "",
 			Version:   version,
-		}
-		providers = append(providers, pi)
+		})
 	}
-
-	return &bridgev1.ListProvidersResponse{Providers: providers}, nil
+	return &bridgev1.ListProvidersResponse{Providers: items}, nil
 }
-
-// --- helpers ---
 
 func sessionInfoToProto(info *bridge.SessionInfo) *bridgev1.GetSessionResponse {
 	resp := &bridgev1.GetSessionResponse{
-		SessionId: info.SessionID,
-		ProjectId: info.ProjectID,
-		Provider:  info.Provider,
-		Status:    mapState(info.State),
-		CreatedAt: timestamppb.New(info.CreatedAt),
-		Error:     info.Error,
+		SessionId:        info.SessionID,
+		ProjectId:        info.ProjectID,
+		Provider:         info.Provider,
+		Status:           mapState(info.State),
+		CreatedAt:        timestamppb.New(info.CreatedAt),
+		Error:            info.Error,
+		Attached:         info.Attached,
+		AttachedClientId: info.AttachedClientID,
+		ExitRecorded:     info.ExitRecorded,
+		ExitCode:         int32(info.ExitCode),
+		OldestSeq:        info.OldestSeq,
+		LastSeq:          info.LastSeq,
+		Cols:             info.Cols,
+		Rows:             info.Rows,
 	}
 	if !info.StoppedAt.IsZero() {
 		resp.StoppedAt = timestamppb.New(info.StoppedAt)
@@ -447,6 +412,8 @@ func mapState(s bridge.SessionState) bridgev1.SessionStatus {
 		return bridgev1.SessionStatus_SESSION_STATUS_STARTING
 	case bridge.SessionStateRunning:
 		return bridgev1.SessionStatus_SESSION_STATUS_RUNNING
+	case bridge.SessionStateAttached:
+		return bridgev1.SessionStatus_SESSION_STATUS_ATTACHED
 	case bridge.SessionStateStopping:
 		return bridgev1.SessionStatus_SESSION_STATUS_STOPPING
 	case bridge.SessionStateStopped:
@@ -458,42 +425,13 @@ func mapState(s bridge.SessionState) bridgev1.SessionStatus {
 	}
 }
 
-func mapEventType(t bridge.EventType) bridgev1.EventType {
-	switch t {
-	case bridge.EventTypeSessionStarted:
-		return bridgev1.EventType_EVENT_TYPE_SESSION_STARTED
-	case bridge.EventTypeSessionStopped:
-		return bridgev1.EventType_EVENT_TYPE_SESSION_STOPPED
-	case bridge.EventTypeSessionFailed:
-		return bridgev1.EventType_EVENT_TYPE_SESSION_FAILED
-	case bridge.EventTypeStdout:
-		return bridgev1.EventType_EVENT_TYPE_STDOUT
-	case bridge.EventTypeStderr:
-		return bridgev1.EventType_EVENT_TYPE_STDERR
-	case bridge.EventTypeInputReceived:
-		return bridgev1.EventType_EVENT_TYPE_INPUT_RECEIVED
-	case bridge.EventTypeBufferOverflow:
-		return bridgev1.EventType_EVENT_TYPE_BUFFER_OVERFLOW
-	case bridge.EventTypeAgentReady:
-		return bridgev1.EventType_EVENT_TYPE_AGENT_READY
-	case bridge.EventTypeResponseComplete:
-		return bridgev1.EventType_EVENT_TYPE_RESPONSE_COMPLETE
-	default:
-		return bridgev1.EventType_EVENT_TYPE_UNSPECIFIED
-	}
-}
-
-func seqEventToProto(se bridge.SequencedEvent) *bridgev1.SessionEvent {
-	return &bridgev1.SessionEvent{
-		Seq:       se.Seq,
-		Timestamp: timestamppb.New(se.Timestamp),
-		SessionId: se.SessionID,
-		ProjectId: se.ProjectID,
-		Provider:  se.Provider,
-		Type:      mapEventType(se.Type),
-		Stream:    se.Stream,
-		Text:      se.Text,
-		Done:      se.Done,
-		Error:     se.Error,
+func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *bridgev1.AttachSessionEvent {
+	return &bridgev1.AttachSessionEvent{
+		Type:      bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT,
+		Seq:       chunk.Seq,
+		Timestamp: timestamppb.New(chunk.Timestamp),
+		SessionId: sessionID,
+		Payload:   chunk.Payload,
+		Replay:    replay,
 	}
 }

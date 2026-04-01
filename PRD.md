@@ -53,7 +53,7 @@ The bridge replaces direct in-process agent management with a networked, provide
 - Persistent event storage (in-memory ring buffer only; consumers can persist if needed).
 - AI model routing or selection (consumers decide which provider to use).
 - Acting as a CI/CD system.
-- SDKs for languages other than Go (protobuf definitions available for future stub generation).
+- SDKs for languages other than Go and Node.js (protobuf definitions available for future stub generation).
 
 ---
 
@@ -61,6 +61,7 @@ The bridge replaces direct in-process agent management with a networked, provide
 
 - **prd-manager-control-plane** - Integrates via Go SDK to replace `internal/agent/Manager` with bridge-backed agent sessions.
 - **ndara-ai-orchestrator** - Integrates via Go SDK to add real agent subprocess management behind its existing `AgentDaemon` gRPC service.
+- **Web Application Developers** - Use `packages/bridge-client-node` and the `useBridgeSession` React hook to embed agent sessions in browser-based UIs without needing to speak gRPC directly.
 - **DevOps/Platform Engineers** - Deploy and operate bridge daemons on agent host machines.
 - **Security Engineers** - Configure and audit the zero-trust PKI infrastructure.
 
@@ -71,14 +72,20 @@ The bridge replaces direct in-process agent management with a networked, provide
 ### 6.1 Components
 
 ```
-                       ┌─────────────────────┐
-                       │  prd-manager-       │
-                       │  control-plane      │
-                       │  (HTTP API)         │
-                       └────────┬────────────┘
-                                │ Go SDK (bridgeclient)
-                                │ gRPC + mTLS + JWT
-                                ▼
+┌─────────────────────┐        ┌────────────────────────────────┐
+│  prd-manager-       │        │  Web / Next.js App             │
+│  control-plane      │        │  (React + useBridgeSession)    │
+│  (HTTP API)         │        └───────────┬────────────────────┘
+└────────┬────────────┘                    │ WebSocket (JSON protocol)
+         │ Go SDK (bridgeclient)           ▼
+         │ gRPC + mTLS + JWT  ┌────────────────────────────────┐
+         │                    │  bridge-client-node            │
+         │                    │  (Node.js WebSocket adapter)   │
+         │                    │  or Go HTTP + bridgelib/       │
+         │                    │  WSHandler                     │
+         │                    └───────────┬────────────────────┘
+         │                                │ gRPC (plain or mTLS+JWT)
+         ▼                                ▼
 ┌────────────────────────────────────────────────────────┐
 │                   AI Agent Bridge                       │
 │                   (bridge daemon)                       │
@@ -118,11 +125,14 @@ The bridge replaces direct in-process agent management with a networked, provide
 |---|---|
 | `cmd/bridge` | Standalone bridge daemon binary |
 | `cmd/bridge-ca` | CA and certificate management CLI |
-| `pkg/bridgeclient` | Go SDK for consumer integration |
+| `pkg/bridgeclient` | Go SDK for consumer integration (gRPC client) |
+| `pkg/bridgelib` | Embeddable Go library (no separate gRPC server; includes WebSocket handler) |
+| `packages/bridge-client-node` | Node.js gRPC→WebSocket adapter + React hook (`useBridgeSession`) |
 | `proto/bridge/v1` | Protobuf service definitions |
 | `internal/bridge` | Session supervisor, provider adapters, event buffer |
 | `internal/auth` | mTLS, JWT, and zero-trust security primitives |
 | `internal/pki` | CA management, cross-signing, cert generation |
+| `docs/go-websocket-integration.md` | Guide for wiring the WebSocket protocol in a Go HTTP server |
 
 ---
 
