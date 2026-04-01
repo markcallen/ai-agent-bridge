@@ -16,7 +16,7 @@ on:
       - "v*.*.*"
 
 concurrency:
-  group: publish-${{ github.ref }}
+  group: publish
   cancel-in-progress: false
 
 jobs:
