@@ -4,10 +4,30 @@ interface Props {
   children: ReactNode;
 }
 
+interface MobileGateContext {
+  userAgent: string;
+  viewportWidth: number;
+}
+
+const MOBILE_VIEWPORT_MAX_WIDTH = 900;
+
+export function shouldUseMobileGate({
+  userAgent,
+  viewportWidth,
+}: MobileGateContext): boolean {
+  const isMobileUserAgent =
+    /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      userAgent
+    );
+
+  return isMobileUserAgent && viewportWidth < MOBILE_VIEWPORT_MAX_WIDTH;
+}
+
 function isMobile(): boolean {
-  return /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    navigator.userAgent
-  ) || window.matchMedia("(pointer: coarse)").matches;
+  return shouldUseMobileGate({
+    userAgent: navigator.userAgent,
+    viewportWidth: window.innerWidth,
+  });
 }
 
 export function MobileGate({ children }: Props) {
