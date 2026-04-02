@@ -111,7 +111,7 @@ jobs:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -210,7 +210,7 @@ jobs:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
