@@ -97,6 +97,14 @@ Issues referenced in original plan were #1, #4, #8. Current open issues after re
 - Validation after rollback: confirm plan reflects latest repo state.
 
 ## Outcome
-- Result: plan updated with concrete documentation mismatches, phased persistence actions (Phases 1–3 mapped to issue #6), and accurate issue alignment table (#1, #2, #4, #6, #8). Original plan incorrectly cited #8 as the persistence issue — corrected to #6.
-- Evidence: `tasks/update-plan.md` (this file).
-- Next steps: Begin with documentation fixes (section 1), then implement Phase 1 metadata tracking (issue #6 short-term), then address issue #4 bug fix.
+- Docs reconciliation: ✅ ARCHITECTURE.md, grpc-api.md, go-sdk.md, service.md
+- Issue #4 (mode field): ✅ config validation rejects non-empty mode at startup
+- Issue #6 Phase 1 (server UUID + bbolt metadata): ✅ server_instance_id in HealthResponse; bbolt SessionStore with LoadHistory and orphan detection
+- Issue #6 Phase 2 (durable PTY chunks): ✅ SaveChunk/LoadChunks; Attach() serves history sessions read-only from persisted chunks
+- Evidence: `tasks/update-plan.md`, commits on `docs-and-persistence-phase1` branch.
+
+## Remaining Open Work
+- **Issue #6 Phase 3** (long-term): process orphan reattach, PID scanning on restart — deferred
+- **Issue #1**: `EVENT_TYPE_THINKING` proto enum + stream-json provider parser for Claude thinking blocks — significant scope (new provider mode + proto change + `make proto` regen)
+- **Issue #2**: Migrate e2e CLI binaries to testify/suite — medium refactor, not a blocker
+- **Issue #8**: Model fallback handling — large scope, deferred
