@@ -66,7 +66,7 @@ func TestBridgeServerSessionLifecycle(t *testing.T) {
 		StartSessionPerClientBurst: 10,
 		SendInputPerSessionRPS:     10,
 		SendInputPerSessionBurst:   10,
-	})
+	}, "test-instance")
 
 	sessionID := uuid.NewString()
 	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "project-a"})
@@ -164,7 +164,7 @@ func TestBridgeServerValidationAndPermissions(t *testing.T) {
 	s := New(supervisor, registry, nil, RateLimitConfig{
 		GlobalRPS:   10,
 		GlobalBurst: 10,
-	})
+	}, "test-instance")
 	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "project-a"})
 
 	if _, err := s.ListSessions(ctx, &bridgev1.ListSessionsRequest{ProjectId: "project-b"}); status.Code(err) != codes.PermissionDenied {

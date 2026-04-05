@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -104,6 +106,11 @@ func main() {
 		AllowedPaths:  cfg.AllowedPaths,
 	}
 
+	// Generate a stable UUID for this daemon instance. Clients can compare
+	// this value across Health calls to detect a restart (issue #6 phase 1).
+	serverInstanceID := generateServerID()
+	logger.Info("bridge instance id", "server_instance_id", serverInstanceID)
+
 	// Set up supervisor
 	idleTimeout := config.ParseDuration(cfg.Sessions.IdleTimeout, 30*time.Minute)
 	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, idleTimeout)
@@ -175,7 +182,7 @@ func main() {
 		StartSessionPerClientBurst: cfg.RateLimits.StartSessionPerClientBurst,
 		SendInputPerSessionRPS:     cfg.RateLimits.SendInputPerSessionRPS,
 		SendInputPerSessionBurst:   cfg.RateLimits.SendInputPerSessionBurst,
-	})
+	}, serverInstanceID)
 	bridgev1.RegisterBridgeServiceServer(grpcServer, bridgeServer)
 
 	ln, err := net.Listen("tcp", cfg.Server.Listen)
@@ -198,6 +205,18 @@ func main() {
 		logger.Error("serve", "error", err)
 		os.Exit(1)
 	}
+}
+
+// generateServerID returns a random UUID (RFC 4122 v4) for this daemon instance.
+func generateServerID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("generateServerID: %v", err))
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant bits
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 func newLogger(cfg *config.Config, redactor *redact.Redactor) *slog.Logger {

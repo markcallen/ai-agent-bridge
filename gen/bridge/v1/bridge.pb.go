@@ -1139,11 +1139,16 @@ func (*HealthRequest) Descriptor() ([]byte, []int) {
 }
 
 type HealthResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Providers     []*ProviderHealth      `protobuf:"bytes,2,rep,name=providers,proto3" json:"providers,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Status    string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Providers []*ProviderHealth      `protobuf:"bytes,2,rep,name=providers,proto3" json:"providers,omitempty"`
+	// server_instance_id is a UUID generated once at daemon startup.
+	// Clients can compare this value across Health calls to detect a daemon
+	// restart (a changed ID means the process restarted and all in-memory
+	// session state has been lost).
+	ServerInstanceId string `protobuf:"bytes,3,opt,name=server_instance_id,json=serverInstanceId,proto3" json:"server_instance_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *HealthResponse) Reset() {
@@ -1188,6 +1193,13 @@ func (x *HealthResponse) GetProviders() []*ProviderHealth {
 		return x.Providers
 	}
 	return nil
+}
+
+func (x *HealthResponse) GetServerInstanceId() string {
+	if x != nil {
+		return x.ServerInstanceId
+	}
+	return ""
 }
 
 type ProviderHealth struct {
@@ -1497,10 +1509,11 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x04rows\x18\x04 \x01(\rR\x04rows\"1\n" +
 	"\x15ResizeSessionResponse\x12\x18\n" +
 	"\aapplied\x18\x01 \x01(\bR\aapplied\"\x0f\n" +
-	"\rHealthRequest\"a\n" +
+	"\rHealthRequest\"\x8f\x01\n" +
 	"\x0eHealthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x127\n" +
-	"\tproviders\x18\x02 \x03(\v2\x19.bridge.v1.ProviderHealthR\tproviders\"`\n" +
+	"\tproviders\x18\x02 \x03(\v2\x19.bridge.v1.ProviderHealthR\tproviders\x12,\n" +
+	"\x12server_instance_id\x18\x03 \x01(\tR\x10serverInstanceId\"`\n" +
 	"\x0eProviderHealth\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x1c\n" +
 	"\tavailable\x18\x02 \x01(\bR\tavailable\x12\x14\n" +

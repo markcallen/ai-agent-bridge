@@ -95,7 +95,7 @@ func TestBridgeHelpersAndProviderResponses(t *testing.T) {
 		t.Fatalf("Register broken: %v", err)
 	}
 
-	s := New(nil, registry, slog.Default(), RateLimitConfig{})
+	s := New(nil, registry, slog.Default(), RateLimitConfig{}, "test-instance")
 	health, err := s.Health(context.Background(), &bridgev1.HealthRequest{})
 	if err != nil {
 		t.Fatalf("Health: %v", err)

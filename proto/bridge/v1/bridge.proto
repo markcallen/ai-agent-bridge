@@ -143,6 +143,11 @@ message HealthRequest {}
 message HealthResponse {
   string status = 1;
   repeated ProviderHealth providers = 2;
+  // server_instance_id is a UUID generated once at daemon startup.
+  // Clients can compare this value across Health calls to detect a daemon
+  // restart (a changed ID means the process restarted and all in-memory
+  // session state has been lost).
+  string server_instance_id = 3;
 }
 
 message ProviderHealth {

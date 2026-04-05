@@ -24,12 +24,13 @@ func generateID() string {
 type BridgeServer struct {
 	bridgev1.UnimplementedBridgeServiceServer
 
-	supervisor *bridge.Supervisor
-	registry   *bridge.Registry
-	logger     *slog.Logger
-	globalRL   *keyedLimiter
-	startRL    *keyedLimiter
-	writeRL    *keyedLimiter
+	supervisor       *bridge.Supervisor
+	registry         *bridge.Registry
+	logger           *slog.Logger
+	globalRL         *keyedLimiter
+	startRL          *keyedLimiter
+	writeRL          *keyedLimiter
+	serverInstanceID string
 }
 
 type RateLimitConfig struct {
@@ -41,14 +42,15 @@ type RateLimitConfig struct {
 	SendInputPerSessionBurst   int
 }
 
-func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger, rl RateLimitConfig) *BridgeServer {
+func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger, rl RateLimitConfig, serverInstanceID string) *BridgeServer {
 	return &BridgeServer{
-		supervisor: supervisor,
-		registry:   registry,
-		logger:     logger,
-		globalRL:   newKeyedLimiter(rl.GlobalRPS, rl.GlobalBurst),
-		startRL:    newKeyedLimiter(rl.StartSessionPerClientRPS, rl.StartSessionPerClientBurst),
-		writeRL:    newKeyedLimiter(rl.SendInputPerSessionRPS, rl.SendInputPerSessionBurst),
+		supervisor:       supervisor,
+		registry:         registry,
+		logger:           logger,
+		globalRL:         newKeyedLimiter(rl.GlobalRPS, rl.GlobalBurst),
+		startRL:          newKeyedLimiter(rl.StartSessionPerClientRPS, rl.StartSessionPerClientBurst),
+		writeRL:          newKeyedLimiter(rl.SendInputPerSessionRPS, rl.SendInputPerSessionBurst),
+		serverInstanceID: serverInstanceID,
 	}
 }
 
@@ -361,7 +363,11 @@ func (s *BridgeServer) Health(ctx context.Context, req *bridgev1.HealthRequest) 
 		}
 		providers = append(providers, item)
 	}
-	return &bridgev1.HealthResponse{Status: "serving", Providers: providers}, nil
+	return &bridgev1.HealthResponse{
+		Status:           "serving",
+		Providers:        providers,
+		ServerInstanceId: s.serverInstanceID,
+	}, nil
 }
 
 func (s *BridgeServer) ListProviders(ctx context.Context, req *bridgev1.ListProvidersRequest) (*bridgev1.ListProvidersResponse, error) {
