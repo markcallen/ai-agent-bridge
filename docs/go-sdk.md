@@ -174,6 +174,8 @@ stream2.RecvAll(ctx, handler)  // resumes from last processed seq
 
 Use `WithCursorStore` to plug in a persistent store (Redis, database) for durable cursor tracking across process restarts.
 
+> **Limitation**: Cursor persistence is only useful within a single server lifetime. If the bridge daemon restarts, all session records are lost and `FileCursorStore` cursor positions become meaningless — `GetSession` will return `NOT_FOUND` for any previously running session. See [issue #6](https://github.com/markcallen/ai-agent-bridge/issues/6) for the session persistence roadmap.
+
 ---
 
 ## Sending Input

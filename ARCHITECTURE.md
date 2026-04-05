@@ -32,24 +32,24 @@ Browser-based applications cannot speak gRPC directly. The `packages/bridge-clie
 │        │                                                             │
 │  ┌─────▼──────────────────────────────────────────────────────────┐  │
 │  │                    Session Supervisor                           │  │
-│  │  - Start/Stop/Send/Get/List                                    │  │
+│  │  - Start/Stop/WriteInput/Get/List                              │  │
 │  │  - Policy enforcement (limits, path validation)                │  │
-│  │  - Event forwarding to per-session ring buffers                │  │
-│  │  - Per-subscriber cursor tracking (SubscriberManager)          │  │
+│  │  - PTY output forwarding to per-session ByteBuffers            │  │
+│  │  - Single-client attach enforcement (Attach/Detach)            │  │
 │  └─────┬──────────────────────────────────────────────────────────┘  │
 │        │                                                             │
 │  ┌─────▼──────────────────────────────────────────────────────────┐  │
 │  │                    Provider Registry                           │  │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐  │  │
 │  │  │  codex   │  │  claude  │  │ opencode │  │ claude-chat │  │  │
-│  │  │ (stdio)  │  │ (stdio)  │  │  (pty)   │  │(stream-json)│  │  │
+│  │  │  (exec)  │  │ (stdio)  │  │  (pty)   │  │(stream-json)│  │  │
 │  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬──────┘  │  │
 │  └───────┼─────────────┼─────────────┼────────────────┼──────────┘  │
 │          │             │             │                │              │
 │    ┌─────▼───┐   ┌─────▼───┐  ┌─────▼───┐   ┌───────▼───┐         │
 │    │  codex  │   │  claude │  │opencode │   │  claude   │         │
 │    │ process │   │ process │  │ process │   │  process  │         │
-│    │ (stdio) │   │ (stdio) │  │  (pty)  │   │(stream-json│         │
+│    │  (exec) │   │ (stdio) │  │  (pty)  │   │(stream-json│         │
 │    └─────────┘   └─────────┘  └─────────┘   └───────────┘         │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -107,20 +107,22 @@ Implements `bridge.v1.BridgeService`:
 - Enforces policy (session limits, path validation, input size)
 - Forwards provider events to per-session ring buffers
 
-**EventBuffer** (`eventbuf.go`)
-- Bounded ring buffer per session
-- Monotonic sequence numbers for ordering
-- Subscribe/unsubscribe for live streaming
-- `After(seq)` for replay from any point
+**ByteBuffer** (`bytebuf.go`)
+- Bounded byte-based ring buffer per session
+- Monotonic sequence numbers for ordering and replay
+- `Append(payload)` — add a PTY output chunk; evicts oldest chunks when byte capacity is reached
+- `After(afterSeq)` — return all chunks with `Seq > afterSeq` for replay
+- `OldestSeq()` / `LastSeq()` — query current buffer bounds
+- Default capacity: 8 MB per session
 
-**SubscriberManager** (`subscribermgr.go`)
-- Per-subscriber cursor tracking on top of EventBuffer
-- `Attach(subscriberID, afterSeq)` — subscribe to live first, then replay, closing the replay-to-live gap
-- `Detach(subscriberID, ch)` — unsubscribe live channel but preserve cursor for reconnect
-- `Ack(subscriberID, seq)` — advance per-subscriber acknowledged sequence
-- `CleanupExpired()` — remove subscribers idle beyond configurable TTL
-- Overflow detection when subscriber falls behind buffer retention
-- Configurable max subscribers per session and subscriber TTL
+**Single-client attach model** (`supervisor.go`)
+- Only one client may be attached to a session at a time (`Attach` / `Detach`)
+- `Attach(sessionID, clientID, afterSeq)` returns an `AttachState`:
+  - `Replay []OutputChunk` — buffered chunks from `afterSeq` onwards
+  - `Live <-chan OutputChunk` — live channel for new PTY output
+  - `ReplayGap bool` — true if `afterSeq` was evicted; replay restarts from oldest retained chunk
+  - `OldestSeq`, `LastSeq` — buffer extent at attach time
+- Client-side cursor tracking is the SDK's responsibility (`CursorStore` in `pkg/bridgeclient`)
 
 **Provider Interface** (`provider.go`)
 - `ID() → string`
@@ -321,7 +323,7 @@ Consumer                    Bridge Daemon                Provider Process
    │                            │── stdin.Write ────────────►│
    │◄── SendInputResponse ────│                            │
    │                            │◄── stdout (response) ─────│
-   │                            │── EventBuffer.Append ──┐   │
+   │                            │── ByteBuffer.Append ───┐   │
    │                            │                        │   │
    │── StreamEvents ──────────►│                        │   │
    │◄── replay from buffer ────│◄───────────────────────┘   │
@@ -337,22 +339,32 @@ Consumer                    Bridge Daemon                Provider Process
 ### Event Replay + Live Streaming
 
 ```
-Client reconnects with subscriber_id="sdk-1", after_seq=42:
+Client calls AttachSession(session_id, client_id="sdk-1", after_seq=42):
 
-SubscriberManager looks up cursor for "sdk-1":
-  - Stored ack_seq=42 (from previous connection)
-  - If ack_seq > client after_seq, uses ack_seq
+Server calls supervisor.Attach("session-1", "sdk-1", afterSeq=42):
+  Returns AttachState:
+    Replay: [seq:43, seq:44]  (all chunks with Seq > 42 from ByteBuffer)
+    Live:   <-chan OutputChunk (new PTY output as it arrives)
+    ReplayGap: false          (seq:42 was still in the buffer)
 
-EventBuffer: [seq:38, seq:39, seq:40, seq:41, seq:42, seq:43, seq:44]
-                                                       ▲
-                                              replay starts here
+ByteBuffer: [..., seq:40, seq:41, seq:42, seq:43, seq:44]
+                                           ▲
+                                  replay starts here (after_seq=42)
 
-1. Subscribe to live channel first (gap-free handoff)
-2. Replay: seq:43, seq:44 sent immediately, Ack() called for each
-3. Switch to live channel
-4. New events (seq:45, 46, ...) streamed as they arrive, Ack() each
-5. Duplicate detection: skip any seq <= last sent
-6. On disconnect: Detach() preserves cursor for next reconnect
+Server stream:
+1. Send ATTACHED event (OldestSeq, LastSeq, cols, rows)
+2. If ReplayGap: send REPLAY_GAP event (seq:42 was evicted; replay
+   restarts from OldestSeq — client should re-render from scratch)
+3. Replay: send seq:43, seq:44 as OUTPUT events (replay=true)
+4. Switch to live: stream new PTY chunks as they arrive (replay=false)
+5. On session exit: send SESSION_EXIT event
+6. On client disconnect: supervisor.Detach() clears attached client
+
+Cursor tracking is client-side:
+  SDK saves last received seq via CursorStore (MemoryCursorStore or
+  FileCursorStore). On reconnect, client passes saved seq as after_seq.
+  Note: FileCursorStore is only useful within a single server lifetime
+  (see issue #6 for durable session persistence roadmap).
 ```
 
 ## Configuration
@@ -380,9 +392,7 @@ sessions:
   max_global: 20
   idle_timeout: "30m"
   stop_grace_period: "10s"
-  event_buffer_size: 10000
-  max_subscribers_per_session: 10
-  subscriber_ttl: "30m"
+  event_buffer_size: 8388608   # per-session ByteBuffer capacity in bytes (8 MB)
 
 input:
   max_size_bytes: 65536             # Maximum SendInput text size
@@ -457,18 +467,19 @@ client.StartSession(ctx, &bridgev1.StartSessionRequest{
     RepoPath:  repoPath,
     Provider:  "claude",
 })
-client.SendInput(ctx, &bridgev1.SendInputRequest{
+client.WriteInput(ctx, &bridgev1.WriteInputRequest{
     SessionId: sessionID,
-    Text:      prompt,
+    ClientId:  clientID,   // must match the client_id used in AttachSession
+    Data:      []byte(prompt),
 })
 
-// Stream events with durable subscriber-based resume
-stream, _ := client.StreamEvents(ctx, &bridgev1.StreamEventsRequest{
-    SessionId:    sessionID,
-    SubscriberId: "my-subscriber",
+// Attach and stream PTY output with client-side cursor tracking
+stream, _ := client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
+    SessionId: sessionID,
+    ClientId:  "my-client",  // stable across reconnects; pass AfterSeq to resume
 })
-stream.RecvAll(ctx, func(ev *bridgev1.SessionEvent) error {
-    // Process event; cursor is tracked server-side per subscriber_id
+stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {
+    // Process event; cursor is tracked client-side via CursorStore
     return nil
 })
 
@@ -492,7 +503,7 @@ ai-agent-bridge/
 ├── internal/
 │   ├── auth/             # mTLS + JWT + audit interceptors
 │   ├── pki/              # CA management
-│   ├── bridge/           # Supervisor, EventBuffer, Policy, Registry
+│   ├── bridge/           # Supervisor, ByteBuffer, Policy, Registry
 │   ├── provider/         # Stdio/PTY/stream-json adapter + provider implementations
 │   ├── redact/           # Log output redaction
 │   ├── config/           # YAML config loading + env var injection

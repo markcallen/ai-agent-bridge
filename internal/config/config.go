@@ -68,7 +68,7 @@ type RateLimitsConfig struct {
 
 type ProviderConfig struct {
 	Binary          string   `yaml:"binary"`
-	Mode            string   `yaml:"mode"` // "exec" for one-shot exec providers (e.g. codex)
+	Mode            string   `yaml:"mode"` // deprecated: no longer supported; remove from config
 	Args            []string `yaml:"args"`
 	StartupTimeout  string   `yaml:"startup_timeout"`
 	ValidateStartup *bool    `yaml:"validate_startup"`
@@ -223,6 +223,9 @@ func validate(cfg *Config) error {
 	for name, provider := range cfg.Providers {
 		if provider.Binary == "" {
 			return fmt.Errorf("config: providers.%s.binary is required", name)
+		}
+		if provider.Mode != "" {
+			return fmt.Errorf("config: providers.%s.mode is no longer supported; remove the field and use pty: true or stream_json: true instead", name)
 		}
 		if provider.StartupProbe != "" {
 			switch provider.StartupProbe {

@@ -56,6 +56,7 @@ STARTING → RUNNING → ATTACHED (client connected)
 - Only one client may be attached at a time.
 - If the client disconnects, the process keeps running and buffering.
 - A reconnecting client passes `after_seq` to resume from where it left off.
+- If the requested `after_seq` was evicted from the buffer (the ring wrapped), the server sends a `REPLAY_GAP` event before replaying from `oldest_seq`. Clients receiving this event should treat the session output as incomplete and re-render from the oldest available chunk.
 
 ### PTY Transport Model
 
