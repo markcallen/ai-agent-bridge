@@ -179,6 +179,12 @@ logging:
 | `stop_grace_period` | Time to wait for graceful agent exit before SIGKILL |
 | `event_buffer_size` | Per-session ring buffer capacity in bytes |
 
+#### `persistence`
+| Field | Default | Description |
+|-------|---------|-------------|
+| `db_path` | `""` (disabled) | Path to the bbolt database file used to persist session metadata **and PTY output chunks** across daemon restarts. When set, `GetSession` and `ListSessions` will surface completed sessions from previous daemon lifetimes. Orphaned sessions (not in a terminal state at restart) are automatically marked `FAILED`. `AttachSession` on a stopped/failed history session replays the persisted chunks and then closes the stream. |
+| `chunk_storage_bytes` | `0` (unlimited) | Soft upper bound on total PTY chunk bytes stored per session. Reserved for future enforcement; currently has no effect. |
+
 #### `providers`
 | Field | Description |
 |-------|-------------|

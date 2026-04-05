@@ -166,6 +166,217 @@ func TestSupervisorStartValidationAndLimits(t *testing.T) {
 	}
 }
 
+func TestSupervisorPersistenceAndHistory(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	dbPath := t.TempDir() + "/sessions.db"
+	store, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewBoltSessionStore: %v", err)
+	}
+
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store))
+	defer sup.Close()
+
+	repo := t.TempDir()
+	if _, err := sup.Start(context.Background(), SessionConfig{
+		ProjectID: "proj-a",
+		SessionID: "persist-1",
+		RepoPath:  repo,
+		Options:   map[string]string{"provider": "fake"},
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Stop the session so it reaches a terminal state and is persisted.
+	if err := sup.Stop("persist-1", true); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	waitForStopped(t, sup, "persist-1")
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	// Simulate a daemon restart: open a fresh supervisor with the same store.
+	store2, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	sup2 := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store2))
+	defer sup2.Close()
+	defer func() { _ = store2.Close() }()
+
+	if err := sup2.LoadHistory(); err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+
+	// The stopped session must be visible via Get and List.
+	info, err := sup2.Get("persist-1")
+	if err != nil {
+		t.Fatalf("Get after restart: %v", err)
+	}
+	if info.State != SessionStateStopped && info.State != SessionStateFailed {
+		t.Errorf("State=%v want Stopped or Failed", info.State)
+	}
+	if info.ProjectID != "proj-a" {
+		t.Errorf("ProjectID=%q want %q", info.ProjectID, "proj-a")
+	}
+
+	list := sup2.List("proj-a")
+	found := false
+	for _, s := range list {
+		if s.SessionID == "persist-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("persist-1 not found in List after restart")
+	}
+}
+
+func TestSupervisorHistoryOrphansMarkedFailed(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	dbPath := t.TempDir() + "/sessions.db"
+
+	// Seed the store with a running session (simulating a crash).
+	store, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewBoltSessionStore: %v", err)
+	}
+	orphan := SessionInfo{
+		SessionID: "orphan-1",
+		ProjectID: "proj-b",
+		Provider:  "fake",
+		State:     SessionStateRunning,
+		CreatedAt: nowUTC(),
+	}
+	if err := store.Save(orphan); err != nil {
+		t.Fatalf("Save orphan: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	// Restart: orphan must be marked Failed.
+	store2, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store2))
+	defer sup.Close()
+	defer func() { _ = store2.Close() }()
+
+	if err := sup.LoadHistory(); err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+
+	info, err := sup.Get("orphan-1")
+	if err != nil {
+		t.Fatalf("Get orphan: %v", err)
+	}
+	if info.State != SessionStateFailed {
+		t.Errorf("State=%v want Failed", info.State)
+	}
+	if info.Error == "" {
+		t.Errorf("Error should be set for orphaned session")
+	}
+}
+
+func TestSupervisorHistoryChunkReplay(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	dbPath := t.TempDir() + "/sessions.db"
+	store, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewBoltSessionStore: %v", err)
+	}
+
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store))
+	repo := t.TempDir()
+	if _, err := sup.Start(context.Background(), SessionConfig{
+		ProjectID: "proj-a",
+		SessionID: "replay-1",
+		RepoPath:  repo,
+		Options:   map[string]string{"provider": "fake"},
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Write some input so /bin/cat echoes it into the PTY buffer.
+	state, err := sup.Attach("replay-1", "client-a", 0)
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if _, err := sup.WriteInput("replay-1", "client-a", []byte("hello\n")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	waitForChunk(t, state.Live, "hello")
+	if err := sup.Detach("replay-1", "client-a"); err != nil {
+		t.Fatalf("Detach: %v", err)
+	}
+
+	// Stop and let the session reach a terminal state.
+	if err := sup.Stop("replay-1", true); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	waitForStopped(t, sup, "replay-1")
+	sup.Close()
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	// Simulate daemon restart: open a fresh supervisor with the same store.
+	store2, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	sup2 := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store2))
+	defer sup2.Close()
+	defer func() { _ = store2.Close() }()
+
+	if err := sup2.LoadHistory(); err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+
+	// AttachSession on a history session must return replay chunks from the store.
+	state2, err := sup2.Attach("replay-1", "client-b", 0)
+	if err != nil {
+		t.Fatalf("Attach history session: %v", err)
+	}
+	if len(state2.Replay) == 0 {
+		t.Fatal("expected non-empty replay for history session")
+	}
+	var found bool
+	for _, c := range state2.Replay {
+		if bytes.Contains(c.Payload, []byte("hello")) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'hello' in history replay, got %d chunks", len(state2.Replay))
+	}
+	// Live channel must be closed (no running process).
+	select {
+	case _, ok := <-state2.Live:
+		if ok {
+			t.Error("live channel should be closed for history session")
+		}
+	default:
+		t.Error("live channel should be immediately readable (closed)")
+	}
+}
+
 func waitForChunk(t *testing.T, ch <-chan OutputChunk, needle string) OutputChunk {
 	t.Helper()
 	timeout := time.After(3 * time.Second)

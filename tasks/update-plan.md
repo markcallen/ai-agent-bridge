@@ -46,17 +46,22 @@ Root issue tracked in **GitHub issue #6** ("Session state is lost on server rest
 
 Current state: all session data lives in `map[string]*managedSession` in `internal/bridge/supervisor.go`. `ByteBuffer` is in-memory only. No restart detection exists.
 
-**Phase 1 — Metadata tracking (short term)**
-- Persist `SessionInfo` (ID, provider, project, state, created/stopped timestamps, exit code) to a local embedded store (bbolt is the suggested option in issue #6) on every state transition.
-- On daemon startup, reload the session index from the store and surface sessions with state `STOPPED`/`FAILED` via `ListSessions` and `GetSession` so operators can inspect what was running.
-- Expose a server **instance UUID** (generated at startup) in `GetSession` and `ListSessions` responses so clients can detect a restart event rather than spinning on `ErrSessionNotFound`.
-- Key files: `internal/bridge/supervisor.go`, `proto/bridge/v1/bridge.proto` (add `server_instance_id` to `ListSessionsResponse` or `HealthResponse`), `internal/server/server.go`.
+**Phase 1 — Metadata tracking (short term)** ✅ COMPLETE
+- [x] Persist `SessionInfo` to bbolt on every state transition (`internal/bridge/session_store.go`, `supervisor.go`).
+- [x] On daemon startup, reload session index via `LoadHistory()`; orphaned (non-terminal) sessions marked `FAILED`.
+- [x] Expose server instance UUID in `HealthResponse.server_instance_id` (proto field 3).
+- [x] Config: `persistence.db_path` in YAML; `PersistenceConfig` struct; store wired in `cmd/bridge/main.go`.
+- [x] Tests: `session_store_test.go` (3 tests), supervisor persistence/orphan tests.
 
-**Phase 2 — Durable buffering (medium term)**
-- Persist `ByteBuffer` chunks to the embedded store (or a WAL file) so `AttachSession` with `after_seq` can replay events that predate the current daemon lifetime.
-- This makes `pkg/bridgeclient/cursor_store.go` (`FileCursorStore`) meaningful end-to-end.
-- Add a configurable retention limit (bytes and/or age) separate from the in-memory ring buffer limit.
-- Key files: `internal/bridge/bytebuf.go`, `internal/bridge/supervisor.go`, `internal/config/`.
+**Phase 2 — Durable buffering (medium term)** ✅ COMPLETE
+- [x] Extend `SessionStore` interface with `SaveChunk(sessionID, chunk)` and `LoadChunks(sessionID)`.
+- [x] `BoltSessionStore` implements both using a `"chunks"` bbolt bucket (key: `sessionID/seq-16hex`).
+- [x] `readLoop` calls `persistChunk` (best-effort) on every PTY byte chunk.
+- [x] `Attach()` extended: for history sessions (stopped/failed, in store), loads persisted chunks, returns them as `Replay` with a closed `Live` channel.
+- [x] `Detach()` is a no-op for history sessions.
+- [x] Config: `persistence.chunk_storage_bytes` field (reserved; enforcement deferred).
+- [x] Tests: 3 new chunk store tests + 1 supervisor history-replay test.
+- Deferred: active per-session chunk retention enforcement (planned for a follow-on).
 
 **Phase 3 — Restart detection and agent reattach (long term)**
 - On daemon startup, scan for orphaned child PIDs from the previous run (via PID file or `/proc` inspection).

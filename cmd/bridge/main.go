@@ -111,10 +111,30 @@ func main() {
 	serverInstanceID := generateServerID()
 	logger.Info("bridge instance id", "server_instance_id", serverInstanceID)
 
+	// Set up optional session persistence store (issue #6 phase 1).
+	var supOpts []bridge.SupervisorOption
+	if cfg.Persistence.DBPath != "" {
+		store, err := bridge.NewBoltSessionStore(cfg.Persistence.DBPath)
+		if err != nil {
+			logger.Error("open session store", "path", cfg.Persistence.DBPath, "error", err)
+			os.Exit(1)
+		}
+		defer func() {
+			if err := store.Close(); err != nil {
+				logger.Warn("close session store", "error", err)
+			}
+		}()
+		supOpts = append(supOpts, bridge.WithStore(store))
+		logger.Info("session persistence enabled", "db_path", cfg.Persistence.DBPath)
+	}
+
 	// Set up supervisor
 	idleTimeout := config.ParseDuration(cfg.Sessions.IdleTimeout, 30*time.Minute)
-	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, idleTimeout)
+	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, idleTimeout, supOpts...)
 	defer sup.Close()
+	if err := sup.LoadHistory(); err != nil {
+		logger.Warn("failed to load session history", "error", err)
+	}
 
 	// Set up JWT verifier
 	verifier := &auth.JWTVerifier{

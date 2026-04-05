@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
@@ -27,6 +28,17 @@ type AttachState struct {
 	Rows         uint32
 }
 
+// SupervisorOption configures optional Supervisor behaviour.
+type SupervisorOption func(*Supervisor)
+
+// WithStore attaches a SessionStore so that session metadata is persisted on
+// every terminal state transition and reloaded at startup via LoadHistory.
+func WithStore(store SessionStore) SupervisorOption {
+	return func(s *Supervisor) {
+		s.store = store
+	}
+}
+
 // Supervisor manages the lifecycle of PTY-backed provider sessions.
 type Supervisor struct {
 	registry        *Registry
@@ -38,6 +50,10 @@ type Supervisor struct {
 	mu       sync.RWMutex
 	sessions map[string]*managedSession
 	done     chan struct{}
+
+	store   SessionStore
+	histMu  sync.RWMutex
+	history map[string]SessionInfo
 }
 
 type managedSession struct {
@@ -56,7 +72,7 @@ type managedSession struct {
 	live           chan OutputChunk
 }
 
-func NewSupervisor(registry *Registry, policy Policy, outputBufSize int, idleTimeout time.Duration) *Supervisor {
+func NewSupervisor(registry *Registry, policy Policy, outputBufSize int, idleTimeout time.Duration, opts ...SupervisorOption) *Supervisor {
 	if outputBufSize <= 0 {
 		outputBufSize = 8 << 20
 	}
@@ -68,9 +84,116 @@ func NewSupervisor(registry *Registry, policy Policy, outputBufSize int, idleTim
 		cleanupInterval: 30 * time.Second,
 		sessions:        make(map[string]*managedSession),
 		done:            make(chan struct{}),
+		history:         make(map[string]SessionInfo),
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 	go s.cleanupLoop()
 	return s
+}
+
+// LoadHistory reads all persisted sessions from the store and places them in
+// the in-memory history map so they are visible via Get and List. Sessions
+// that were not in a terminal state (i.e. the daemon crashed mid-flight) are
+// marked as SessionStateFailed with an "orphaned by daemon restart" message
+// and their updated state is written back to the store.
+//
+// Call LoadHistory once, before serving requests.
+func (s *Supervisor) LoadHistory() error {
+	if s.store == nil {
+		return nil
+	}
+	infos, err := s.store.LoadAll()
+	if err != nil {
+		return err
+	}
+	s.histMu.Lock()
+	defer s.histMu.Unlock()
+	for _, info := range infos {
+		if info.State != SessionStateStopped && info.State != SessionStateFailed {
+			info.State = SessionStateFailed
+			if info.Error == "" {
+				info.Error = "orphaned by daemon restart"
+			}
+			if info.StoppedAt.IsZero() {
+				info.StoppedAt = nowUTC()
+			}
+			// Best-effort: ignore write errors during startup.
+			if saveErr := s.store.Save(info); saveErr != nil {
+				slog.Warn("session store: failed to update orphaned session", "session_id", info.SessionID, "error", saveErr)
+			}
+		}
+		s.history[info.SessionID] = info
+	}
+	return nil
+}
+
+// persistSession writes info to the store if one is configured. Errors are
+// logged at warn level and do not propagate — persistence is best-effort.
+func (s *Supervisor) persistSession(info SessionInfo) {
+	if s.store == nil {
+		return
+	}
+	if err := s.store.Save(info); err != nil {
+		slog.Warn("session store: failed to persist session", "session_id", info.SessionID, "error", err)
+	}
+}
+
+// persistChunk writes a single PTY output chunk to the store. Errors are
+// logged at warn level and do not propagate — persistence is best-effort.
+func (s *Supervisor) persistChunk(sessionID string, chunk OutputChunk) {
+	if s.store == nil {
+		return
+	}
+	if err := s.store.SaveChunk(sessionID, chunk); err != nil {
+		slog.Warn("session store: failed to persist chunk", "session_id", sessionID, "seq", chunk.Seq, "error", err)
+	}
+}
+
+// attachHistory serves a read-only replay for a session that exists only in
+// the persisted history (i.e. from a previous daemon lifetime). Returns
+// ErrSessionNotFound if the session is not in history or has no store.
+func (s *Supervisor) attachHistory(sessionID, clientID string, afterSeq uint64) (*AttachState, error) {
+	if s.store == nil {
+		return nil, ErrSessionNotFound
+	}
+	s.histMu.RLock()
+	info, ok := s.history[sessionID]
+	s.histMu.RUnlock()
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+	chunks, err := s.store.LoadChunks(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load chunks for %q: %w", sessionID, err)
+	}
+	var replay []OutputChunk
+	for _, c := range chunks {
+		if c.Seq > afterSeq {
+			replay = append(replay, c)
+		}
+	}
+	var oldest, last uint64
+	if len(chunks) > 0 {
+		oldest = chunks[0].Seq
+		last = chunks[len(chunks)-1].Seq
+	}
+	// A closed channel signals EOF immediately to the server's streaming loop.
+	closed := make(chan OutputChunk)
+	close(closed)
+	return &AttachState{
+		ClientID:     clientID,
+		Replay:       replay,
+		Live:         closed,
+		ReplayGap:    oldest > 0 && afterSeq > 0 && afterSeq < oldest-1,
+		OldestSeq:    oldest,
+		LastSeq:      last,
+		ExitRecorded: info.ExitRecorded,
+		ExitCode:     info.ExitCode,
+		Cols:         info.Cols,
+		Rows:         info.Rows,
+	}, nil
 }
 
 func (s *Supervisor) cleanupLoop() {
@@ -201,6 +324,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	go s.waitLoop(ms)
 
 	info := ms.snapshotInfo()
+	s.persistSession(info)
 	return &info, nil
 }
 
@@ -210,6 +334,7 @@ func (s *Supervisor) readLoop(ms *managedSession) {
 		n, err := ms.ptmx.Read(buf)
 		if n > 0 {
 			chunk := ms.buf.Append(buf[:n])
+			s.persistChunk(ms.info.SessionID, chunk)
 			ms.mu.Lock()
 			ms.info.OldestSeq = ms.buf.OldestSeq()
 			ms.info.LastSeq = ms.buf.LastSeq()
@@ -260,6 +385,8 @@ func (s *Supervisor) waitLoop(ms *managedSession) {
 	}
 	ms.cancel()
 	ms.mu.Unlock()
+
+	s.persistSession(ms.snapshotInfo())
 }
 
 func (s *Supervisor) Stop(sessionID string, force bool) error {
@@ -360,6 +487,11 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*Attac
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
+		// For stopped/failed sessions that were persisted in a previous daemon
+		// lifetime, serve the stored chunks in read-only mode (no live channel).
+		if state, err := s.attachHistory(sessionID, clientID, afterSeq); state != nil || err != ErrSessionNotFound {
+			return state, err
+		}
 		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 
@@ -396,6 +528,13 @@ func (s *Supervisor) Detach(sessionID, clientID string) error {
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
+		// History sessions are served read-only; detach is a no-op.
+		s.histMu.RLock()
+		_, inHistory := s.history[sessionID]
+		s.histMu.RUnlock()
+		if inHistory {
+			return nil
+		}
 		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	ms.mu.Lock()
@@ -417,24 +556,47 @@ func (s *Supervisor) Get(sessionID string) (*SessionInfo, error) {
 	s.mu.RLock()
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+	if ok {
+		info := ms.snapshotInfo()
+		return &info, nil
 	}
-	info := ms.snapshotInfo()
-	return &info, nil
+	// Fall back to history (sessions persisted from a previous daemon lifetime).
+	s.histMu.RLock()
+	info, ok := s.history[sessionID]
+	s.histMu.RUnlock()
+	if ok {
+		return &info, nil
+	}
+	return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 }
 
 func (s *Supervisor) List(projectID string) []SessionInfo {
+	// Snapshot live session IDs and their info under the live lock.
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	liveIDs := make(map[string]struct{}, len(s.sessions))
 	out := make([]SessionInfo, 0, len(s.sessions))
-	for _, ms := range s.sessions {
+	for id, ms := range s.sessions {
+		liveIDs[id] = struct{}{}
 		info := ms.snapshotInfo()
 		if projectID != "" && info.ProjectID != projectID {
 			continue
 		}
 		out = append(out, info)
 	}
+	s.mu.RUnlock()
+
+	// Append historical sessions not present in the live map.
+	s.histMu.RLock()
+	for id, info := range s.history {
+		if _, live := liveIDs[id]; live {
+			continue
+		}
+		if projectID != "" && info.ProjectID != projectID {
+			continue
+		}
+		out = append(out, info)
+	}
+	s.histMu.RUnlock()
 	return out
 }
 

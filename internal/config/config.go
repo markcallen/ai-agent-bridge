@@ -17,6 +17,7 @@ type Config struct {
 	Sessions     SessionsConfig            `yaml:"sessions"`
 	Input        InputConfig               `yaml:"input"`
 	RateLimits   RateLimitsConfig          `yaml:"rate_limits"`
+	Persistence  PersistenceConfig         `yaml:"persistence"`
 	Providers    map[string]ProviderConfig `yaml:"providers"`
 	AllowedPaths []string                  `yaml:"allowed_paths"`
 	Logging      LoggingConfig             `yaml:"logging"`
@@ -84,6 +85,18 @@ type ProviderConfig struct {
 
 func (p ProviderConfig) ShouldValidateStartup() bool {
 	return p.ValidateStartup == nil || *p.ValidateStartup
+}
+
+type PersistenceConfig struct {
+	// DBPath is the path to the bbolt database file used to persist session
+	// metadata and PTY output chunks across daemon restarts. An empty string
+	// disables persistence.
+	DBPath string `yaml:"db_path"`
+	// ChunkStorageBytes is the soft upper bound on total chunk bytes stored per
+	// session in the database. 0 means unlimited (the default). Enforcement is
+	// planned for a future release; this field is reserved for configuration
+	// compatibility.
+	ChunkStorageBytes int `yaml:"chunk_storage_bytes"`
 }
 
 type LoggingConfig struct {
