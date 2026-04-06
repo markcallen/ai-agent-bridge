@@ -1,7 +1,9 @@
 package bridge
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -61,7 +63,9 @@ type managedSession struct {
 	info         SessionInfo
 	provider     Provider
 	cmd          *exec.Cmd
-	ptmx         *os.File
+	ptmx         *os.File       // non-nil for PTY-backed sessions
+	stdin        io.WriteCloser // non-nil for stream-JSON sessions
+	streamJSON   bool           // true when provider uses stream-JSON mode
 	buf          *ByteBuffer
 	cancel       context.CancelFunc
 	stopGrace    time.Duration
@@ -281,13 +285,11 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		cancel()
 		return nil, err
 	}
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
-		Cols: uint16(cfg.InitialCols),
-		Rows: uint16(cfg.InitialRows),
-	})
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("start pty session: %w", err)
+
+	// Detect whether the provider requests stream-JSON mode (no PTY).
+	useStreamJSON := false
+	if sjp, ok := provider.(StreamJSONProvider); ok && sjp.IsStreamJSON() {
+		useStreamJSON = true
 	}
 
 	now := nowUTC()
@@ -303,25 +305,64 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		},
 		provider:     provider,
 		cmd:          cmd,
-		ptmx:         ptmx,
+		streamJSON:   useStreamJSON,
 		buf:          NewByteBuffer(s.bufSize),
 		cancel:       cancel,
 		stopGrace:    provider.StopGrace(),
 		lastActivity: time.Now(),
 	}
 
-	s.mu.Lock()
-	if _, exists := s.sessions[cfg.SessionID]; exists {
+	if useStreamJSON {
+		stdinPipe, err := cmd.StdinPipe()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("get stdin pipe: %w", err)
+		}
+		stdoutPipe, err := cmd.StdoutPipe()
+		if err != nil {
+			cancel()
+			_ = stdinPipe.Close()
+			return nil, fmt.Errorf("get stdout pipe: %w", err)
+		}
+		if err := cmd.Start(); err != nil {
+			cancel()
+			_ = stdinPipe.Close()
+			return nil, fmt.Errorf("start stream-json session: %w", err)
+		}
+		ms.stdin = stdinPipe
+		s.mu.Lock()
+		if _, exists := s.sessions[cfg.SessionID]; exists {
+			s.mu.Unlock()
+			cancel()
+			_ = stdinPipe.Close()
+			return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
+		}
+		s.sessions[cfg.SessionID] = ms
 		s.mu.Unlock()
-		cancel()
-		_ = ptmx.Close()
-		return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
+		go s.readLoopStreamJSON(ms, stdoutPipe)
+		go s.waitLoop(ms)
+	} else {
+		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
+			Cols: uint16(cfg.InitialCols),
+			Rows: uint16(cfg.InitialRows),
+		})
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("start pty session: %w", err)
+		}
+		ms.ptmx = ptmx
+		s.mu.Lock()
+		if _, exists := s.sessions[cfg.SessionID]; exists {
+			s.mu.Unlock()
+			cancel()
+			_ = ptmx.Close()
+			return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
+		}
+		s.sessions[cfg.SessionID] = ms
+		s.mu.Unlock()
+		go s.readLoop(ms)
+		go s.waitLoop(ms)
 	}
-	s.sessions[cfg.SessionID] = ms
-	s.mu.Unlock()
-
-	go s.readLoop(ms)
-	go s.waitLoop(ms)
 
 	info := ms.snapshotInfo()
 	s.persistSession(info)
@@ -329,21 +370,12 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 }
 
 func (s *Supervisor) readLoop(ms *managedSession) {
+	defer s.closeLive(ms)
 	buf := make([]byte, 8192)
 	for {
 		n, err := ms.ptmx.Read(buf)
 		if n > 0 {
-			chunk := ms.buf.Append(buf[:n])
-			s.persistChunk(ms.info.SessionID, chunk)
-			ms.mu.Lock()
-			ms.info.OldestSeq = ms.buf.OldestSeq()
-			ms.info.LastSeq = ms.buf.LastSeq()
-			ms.lastActivity = time.Now()
-			live := ms.live
-			ms.mu.Unlock()
-			if live != nil {
-				live <- chunk
-			}
+			s.appendChunk(ms, buf[:n], ChunkTypeOutput)
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
@@ -355,6 +387,87 @@ func (s *Supervisor) readLoop(ms *managedSession) {
 			}
 			return
 		}
+	}
+}
+
+// claudeStreamEvent is the JSON shape emitted by `claude --output-format stream-json`.
+// Only the fields we inspect are declared; unknown fields are discarded.
+type claudeStreamEvent struct {
+	Type  string `json:"type"`
+	Delta *struct {
+		Type     string `json:"type"`
+		Text     string `json:"text,omitempty"`
+		Thinking string `json:"thinking,omitempty"`
+	} `json:"delta,omitempty"`
+}
+
+// readLoopStreamJSON reads newline-delimited JSON from a stream-JSON provider's
+// stdout, parses thinking and text deltas, and appends typed OutputChunks.
+func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
+	defer func() { _ = r.Close() }()
+	defer s.closeLive(ms)
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var ev claudeStreamEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			// Non-JSON line (e.g. a log or warning): emit as raw output.
+			s.appendChunk(ms, line, ChunkTypeOutput)
+			continue
+		}
+		if ev.Type == "content_block_delta" && ev.Delta != nil {
+			switch ev.Delta.Type {
+			case "thinking_delta":
+				if ev.Delta.Thinking != "" {
+					s.appendChunk(ms, []byte(ev.Delta.Thinking), ChunkTypeThinking)
+				}
+			case "text_delta":
+				if ev.Delta.Text != "" {
+					s.appendChunk(ms, []byte(ev.Delta.Text), ChunkTypeOutput)
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
+		ms.mu.Lock()
+		if ms.info.Error == "" && !ms.info.ExitRecorded {
+			ms.info.Error = err.Error()
+		}
+		ms.mu.Unlock()
+	}
+}
+
+// closeLive closes the managed session's live channel exactly once. It
+// acquires ms.mu, reads and nils ms.live, then closes the old reference
+// outside the lock. This must only be called from readLoop or
+// readLoopStreamJSON — i.e. after all sends to the channel are complete.
+func (s *Supervisor) closeLive(ms *managedSession) {
+	ms.mu.Lock()
+	live := ms.live
+	ms.live = nil
+	ms.mu.Unlock()
+	if live != nil {
+		close(live)
+	}
+}
+
+// appendChunk adds a new chunk with the given type to the session buffer and
+// notifies any attached live client.
+func (s *Supervisor) appendChunk(ms *managedSession, payload []byte, ctype ChunkType) {
+	chunk := ms.buf.AppendTyped(payload, ctype)
+	s.persistChunk(ms.info.SessionID, chunk)
+	ms.mu.Lock()
+	ms.info.OldestSeq = ms.buf.OldestSeq()
+	ms.info.LastSeq = ms.buf.LastSeq()
+	ms.lastActivity = time.Now()
+	live := ms.live
+	ms.mu.Unlock()
+	if live != nil {
+		live <- chunk
 	}
 }
 
@@ -406,7 +519,13 @@ func (s *Supervisor) Stop(sessionID string, force bool) error {
 	ms.forceStop = force
 	pid := ms.cmd.Process.Pid
 	grace := ms.stopGrace
+	stdin := ms.stdin
 	ms.mu.Unlock()
+
+	// Closing stdin signals EOF to stream-JSON providers that read from stdin.
+	if stdin != nil {
+		_ = stdin.Close()
+	}
 
 	if force {
 		if pid > 0 {
@@ -451,12 +570,16 @@ func (s *Supervisor) WriteInput(sessionID, clientID string, data []byte) (int, e
 		return 0, ErrClientMismatch
 	}
 	ms.lastActivity = time.Now()
+	streamJSON := ms.streamJSON
+	stdin := ms.stdin
+	ptmx := ms.ptmx
 	ms.mu.Unlock()
-	n, err := ms.ptmx.Write(data)
-	if err != nil {
+	if streamJSON {
+		n, err := stdin.Write(data)
 		return n, err
 	}
-	return n, nil
+	n, err := ptmx.Write(data)
+	return n, err
 }
 
 func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error {
@@ -478,8 +601,13 @@ func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error
 	ms.info.Cols = cols
 	ms.info.Rows = rows
 	ms.lastActivity = time.Now()
+	streamJSON := ms.streamJSON
+	ptmx := ms.ptmx
 	ms.mu.Unlock()
-	return pty.Setsize(ms.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	if streamJSON {
+		return nil // no PTY to resize for stream-JSON sessions
+	}
+	return pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 }
 
 func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*AttachState, error) {

@@ -61,9 +61,28 @@ type SessionInfo struct {
 	Rows             uint32
 }
 
-// OutputChunk is one retained PTY byte chunk.
+// ChunkType classifies an OutputChunk's content.
+type ChunkType uint8
+
+const (
+	// ChunkTypeOutput is raw terminal/text output (default, zero value).
+	ChunkTypeOutput ChunkType = 0
+	// ChunkTypeThinking carries a thinking block from a stream-JSON provider.
+	ChunkTypeThinking ChunkType = 1
+)
+
+// OutputChunk is one retained output chunk from an agent session.
 type OutputChunk struct {
 	Seq       uint64
 	Timestamp time.Time
 	Payload   []byte
+	Type      ChunkType // defaults to ChunkTypeOutput
+}
+
+// StreamJSONProvider is implemented by providers that emit structured JSONL
+// (e.g. claude --output-format stream-json) instead of raw PTY bytes.
+// These providers run without a PTY and have their stdout parsed for typed
+// events (text, thinking).
+type StreamJSONProvider interface {
+	IsStreamJSON() bool
 }

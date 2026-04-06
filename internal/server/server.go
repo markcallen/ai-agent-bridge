@@ -432,7 +432,7 @@ func mapState(s bridge.SessionState) bridgev1.SessionStatus {
 }
 
 func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *bridgev1.AttachSessionEvent {
-	return &bridgev1.AttachSessionEvent{
+	ev := &bridgev1.AttachSessionEvent{
 		Type:      bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT,
 		Seq:       chunk.Seq,
 		Timestamp: timestamppb.New(chunk.Timestamp),
@@ -440,4 +440,10 @@ func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *brid
 		Payload:   chunk.Payload,
 		Replay:    replay,
 	}
+	if chunk.Type == bridge.ChunkTypeThinking {
+		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_THINKING
+		ev.ThinkingText = string(chunk.Payload)
+		ev.Payload = nil
+	}
+	return ev
 }

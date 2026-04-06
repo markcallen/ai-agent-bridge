@@ -26,6 +26,7 @@ type StdioConfig struct {
 	StartupProbe   string
 	PromptPattern  string
 	RequiredEnv    []string
+	StreamJSON     bool // if true, the provider uses stream-JSON mode (no PTY)
 }
 
 // StdioProvider defines how to launch and validate one interactive CLI.
@@ -56,6 +57,11 @@ func (p *StdioProvider) Binary() string                { return p.cfg.Binary }
 func (p *StdioProvider) PromptPattern() *regexp.Regexp { return p.promptRe }
 func (p *StdioProvider) StartupTimeout() time.Duration { return p.cfg.StartupTimeout }
 func (p *StdioProvider) StopGrace() time.Duration      { return p.cfg.StopGrace }
+
+// IsStreamJSON implements bridge.StreamJSONProvider. It returns true when the
+// provider is configured with StreamJSON: true (i.e. it emits JSONL on stdout
+// instead of raw PTY bytes).
+func (p *StdioProvider) IsStreamJSON() bool { return p.cfg.StreamJSON }
 
 func (p *StdioProvider) BuildCommand(ctx context.Context, cfg bridge.SessionConfig) (*exec.Cmd, error) {
 	binPath, err := resolveBinaryPath(p.cfg.Binary)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"regexp"
 	"testing"
@@ -374,6 +375,183 @@ func TestSupervisorHistoryChunkReplay(t *testing.T) {
 		}
 	default:
 		t.Error("live channel should be immediately readable (closed)")
+	}
+}
+
+// streamJSONTestProvider wraps testProvider and implements StreamJSONProvider.
+// BuildCommand runs a shell one-liner that prints a fixed JSONL payload and exits.
+type streamJSONTestProvider struct {
+	testProvider
+	jsonLines []string
+}
+
+func (p *streamJSONTestProvider) IsStreamJSON() bool { return true }
+
+func (p *streamJSONTestProvider) BuildCommand(ctx context.Context, cfg SessionConfig) (*exec.Cmd, error) {
+	// Construct a printf call that emits each line.
+	args := make([]string, 0, len(p.jsonLines)*2+2)
+	args = append(args, "-c")
+	script := ""
+	for _, line := range p.jsonLines {
+		script += "printf '%s\\n' '" + line + "';"
+	}
+	args = append(args, script)
+	cmd := exec.CommandContext(ctx, "/bin/sh", args...)
+	cmd.Dir = cfg.RepoPath
+	return cmd, nil
+}
+
+func TestReadLoopStreamJSONParsing(t *testing.T) {
+	sup := NewSupervisor(NewRegistry(), DefaultPolicy(), 64*1024, time.Minute)
+	defer sup.Close()
+
+	ms := &managedSession{
+		buf:  NewByteBuffer(64 * 1024),
+		live: make(chan OutputChunk, 100),
+		info: SessionInfo{SessionID: "test-stream"},
+	}
+
+	lines := []string{
+		`{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello world"}}`,
+		`{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"deep thought"}}`,
+		`not json at all`,
+		`{"type":"other_event"}`,
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		for _, line := range lines {
+			_, _ = pw.Write([]byte(line + "\n"))
+		}
+		_ = pw.Close()
+	}()
+
+	// readLoopStreamJSON blocks until EOF; closeLive closes ms.live on return.
+	sup.readLoopStreamJSON(ms, pr)
+
+	chunks := ms.buf.After(0)
+	if len(chunks) == 0 {
+		t.Fatal("expected chunks in buffer, got none")
+	}
+
+	var textChunks, thinkingChunks, rawChunks []OutputChunk
+	for _, c := range chunks {
+		switch c.Type {
+		case ChunkTypeOutput:
+			textChunks = append(textChunks, c)
+		case ChunkTypeThinking:
+			thinkingChunks = append(thinkingChunks, c)
+		}
+		rawChunks = append(rawChunks, c)
+	}
+
+	// text_delta → ChunkTypeOutput
+	if len(textChunks) == 0 {
+		t.Error("expected at least one ChunkTypeOutput chunk")
+	}
+	var foundText bool
+	for _, c := range textChunks {
+		if bytes.Contains(c.Payload, []byte("hello world")) {
+			foundText = true
+		}
+	}
+	if !foundText {
+		t.Errorf("expected 'hello world' in ChunkTypeOutput chunks, got %v", textChunks)
+	}
+
+	// thinking_delta → ChunkTypeThinking
+	if len(thinkingChunks) == 0 {
+		t.Error("expected at least one ChunkTypeThinking chunk")
+	}
+	var foundThinking bool
+	for _, c := range thinkingChunks {
+		if bytes.Contains(c.Payload, []byte("deep thought")) {
+			foundThinking = true
+		}
+	}
+	if !foundThinking {
+		t.Errorf("expected 'deep thought' in ChunkTypeThinking chunks, got %v", thinkingChunks)
+	}
+
+	// Non-JSON line → raw ChunkTypeOutput chunk
+	var foundRaw bool
+	for _, c := range rawChunks {
+		if bytes.Contains(c.Payload, []byte("not json")) {
+			foundRaw = true
+		}
+	}
+	if !foundRaw {
+		t.Error("expected non-JSON line to be emitted as raw ChunkTypeOutput chunk")
+	}
+}
+
+func TestStreamJSONSessionLifecycle(t *testing.T) {
+	jsonLines := []string{
+		`{"type":"content_block_delta","delta":{"type":"text_delta","text":"answer"}}`,
+		`{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"thinking"}}`,
+	}
+	p := &streamJSONTestProvider{
+		testProvider: testProvider{id: "stream-fake"},
+		jsonLines:    jsonLines,
+	}
+	registry := NewRegistry()
+	if err := registry.Register(p); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	sup := NewSupervisor(registry, DefaultPolicy(), 64*1024, time.Minute)
+	defer sup.Close()
+
+	repo := t.TempDir()
+	info, err := sup.Start(context.Background(), SessionConfig{
+		ProjectID: "proj-stream",
+		SessionID: "stream-1",
+		RepoPath:  repo,
+		Options:   map[string]string{"provider": "stream-fake"},
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if info.Provider != "stream-fake" {
+		t.Fatalf("Provider=%q want stream-fake", info.Provider)
+	}
+
+	// Attach and wait for at least one chunk from the process output.
+	state, err := sup.Attach("stream-1", "client-x", 0)
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+
+	// Drain until the live channel closes (process exits).
+	var collected []OutputChunk
+	timeout := time.After(5 * time.Second)
+drainLoop:
+	for {
+		select {
+		case c, ok := <-state.Live:
+			if !ok {
+				break drainLoop
+			}
+			collected = append(collected, c)
+		case <-timeout:
+			t.Fatal("timed out waiting for stream-JSON session to complete")
+		}
+	}
+
+	// Check for text and thinking chunks.
+	var sawText, sawThinking bool
+	for _, c := range collected {
+		if c.Type == ChunkTypeOutput && bytes.Contains(c.Payload, []byte("answer")) {
+			sawText = true
+		}
+		if c.Type == ChunkTypeThinking && bytes.Contains(c.Payload, []byte("thinking")) {
+			sawThinking = true
+		}
+	}
+	if !sawText {
+		t.Errorf("expected text chunk with 'answer', got %d chunks", len(collected))
+	}
+	if !sawThinking {
+		t.Errorf("expected thinking chunk with 'thinking', got %d chunks", len(collected))
 	}
 }
 

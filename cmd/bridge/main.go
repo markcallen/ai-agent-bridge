@@ -59,6 +59,7 @@ func main() {
 			StartupProbe:   pcfg.StartupProbe,
 			PromptPattern:  pcfg.PromptPattern,
 			RequiredEnv:    pcfg.RequiredEnv,
+			StreamJSON:     pcfg.StreamJSON,
 		})
 		if err := registry.Register(p); err != nil {
 			logger.Error("register provider", "provider", name, "error", err)

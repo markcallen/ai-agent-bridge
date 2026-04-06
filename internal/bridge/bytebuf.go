@@ -25,6 +25,11 @@ func NewByteBuffer(capacity int) *ByteBuffer {
 }
 
 func (b *ByteBuffer) Append(payload []byte) OutputChunk {
+	return b.AppendTyped(payload, ChunkTypeOutput)
+}
+
+// AppendTyped adds a payload with an explicit ChunkType to the buffer.
+func (b *ByteBuffer) AppendTyped(payload []byte, ctype ChunkType) OutputChunk {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -33,6 +38,7 @@ func (b *ByteBuffer) Append(payload []byte) OutputChunk {
 		Seq:       b.nextSeq,
 		Timestamp: nowUTC(),
 		Payload:   copied,
+		Type:      ctype,
 	}
 	b.nextSeq++
 	b.chunks = append(b.chunks, chunk)
@@ -57,6 +63,7 @@ func (b *ByteBuffer) After(afterSeq uint64) []OutputChunk {
 			Seq:       chunk.Seq,
 			Timestamp: chunk.Timestamp,
 			Payload:   append([]byte(nil), chunk.Payload...),
+			Type:      chunk.Type,
 		})
 	}
 	return out
