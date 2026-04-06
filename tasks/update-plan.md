@@ -75,7 +75,7 @@ Issues referenced in original plan were #1, #4, #8. Current open issues after re
 
 | Issue | Title | Status | Action |
 |-------|-------|--------|--------|
-| **#1** | Stream agent thinking blocks to SDK | Open — unimplemented | Keep open. Acceptance criteria well-defined in issue. Add `EVENT_TYPE_THINKING` proto enum + parser extension to `claude-chat` stream-json provider. Prerequisite: `make proto` regeneration. |
+| **#1** | Stream agent thinking blocks to SDK | ✅ COMPLETE | `ATTACH_EVENT_TYPE_THINKING=6` in proto; `claude-chat` stream-JSON provider; `readLoopStreamJSON`; `closeLive`; `ByteBuffer.After` type fix. |
 | **#2** | Migrate e2e tests to testify/suite | Open — unimplemented | Keep open. Migration steps clearly defined in issue. Not a blocker for persistence work. |
 | **#4** | `mode: exec` hardcoded to `CodexExecProvider` | Open bug | Keep open. Fix: validate that `mode: exec` is only permitted for `codex` provider at startup and return a config error otherwise. Low risk today but fragile as more exec-style providers are added. |
 | **#6** | Session state lost on server restart | Open enhancement | **Primary persistence issue.** Phase 1–3 above maps directly to the short/medium/long-term proposals in this issue. |
@@ -105,6 +105,4 @@ Issues referenced in original plan were #1, #4, #8. Current open issues after re
 
 ## Remaining Open Work
 - **Issue #6 Phase 3** (long-term): process orphan reattach, PID scanning on restart — deferred
-- **Issue #1**: `EVENT_TYPE_THINKING` proto enum + stream-json provider parser for Claude thinking blocks — significant scope (new provider mode + proto change + `make proto` regen)
-- **Issue #2**: Migrate e2e CLI binaries to testify/suite — medium refactor, not a blocker
 - **Issue #8**: Model fallback handling — large scope, deferred
