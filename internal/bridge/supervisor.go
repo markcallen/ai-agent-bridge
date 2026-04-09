@@ -71,6 +71,7 @@ type managedSession struct {
 	stopGrace    time.Duration
 	lastActivity time.Time
 	forceStop    bool
+	recovered    bool
 
 	attachedClient string
 	live           chan OutputChunk
@@ -116,6 +117,9 @@ func (s *Supervisor) LoadHistory() error {
 	defer s.histMu.Unlock()
 	for _, info := range infos {
 		if info.State != SessionStateStopped && info.State != SessionStateFailed {
+			if s.recoverProcess(&info) {
+				continue
+			}
 			info.State = SessionStateFailed
 			if info.Error == "" {
 				info.Error = "orphaned by daemon restart"
@@ -131,6 +135,84 @@ func (s *Supervisor) LoadHistory() error {
 		s.history[info.SessionID] = info
 	}
 	return nil
+}
+
+func (s *Supervisor) recoverProcess(info *SessionInfo) bool {
+	if info.ProcessID <= 0 || !processAlive(info.ProcessID) {
+		return false
+	}
+
+	ms := &managedSession{
+		info: SessionInfo{
+			SessionID:    info.SessionID,
+			ProjectID:    info.ProjectID,
+			Provider:     info.Provider,
+			State:        SessionStateRunning,
+			ProcessID:    info.ProcessID,
+			CreatedAt:    info.CreatedAt,
+			Error:        "recovered after daemon restart; live attach/input unavailable",
+			Recovered:    true,
+			ExitRecorded: info.ExitRecorded,
+			ExitCode:     info.ExitCode,
+			Cols:         info.Cols,
+			Rows:         info.Rows,
+		},
+		buf:          NewByteBuffer(s.bufSize),
+		stopGrace:    500 * time.Millisecond,
+		lastActivity: time.Now(),
+		recovered:    true,
+	}
+
+	if chunks, err := s.store.LoadChunks(info.SessionID); err == nil {
+		for _, chunk := range chunks {
+			ms.buf.AppendTyped(chunk.Payload, chunk.Type)
+		}
+	} else {
+		slog.Warn("session store: failed to load chunks for recovered session", "session_id", info.SessionID, "error", err)
+	}
+	ms.info.OldestSeq = ms.buf.OldestSeq()
+	ms.info.LastSeq = ms.buf.LastSeq()
+
+	s.mu.Lock()
+	s.sessions[info.SessionID] = ms
+	s.mu.Unlock()
+	s.persistSession(ms.snapshotInfo())
+	go s.monitorRecoveredProcess(ms)
+	return true
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func (s *Supervisor) monitorRecoveredProcess(ms *managedSession) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		ms.mu.Lock()
+		pid := ms.info.ProcessID
+		state := ms.info.State
+		ms.mu.Unlock()
+		if state == SessionStateStopped || state == SessionStateFailed {
+			return
+		}
+		if processAlive(pid) {
+			continue
+		}
+		ms.mu.Lock()
+		if ms.info.State != SessionStateStopped && ms.info.State != SessionStateFailed {
+			ms.info.State = SessionStateStopped
+			ms.info.StoppedAt = nowUTC()
+			ms.info.ProcessID = 0
+		}
+		ms.mu.Unlock()
+		s.persistSession(ms.snapshotInfo())
+		return
+	}
 }
 
 // persistSession writes info to the store if one is configured. Errors are
@@ -229,6 +311,33 @@ func (s *Supervisor) cleanupLoop() {
 	}
 }
 
+// resolveProvider tries the primary provider ID, then each fallback in order,
+// returning the first one that is registered and passes its Health check. If
+// no candidate succeeds, the last error is returned.
+func (s *Supervisor) resolveProvider(ctx context.Context, primary string, fallbacks []string) (Provider, error) {
+	candidates := make([]string, 0, 1+len(fallbacks))
+	candidates = append(candidates, primary)
+	candidates = append(candidates, fallbacks...)
+	var lastErr error
+	for _, id := range candidates {
+		p, err := s.registry.Get(id)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := p.Health(ctx); err != nil {
+			lastErr = fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
+			slog.Warn("provider unavailable, trying fallback", "provider", id, "error", err)
+			continue
+		}
+		if id != primary {
+			slog.Info("using fallback provider", "requested", primary, "selected", id)
+		}
+		return p, nil
+	}
+	return nil, lastErr
+}
+
 func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo, error) {
 	if cfg.SessionID == "" {
 		return nil, fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
@@ -264,12 +373,9 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	}
 	s.mu.Unlock()
 
-	provider, err := s.registry.Get(cfg.Options["provider"])
+	provider, err := s.resolveProvider(ctx, cfg.Options["provider"], cfg.Fallbacks)
 	if err != nil {
 		return nil, err
-	}
-	if err := provider.Health(ctx); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
 
 	if cfg.InitialCols == 0 {
@@ -330,6 +436,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 			return nil, fmt.Errorf("start stream-json session: %w", err)
 		}
 		ms.stdin = stdinPipe
+		ms.info.ProcessID = cmd.Process.Pid
 		s.mu.Lock()
 		if _, exists := s.sessions[cfg.SessionID]; exists {
 			s.mu.Unlock()
@@ -351,6 +458,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 			return nil, fmt.Errorf("start pty session: %w", err)
 		}
 		ms.ptmx = ptmx
+		ms.info.ProcessID = cmd.Process.Pid
 		s.mu.Lock()
 		if _, exists := s.sessions[cfg.SessionID]; exists {
 			s.mu.Unlock()
@@ -488,6 +596,7 @@ func (s *Supervisor) waitLoop(ms *managedSession) {
 	ms.info.StoppedAt = nowUTC()
 	ms.info.ExitRecorded = true
 	ms.info.ExitCode = exitCode
+	ms.info.ProcessID = 0
 	if err != nil && !ms.forceStop {
 		ms.info.State = SessionStateFailed
 		if ms.info.Error == "" {
@@ -513,6 +622,47 @@ func (s *Supervisor) Stop(sessionID string, force bool) error {
 	ms.mu.Lock()
 	if ms.info.State == SessionStateStopped || ms.info.State == SessionStateFailed {
 		ms.mu.Unlock()
+		return nil
+	}
+	if ms.recovered {
+		ms.info.State = SessionStateStopping
+		ms.forceStop = force
+		pid := ms.info.ProcessID
+		grace := ms.stopGrace
+		ms.mu.Unlock()
+
+		if force {
+			if pid > 0 {
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+			}
+		} else if pid > 0 {
+			_ = syscall.Kill(-pid, syscall.SIGTERM)
+		}
+
+		go func() {
+			deadline := time.Now().Add(grace)
+			for time.Now().Before(deadline) {
+				if !processAlive(pid) {
+					ms.mu.Lock()
+					ms.info.State = SessionStateStopped
+					ms.info.StoppedAt = nowUTC()
+					ms.info.ProcessID = 0
+					ms.mu.Unlock()
+					s.persistSession(ms.snapshotInfo())
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			if !force && pid > 0 && processAlive(pid) {
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+			}
+			ms.mu.Lock()
+			ms.info.State = SessionStateStopped
+			ms.info.StoppedAt = nowUTC()
+			ms.info.ProcessID = 0
+			ms.mu.Unlock()
+			s.persistSession(ms.snapshotInfo())
+		}()
 		return nil
 	}
 	ms.info.State = SessionStateStopping
@@ -561,6 +711,10 @@ func (s *Supervisor) WriteInput(sessionID, clientID string, data []byte) (int, e
 		return 0, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	ms.mu.Lock()
+	if ms.recovered {
+		ms.mu.Unlock()
+		return 0, ErrSessionRecoveryUnavailable
+	}
 	if ms.attachedClient == "" {
 		ms.mu.Unlock()
 		return 0, ErrClientNotAttached
@@ -568,6 +722,10 @@ func (s *Supervisor) WriteInput(sessionID, clientID string, data []byte) (int, e
 	if ms.attachedClient != clientID {
 		ms.mu.Unlock()
 		return 0, ErrClientMismatch
+	}
+	if ms.recovered {
+		ms.mu.Unlock()
+		return 0, ErrSessionRecoveryUnavailable
 	}
 	ms.lastActivity = time.Now()
 	streamJSON := ms.streamJSON
@@ -590,6 +748,10 @@ func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error
 		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	ms.mu.Lock()
+	if ms.recovered {
+		ms.mu.Unlock()
+		return ErrSessionRecoveryUnavailable
+	}
 	if ms.attachedClient == "" {
 		ms.mu.Unlock()
 		return ErrClientNotAttached
@@ -597,6 +759,10 @@ func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error
 	if ms.attachedClient != clientID {
 		ms.mu.Unlock()
 		return ErrClientMismatch
+	}
+	if ms.recovered {
+		ms.mu.Unlock()
+		return ErrSessionRecoveryUnavailable
 	}
 	ms.info.Cols = cols
 	ms.info.Rows = rows
@@ -625,6 +791,24 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*Attac
 
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	if ms.recovered {
+		oldest := ms.buf.OldestSeq()
+		last := ms.buf.LastSeq()
+		closed := make(chan OutputChunk)
+		close(closed)
+		return &AttachState{
+			ClientID:     clientID,
+			Replay:       ms.buf.After(afterSeq),
+			Live:         closed,
+			ReplayGap:    oldest > 0 && afterSeq > 0 && afterSeq < oldest-1,
+			OldestSeq:    oldest,
+			LastSeq:      last,
+			ExitRecorded: ms.info.ExitRecorded,
+			ExitCode:     ms.info.ExitCode,
+			Cols:         ms.info.Cols,
+			Rows:         ms.info.Rows,
+		}, nil
+	}
 	if ms.attachedClient != "" {
 		return nil, ErrSessionAlreadyAttached
 	}
@@ -667,6 +851,9 @@ func (s *Supervisor) Detach(sessionID, clientID string) error {
 	}
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	if ms.recovered {
+		return nil
+	}
 	if ms.attachedClient != clientID {
 		return ErrClientMismatch
 	}

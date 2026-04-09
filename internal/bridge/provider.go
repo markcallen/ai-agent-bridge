@@ -22,10 +22,14 @@ type Provider interface {
 
 // SessionConfig holds configuration for starting a new provider session.
 type SessionConfig struct {
-	ProjectID   string
-	SessionID   string
-	RepoPath    string
-	Options     map[string]string
+	ProjectID string
+	SessionID string
+	RepoPath  string
+	Options   map[string]string
+	// Fallbacks is an ordered list of provider IDs to try if the primary
+	// provider (Options["provider"]) is unavailable. At most 2 entries are
+	// meaningful; extras are silently ignored.
+	Fallbacks   []string
 	InitialCols uint32
 	InitialRows uint32
 }
@@ -48,11 +52,13 @@ type SessionInfo struct {
 	ProjectID        string
 	Provider         string
 	State            SessionState
+	ProcessID        int
 	CreatedAt        time.Time
 	StoppedAt        time.Time
 	Error            string
 	Attached         bool
 	AttachedClientID string
+	Recovered        bool
 	ExitRecorded     bool
 	ExitCode         int
 	OldestSeq        uint64

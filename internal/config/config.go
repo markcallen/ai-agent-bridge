@@ -14,6 +14,7 @@ type Config struct {
 	Server       ServerConfig              `yaml:"server"`
 	TLS          TLSConfig                 `yaml:"tls"`
 	Auth         AuthConfig                `yaml:"auth"`
+	FeatureFlags FeatureFlagsConfig        `yaml:"feature_flags"`
 	Sessions     SessionsConfig            `yaml:"sessions"`
 	Input        InputConfig               `yaml:"input"`
 	RateLimits   RateLimitsConfig          `yaml:"rate_limits"`
@@ -37,6 +38,10 @@ type AuthConfig struct {
 	JWTPublicKeys []JWTKeyConfig `yaml:"jwt_public_keys"`
 	JWTAudience   string         `yaml:"jwt_audience"`
 	JWTMaxTTL     string         `yaml:"jwt_max_ttl"`
+}
+
+type FeatureFlagsConfig struct {
+	ProviderFallbacks bool `yaml:"provider_fallbacks"`
 }
 
 type JWTKeyConfig struct {
@@ -81,6 +86,9 @@ type ProviderConfig struct {
 	// matches the first time, AGENT_READY is emitted; on subsequent matches
 	// after output, RESPONSE_COMPLETE is emitted.
 	PromptPattern string `yaml:"prompt_pattern"`
+	// Fallbacks is an ordered list of provider IDs to try when this provider
+	// is unavailable at session start time. At most 2 entries are allowed.
+	Fallbacks []string `yaml:"fallbacks"`
 }
 
 func (p ProviderConfig) ShouldValidateStartup() bool {
@@ -255,6 +263,17 @@ func validate(cfg *Config) error {
 		for i, envName := range provider.RequiredEnv {
 			if strings.TrimSpace(envName) == "" {
 				return fmt.Errorf("config: providers.%s.required_env[%d] must not be empty", name, i)
+			}
+		}
+		if len(provider.Fallbacks) > 2 {
+			return fmt.Errorf("config: providers.%s.fallbacks must have at most 2 entries", name)
+		}
+		for i, fb := range provider.Fallbacks {
+			if fb == name {
+				return fmt.Errorf("config: providers.%s.fallbacks[%d]: provider cannot be its own fallback", name, i)
+			}
+			if _, ok := cfg.Providers[fb]; !ok {
+				return fmt.Errorf("config: providers.%s.fallbacks[%d]: unknown provider %q", name, i, fb)
 			}
 		}
 	}

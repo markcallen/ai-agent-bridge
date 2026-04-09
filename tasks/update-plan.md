@@ -63,11 +63,12 @@ Current state: all session data lives in `map[string]*managedSession` in `intern
 - [x] Tests: 3 new chunk store tests + 1 supervisor history-replay test.
 - Deferred: active per-session chunk retention enforcement (planned for a follow-on).
 
-**Phase 3 — Restart detection and agent reattach (long term)**
-- On daemon startup, scan for orphaned child PIDs from the previous run (via PID file or `/proc` inspection).
-- If an agent process is still alive, re-open its PTY or pipe and resume buffering.
-- Reconnect semantics: client reconnects → `GetSession` returns `RUNNING` with updated `server_instance_id` → client resumes attach from stored cursor.
-- Key files: `cmd/bridge/main.go`, `internal/bridge/supervisor.go`, `internal/provider/`.
+**Phase 3 — Restart detection and surviving-process recovery** ✅ COMPLETE
+- [x] On daemon startup, scan persisted non-terminal sessions for surviving child PIDs via `kill(pid, 0)` / `/proc`-visible process existence.
+- [x] If an agent PID is still alive, recover the session into the live supervisor map as `RUNNING` instead of immediately marking it failed.
+- [x] Reconnect semantics: client reconnects after restart → `GetSession` returns `RUNNING` with updated `server_instance_id`; `AttachSession` replays persisted chunks and closes; `StopSession` still signals the recovered PID.
+- [x] Tests: recovered-session supervisor test covering `Get`, replay-only `Attach`, `WriteInput` unavailable, and `Stop` after restart.
+- Limitation: the current PTY model does **not** re-open the original live master FD after daemon restart, so post-restart attach is replay-only rather than a fully live reattach.
 
 ### 3. Open issue alignment
 
@@ -79,7 +80,7 @@ Issues referenced in original plan were #1, #4, #8. Current open issues after re
 | **#2** | Migrate e2e tests to testify/suite | Open — unimplemented | Keep open. Migration steps clearly defined in issue. Not a blocker for persistence work. |
 | **#4** | `mode: exec` hardcoded to `CodexExecProvider` | Open bug | Keep open. Fix: validate that `mode: exec` is only permitted for `codex` provider at startup and return a config error otherwise. Low risk today but fragile as more exec-style providers are added. |
 | **#6** | Session state lost on server restart | Open enhancement | **Primary persistence issue.** Phase 1–3 above maps directly to the short/medium/long-term proposals in this issue. |
-| **#8** | Model fallback handling | Open enhancement | Keep open. Large scope (fallback config, scheduled version-check automation, expanded smoke tests). Not a blocker for docs or persistence work. Implement after Phase 1 of persistence. |
+| **#8** | Model fallback handling | ✅ COMPLETE | Startup fallback is implemented with config validation, a rollout flag (`feature_flags.provider_fallbacks`), scheduled provider-version automation (`provider-version-check.yml`), and smoke coverage that verifies fallback selection in Docker. |
 
 **Correction from original plan**: The original checklist referenced issues #1, #4, #8. Issue #6 (not #8) is the session persistence issue. Issue #8 is the model fallback feature. Both are in scope but #6 is the persistence priority.
 
@@ -101,8 +102,9 @@ Issues referenced in original plan were #1, #4, #8. Current open issues after re
 - Issue #4 (mode field): ✅ config validation rejects non-empty mode at startup
 - Issue #6 Phase 1 (server UUID + bbolt metadata): ✅ server_instance_id in HealthResponse; bbolt SessionStore with LoadHistory and orphan detection
 - Issue #6 Phase 2 (durable PTY chunks): ✅ SaveChunk/LoadChunks; Attach() serves history sessions read-only from persisted chunks
+- Issue #6 Phase 3 (surviving process recovery): ✅ persisted PID scanning restores still-alive sessions as `RUNNING`, preserves replay, and keeps `StopSession` working after restart
+- Issue #8: ✅ config-driven provider fallbacks with rollout flag, scheduled version report workflow, and smoke verification of fallback selection
 - Evidence: `tasks/update-plan.md`, commits on `docs-and-persistence-phase1` branch.
 
 ## Remaining Open Work
-- **Issue #6 Phase 3** (long-term): process orphan reattach, PID scanning on restart — deferred
-- **Issue #8**: Model fallback handling — large scope, deferred
+- None in this plan entry. Future improvements can make recovered sessions fully live-reattachable instead of replay-only, but that exceeds the scope captured here.

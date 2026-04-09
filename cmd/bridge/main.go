@@ -196,6 +196,20 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(grpcOpts...)
+	// Build per-provider fallback map from config.
+	providerFallbacks := map[string][]string{}
+	if cfg.FeatureFlags.ProviderFallbacks {
+		providerFallbacks = make(map[string][]string, len(cfg.Providers))
+		for name, pcfg := range cfg.Providers {
+			if len(pcfg.Fallbacks) > 0 {
+				providerFallbacks[name] = pcfg.Fallbacks
+			}
+		}
+		logger.Info("provider fallbacks enabled", "providers", len(providerFallbacks))
+	} else {
+		logger.Info("provider fallbacks disabled")
+	}
+
 	bridgeServer := server.New(sup, registry, logger, server.RateLimitConfig{
 		GlobalRPS:                  cfg.RateLimits.GlobalRPS,
 		GlobalBurst:                cfg.RateLimits.GlobalBurst,
@@ -203,7 +217,7 @@ func main() {
 		StartSessionPerClientBurst: cfg.RateLimits.StartSessionPerClientBurst,
 		SendInputPerSessionRPS:     cfg.RateLimits.SendInputPerSessionRPS,
 		SendInputPerSessionBurst:   cfg.RateLimits.SendInputPerSessionBurst,
-	}, serverInstanceID)
+	}, serverInstanceID, providerFallbacks)
 	bridgev1.RegisterBridgeServiceServer(grpcServer, bridgeServer)
 
 	ln, err := net.Listen("tcp", cfg.Server.Listen)

@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
+	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
 
@@ -49,12 +51,35 @@ func main() {
 		health, healthErr := client.Health(ctx)
 		if healthErr == nil && health.GetStatus() == "serving" {
 			providers, providersErr := client.ListProviders(ctx)
-			cancel()
 			if providersErr != nil {
+				cancel()
 				fmt.Fprintf(os.Stderr, "SMOKE TEST FAILED: list providers: %v\n", providersErr)
 				os.Exit(1)
 			}
-			fmt.Printf("SMOKE TEST PASSED: status=%s providers=%d\n", health.GetStatus(), len(providers.GetProviders()))
+			sessionID := uuid.NewString()
+			startResp, startErr := client.StartSession(ctx, &bridgev1.StartSessionRequest{
+				ProjectId: "smoke",
+				SessionId: sessionID,
+				RepoPath:  "/repos",
+				Provider:  "primary",
+			})
+			if startErr != nil {
+				cancel()
+				fmt.Fprintf(os.Stderr, "SMOKE TEST FAILED: start session fallback: %v\n", startErr)
+				os.Exit(1)
+			}
+			session, getErr := client.GetSession(ctx, &bridgev1.GetSessionRequest{SessionId: sessionID})
+			cancel()
+			if getErr != nil {
+				fmt.Fprintf(os.Stderr, "SMOKE TEST FAILED: get fallback session: %v\n", getErr)
+				os.Exit(1)
+			}
+			if session.GetProvider() != "smoke" {
+				fmt.Fprintf(os.Stderr, "SMOKE TEST FAILED: provider=%s want smoke\n", session.GetProvider())
+				os.Exit(1)
+			}
+			fmt.Printf("SMOKE TEST PASSED: status=%s providers=%d fallback_provider=%s start_status=%s\n",
+				health.GetStatus(), len(providers.GetProviders()), session.GetProvider(), startResp.GetStatus().String())
 			return
 		}
 		cancel()

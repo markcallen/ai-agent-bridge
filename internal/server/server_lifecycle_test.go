@@ -66,7 +66,7 @@ func TestBridgeServerSessionLifecycle(t *testing.T) {
 		StartSessionPerClientBurst: 10,
 		SendInputPerSessionRPS:     10,
 		SendInputPerSessionBurst:   10,
-	}, "test-instance")
+	}, "test-instance", nil)
 
 	sessionID := uuid.NewString()
 	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "project-a"})
@@ -164,7 +164,7 @@ func TestBridgeServerValidationAndPermissions(t *testing.T) {
 	s := New(supervisor, registry, nil, RateLimitConfig{
 		GlobalRPS:   10,
 		GlobalBurst: 10,
-	}, "test-instance")
+	}, "test-instance", nil)
 	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "project-a"})
 
 	if _, err := s.ListSessions(ctx, &bridgev1.ListSessionsRequest{ProjectId: "project-b"}); status.Code(err) != codes.PermissionDenied {
@@ -178,6 +178,57 @@ func TestBridgeServerValidationAndPermissions(t *testing.T) {
 	}
 	if _, err := s.Health(context.Background(), &bridgev1.HealthRequest{}); err != nil {
 		t.Fatalf("Health: %v", err)
+	}
+}
+
+func TestBridgeServerStartSessionUsesConfiguredFallbacks(t *testing.T) {
+	registry := bridge.NewRegistry()
+	if err := registry.Register(&serverTestProvider{id: "primary", healthErr: context.DeadlineExceeded}); err != nil {
+		t.Fatalf("Register primary: %v", err)
+	}
+	if err := registry.Register(&serverTestProvider{id: "secondary", version: "1"}); err != nil {
+		t.Fatalf("Register secondary: %v", err)
+	}
+
+	supervisor := bridge.NewSupervisor(registry, bridge.DefaultPolicy(), 1024, time.Minute)
+	defer supervisor.Close()
+
+	s := New(supervisor, registry, nil, RateLimitConfig{
+		GlobalRPS:                  10,
+		GlobalBurst:                10,
+		StartSessionPerClientRPS:   10,
+		StartSessionPerClientBurst: 10,
+		SendInputPerSessionRPS:     10,
+		SendInputPerSessionBurst:   10,
+	}, "test-instance", map[string][]string{
+		"primary": {"secondary"},
+	})
+
+	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "project-a"})
+	sessionID := uuid.NewString()
+	resp, err := s.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId: "project-a",
+		SessionId: sessionID,
+		RepoPath:  t.TempDir(),
+		Provider:  "primary",
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if resp.GetSessionId() != sessionID {
+		t.Fatalf("StartSession resp=%+v", resp)
+	}
+
+	info, err := supervisor.Get(sessionID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if info.Provider != "secondary" {
+		t.Fatalf("Provider=%q want secondary", info.Provider)
+	}
+
+	if err := supervisor.Stop(sessionID, true); err != nil {
+		t.Fatalf("Stop: %v", err)
 	}
 }
 

@@ -88,6 +88,7 @@ make smoke
 ```
 
 This validates the repo Dockerfile and Compose stack by starting the bridge in Docker and running an authenticated gRPC health check.
+It also verifies config-driven provider fallback by requesting a deliberately unavailable smoke provider and asserting the configured fallback provider is selected.
 
 ---
 

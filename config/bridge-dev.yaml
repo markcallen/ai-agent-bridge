@@ -13,6 +13,9 @@ auth:
   jwt_audience: "bridge"
   jwt_max_ttl: "5m"
 
+feature_flags:
+  provider_fallbacks: true
+
 sessions:
   max_per_project: 5
   max_global: 20
@@ -38,6 +41,7 @@ providers:
     startup_timeout: "60s"
     startup_probe: "prompt"
     required_env: ["ANTHROPIC_API_KEY"]
+    fallbacks: ["codex"]
     prompt_pattern: "(?m)(❯|>\\s*$)"
   opencode:
     binary: "./node_modules/.bin/opencode"
@@ -45,6 +49,7 @@ providers:
     startup_timeout: "45s"
     startup_probe: "output"
     required_env: ["OPENAI_API_KEY"]
+    fallbacks: ["codex"]
     prompt_pattern: "❯"
   codex:
     binary: "./node_modules/.bin/codex"

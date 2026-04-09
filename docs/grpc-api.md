@@ -245,7 +245,7 @@ rpc Health(HealthRequest) returns (HealthResponse)
 |-------|------|-------------|
 | `status` | string | `"serving"` (always, for now) |
 | `providers` | repeated ProviderHealth | Per-provider health |
-| `server_instance_id` | string | UUID generated once at daemon startup. Compare across calls to detect a restart: a changed value means the process restarted and all in-memory session state has been lost (see [issue #6](https://github.com/markcallen/ai-agent-bridge/issues/6)). |
+| `server_instance_id` | string | UUID generated once at daemon startup. Compare across calls to detect a restart: a changed value means the process restarted. Persisted sessions and chunks are reloaded on restart; if a prior session's child PID is still alive it is surfaced again as `RUNNING`, but attach/input recovery is currently replay-only. |
 
 `ProviderHealth`:
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"regexp"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -290,6 +291,97 @@ func TestSupervisorHistoryOrphansMarkedFailed(t *testing.T) {
 	}
 }
 
+func TestSupervisorLoadHistoryRecoversRunningProcess(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper process: %v", err)
+	}
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_, _ = cmd.Process.Wait()
+		}
+	})
+
+	dbPath := t.TempDir() + "/sessions.db"
+	store, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewBoltSessionStore: %v", err)
+	}
+	recovered := SessionInfo{
+		SessionID: "recover-1",
+		ProjectID: "proj-r",
+		Provider:  "fake",
+		State:     SessionStateRunning,
+		CreatedAt: nowUTC(),
+		ProcessID: cmd.Process.Pid,
+	}
+	if err := store.Save(recovered); err != nil {
+		t.Fatalf("Save recovered session: %v", err)
+	}
+	chunk := OutputChunk{Seq: 1, Timestamp: nowUTC(), Payload: []byte("persisted output")}
+	if err := store.SaveChunk("recover-1", chunk); err != nil {
+		t.Fatalf("SaveChunk: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	store2, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store2))
+	defer sup.Close()
+	defer func() { _ = store2.Close() }()
+
+	if err := sup.LoadHistory(); err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+
+	info, err := sup.Get("recover-1")
+	if err != nil {
+		t.Fatalf("Get recover-1: %v", err)
+	}
+	if info.State != SessionStateRunning {
+		t.Fatalf("State=%v want Running", info.State)
+	}
+	if !info.Recovered {
+		t.Fatal("Recovered flag was false")
+	}
+
+	attach, err := sup.Attach("recover-1", "client-a", 0)
+	if err != nil {
+		t.Fatalf("Attach recovered: %v", err)
+	}
+	if len(attach.Replay) != 1 {
+		t.Fatalf("Replay len=%d want 1", len(attach.Replay))
+	}
+	select {
+	case _, ok := <-attach.Live:
+		if ok {
+			t.Fatal("recovered live channel should be closed")
+		}
+	default:
+		t.Fatal("recovered live channel should be immediately closed")
+	}
+
+	if _, err := sup.WriteInput("recover-1", "client-a", []byte("hello")); !errors.Is(err, ErrSessionRecoveryUnavailable) {
+		t.Fatalf("WriteInput recovered error=%v want %v", err, ErrSessionRecoveryUnavailable)
+	}
+
+	if err := sup.Stop("recover-1", true); err != nil {
+		t.Fatalf("Stop recovered: %v", err)
+	}
+	waitForRecoveredStopped(t, sup, "recover-1")
+}
+
 func TestSupervisorHistoryChunkReplay(t *testing.T) {
 	registry := NewRegistry()
 	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
@@ -570,6 +662,80 @@ func waitForChunk(t *testing.T, ch <-chan OutputChunk, needle string) OutputChun
 	}
 }
 
+func TestSupervisorFallbackProvider(t *testing.T) {
+	registry := NewRegistry()
+	_ = registry.Register(&testProvider{id: "primary", healthErr: errors.New("down")})
+	_ = registry.Register(&testProvider{id: "fallback1", healthErr: errors.New("also down")})
+	_ = registry.Register(&testProvider{id: "fallback2"})
+
+	supervisor := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute)
+	defer supervisor.Close()
+
+	repo := t.TempDir()
+
+	t.Run("primary succeeds, no fallback used", func(t *testing.T) {
+		_ = registry.Register(&testProvider{id: "ok"})
+		info, err := supervisor.Start(context.Background(), SessionConfig{
+			ProjectID: "project-a",
+			SessionID: "s-ok",
+			RepoPath:  repo,
+			Options:   map[string]string{"provider": "ok"},
+			Fallbacks: []string{"fallback2"},
+		})
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		if info.Provider != "ok" {
+			t.Fatalf("Provider=%q want ok", info.Provider)
+		}
+		_ = supervisor.Stop("s-ok", true)
+		waitForStopped(t, supervisor, "s-ok")
+	})
+
+	t.Run("primary down, first fallback down, second succeeds", func(t *testing.T) {
+		info, err := supervisor.Start(context.Background(), SessionConfig{
+			ProjectID: "project-a",
+			SessionID: "s-fallback",
+			RepoPath:  repo,
+			Options:   map[string]string{"provider": "primary"},
+			Fallbacks: []string{"fallback1", "fallback2"},
+		})
+		if err != nil {
+			t.Fatalf("Start with fallback: %v", err)
+		}
+		if info.Provider != "fallback2" {
+			t.Fatalf("Provider=%q want fallback2", info.Provider)
+		}
+		_ = supervisor.Stop("s-fallback", true)
+		waitForStopped(t, supervisor, "s-fallback")
+	})
+
+	t.Run("all providers down returns error", func(t *testing.T) {
+		_, err := supervisor.Start(context.Background(), SessionConfig{
+			ProjectID: "project-a",
+			SessionID: "s-allfail",
+			RepoPath:  repo,
+			Options:   map[string]string{"provider": "primary"},
+			Fallbacks: []string{"fallback1"},
+		})
+		if !errors.Is(err, ErrProviderUnavailable) {
+			t.Fatalf("Start all-down error=%v want %v", err, ErrProviderUnavailable)
+		}
+	})
+
+	t.Run("unknown primary with no fallbacks returns error", func(t *testing.T) {
+		_, err := supervisor.Start(context.Background(), SessionConfig{
+			ProjectID: "project-a",
+			SessionID: "s-unknown",
+			RepoPath:  repo,
+			Options:   map[string]string{"provider": "nonexistent"},
+		})
+		if !errors.Is(err, ErrProviderUnavailable) {
+			t.Fatalf("Start unknown error=%v want %v", err, ErrProviderUnavailable)
+		}
+	})
+}
+
 func waitForStopped(t *testing.T, supervisor *Supervisor, sessionID string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -581,4 +747,17 @@ func waitForStopped(t *testing.T, supervisor *Supervisor, sessionID string) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s to stop", sessionID)
+}
+
+func waitForRecoveredStopped(t *testing.T, supervisor *Supervisor, sessionID string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		info, err := supervisor.Get(sessionID)
+		if err == nil && (info.State == SessionStateStopped || info.State == SessionStateFailed) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for recovered session %q to stop", sessionID)
 }
