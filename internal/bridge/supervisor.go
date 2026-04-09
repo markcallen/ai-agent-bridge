@@ -165,7 +165,7 @@ func (s *Supervisor) recoverProcess(info *SessionInfo) bool {
 
 	if chunks, err := s.store.LoadChunks(info.SessionID); err == nil {
 		for _, chunk := range chunks {
-			ms.buf.AppendTyped(chunk.Payload, chunk.Type)
+			ms.buf.AppendChunk(chunk)
 		}
 	} else {
 		slog.Warn("session store: failed to load chunks for recovered session", "session_id", info.SessionID, "error", err)
@@ -419,6 +419,11 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	}
 
 	if useStreamJSON {
+		if cmd.SysProcAttr == nil {
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		} else {
+			cmd.SysProcAttr.Setpgid = true
+		}
 		stdinPipe, err := cmd.StdinPipe()
 		if err != nil {
 			cancel()

@@ -371,6 +371,13 @@ func TestSupervisorLoadHistoryRecoversRunningProcess(t *testing.T) {
 	default:
 		t.Fatal("recovered live channel should be immediately closed")
 	}
+	attachAfter, err := sup.Attach("recover-1", "client-b", chunk.Seq)
+	if err != nil {
+		t.Fatalf("Attach recovered after seq: %v", err)
+	}
+	if len(attachAfter.Replay) != 0 {
+		t.Fatalf("Replay after persisted seq len=%d want 0", len(attachAfter.Replay))
+	}
 
 	if _, err := sup.WriteInput("recover-1", "client-a", []byte("hello")); !errors.Is(err, ErrSessionRecoveryUnavailable) {
 		t.Fatalf("WriteInput recovered error=%v want %v", err, ErrSessionRecoveryUnavailable)

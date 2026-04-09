@@ -71,7 +71,7 @@ func (s *BoltSessionStore) SaveChunk(sessionID string, chunk OutputChunk) error 
 	if err != nil {
 		return fmt.Errorf("marshal chunk seq=%d: %w", chunk.Seq, err)
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.db.Batch(func(tx *bolt.Tx) error {
 		return tx.Bucket(chunksBucket).Put(chunkKey(sessionID, chunk.Seq), data)
 	})
 }

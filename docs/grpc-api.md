@@ -168,8 +168,9 @@ Each `AttachSessionEvent` has:
 | 3 | `REPLAY_GAP` | The requested `after_seq` was evicted from the ring buffer. Replay restarts from `oldest_seq`. Clients should treat the output as incomplete and re-render from the oldest available chunk. |
 | 4 | `SESSION_EXIT` | Agent process exited; `exit_code` and `exit_recorded` are set |
 | 5 | `ERROR` | Stream error; `error` field contains details |
+| 6 | `THINKING` | Provider-emitted thinking content in `thinking_text`; may be replayed from the retained buffer like other attach events |
 
-> **Planned (not yet implemented)**: A future `EVENT_TYPE_THINKING` event (see [issue #1](https://github.com/markcallen/ai-agent-bridge/issues/1)) will surface Claude's extended thinking blocks from the `claude-chat` (stream-json) provider. No `THINKING` events are emitted today.
+`THINKING` events are currently emitted by stream-JSON providers that surface thinking blocks. Clients should read the content from `thinking_text` instead of `payload`.
 
 **Reconnect pattern**
 

@@ -80,7 +80,7 @@ type ProviderConfig struct {
 	ValidateStartup *bool    `yaml:"validate_startup"`
 	StartupProbe    string   `yaml:"startup_probe"`
 	RequiredEnv     []string `yaml:"required_env"`
-	PTY             bool     `yaml:"pty"`
+	PTY             *bool    `yaml:"pty"` // deprecated: PTY is the default; remove this field
 	StreamJSON      bool     `yaml:"stream_json"`
 	// PromptPattern is a regex matched against PTY output lines. When it
 	// matches the first time, AGENT_READY is emitted; on subsequent matches
@@ -246,7 +246,10 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("config: providers.%s.binary is required", name)
 		}
 		if provider.Mode != "" {
-			return fmt.Errorf("config: providers.%s.mode is no longer supported; remove the field and use pty: true or stream_json: true instead", name)
+			return fmt.Errorf("config: providers.%s.mode is no longer supported; remove the field and use stream_json: true only for JSONL providers", name)
+		}
+		if provider.PTY != nil {
+			return fmt.Errorf("config: providers.%s.pty is no longer supported; PTY is the default and stream_json: true opts out of PTY allocation", name)
 		}
 		if provider.StartupProbe != "" {
 			switch provider.StartupProbe {
