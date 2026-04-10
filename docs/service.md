@@ -138,8 +138,8 @@ feature_flags:
 
 providers:
   claude:
-    binary:          "./node_modules/.bin/claude"
-    args:            []
+    binary:          "node"
+    args:            ["./node_modules/@anthropic-ai/claude-code/cli.js", "--verbose"]
     startup_timeout: "60s"
     startup_probe:   output
     required_env:    ["ANTHROPIC_API_KEY"]
@@ -197,7 +197,7 @@ logging:
 #### `providers`
 | Field | Description |
 |-------|-------------|
-| `name` | Provider name used in `StartSessionRequest.provider` |
+| `<id>` | Provider ID, expressed as the map key under `providers:` and used in `StartSessionRequest.provider` |
 | `binary` | Path to the agent binary |
 | `args` | Extra CLI arguments |
 | `startup_timeout` | Max time to wait for the process to become ready |

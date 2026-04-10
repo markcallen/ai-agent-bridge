@@ -256,7 +256,7 @@ func resolveCommandArgs(args []string) ([]string, error) {
 
 	resolved := append([]string(nil), args...)
 	for i, arg := range resolved {
-		if !strings.Contains(arg, "/") || filepath.IsAbs(arg) {
+		if !isStandaloneRelativePathArg(arg) {
 			continue
 		}
 		abs, err := filepath.Abs(arg)
@@ -266,6 +266,13 @@ func resolveCommandArgs(args []string) ([]string, error) {
 		resolved[i] = abs
 	}
 	return resolved, nil
+}
+
+func isStandaloneRelativePathArg(arg string) bool {
+	if arg == "." || arg == ".." {
+		return true
+	}
+	return strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../")
 }
 
 // filterEnv returns a filtered environment excluding sensitive variables and

@@ -97,7 +97,7 @@ Build the shared Node client package and install the web example dependencies:
 make chat-web-install
 ```
 
-The web example already includes a local `.env` configured for the dev bridge in [`examples/chat-web/.env.example`](/home/marka/src/ai-agent-bridge/examples/chat-web/.env.example). If you need to recreate it, use:
+The web example already includes a local `.env` configured for the dev bridge in [`examples/chat-web/.env.example`](chat-web/.env.example). If you need to recreate it, use:
 
 ```dotenv
 BRIDGE_ADDR=bridge.local:9445

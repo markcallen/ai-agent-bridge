@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"regexp"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -580,6 +581,61 @@ func TestReadLoopStreamJSONParsing(t *testing.T) {
 	}
 	if !foundRaw {
 		t.Error("expected non-JSON line to be emitted as raw ChunkTypeOutput chunk")
+	}
+}
+
+func TestReadLoopStreamJSONHandlesLargeLines(t *testing.T) {
+	sup := NewSupervisor(NewRegistry(), DefaultPolicy(), 256*1024, time.Minute)
+	defer sup.Close()
+
+	ms := &managedSession{
+		buf:  NewByteBuffer(256 * 1024),
+		live: make(chan OutputChunk, 10),
+		info: SessionInfo{SessionID: "test-large-stream"},
+	}
+
+	large := strings.Repeat("x", 70*1024)
+	line := `{"type":"content_block_delta","delta":{"type":"text_delta","text":"` + large + `"}}`
+
+	pr, pw := io.Pipe()
+	go func() {
+		_, _ = pw.Write([]byte(line + "\n"))
+		_ = pw.Close()
+	}()
+
+	sup.readLoopStreamJSON(ms, pr)
+
+	chunks := ms.buf.After(0)
+	if len(chunks) != 1 {
+		t.Fatalf("chunks len=%d want 1", len(chunks))
+	}
+	if got := string(chunks[0].Payload); got != large {
+		t.Fatalf("payload len=%d want %d", len(got), len(large))
+	}
+}
+
+func TestMonitorRecoveredProcessStopsOnSupervisorClose(t *testing.T) {
+	sup := NewSupervisor(NewRegistry(), DefaultPolicy(), 1024, time.Minute)
+	ms := &managedSession{
+		info: SessionInfo{
+			SessionID: "recovered-1",
+			ProcessID: 999999,
+			State:     SessionStateRunning,
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		sup.monitorRecoveredProcess(ms)
+		close(done)
+	}()
+
+	sup.Close()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitorRecoveredProcess did not exit after supervisor close")
 	}
 }
 

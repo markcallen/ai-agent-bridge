@@ -26,9 +26,9 @@ Identified mismatches between `ARCHITECTURE.md` / `docs/` and the actual impleme
 
 - [x] **`ARCHITECTURE.md` names `EventBuffer` and `SubscriberManager`** — the real types are `ByteBuffer` (`internal/bridge/bytebuf.go`) and a direct single-client `Attach()` model in `supervisor.go`. There is no `SubscriberManager`. Update `ARCHITECTURE.md` to reflect `ByteBuffer` and the `AttachState` channel pattern.
 
-- [x] **Provider mode labels in architecture diagram** — the diagram shows `codex (stdio)` and `claude (stdio)` but `opencode` is PTY, and `claude-chat` is `stream-json`. The actual mode-to-provider mapping is:
-  - `claude` → stdio
-  - `codex` → exec (JSONL via `codex exec --json -`)
+- [x] **Provider mode labels in architecture diagram** — provider sessions default to PTY unless `stream_json` is enabled. The actual transport mapping is:
+  - `claude` → PTY
+  - `codex` → PTY
   - `opencode` → PTY
   - `gemini` → PTY
   - `claude-chat` → stream-json

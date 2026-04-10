@@ -77,3 +77,28 @@ func TestBuildCommandAbsolutizesRelativeScriptArgForNode(t *testing.T) {
 		t.Fatalf("Dir=%q want /tmp/other-repo", got)
 	}
 }
+
+func TestResolveCommandArgsLeavesFlagsAndURLsUntouched(t *testing.T) {
+	args, err := resolveCommandArgs([]string{
+		"./node_modules/@anthropic-ai/claude-code/cli.js",
+		"--config=./configs/dev.yaml",
+		"https://example.com/api",
+		"../relative-script.js",
+	})
+	if err != nil {
+		t.Fatalf("resolveCommandArgs: %v", err)
+	}
+
+	if !filepath.IsAbs(args[0]) {
+		t.Fatalf("first arg should be absolutized, got %q", args[0])
+	}
+	if got := args[1]; got != "--config=./configs/dev.yaml" {
+		t.Fatalf("flag arg=%q", got)
+	}
+	if got := args[2]; got != "https://example.com/api" {
+		t.Fatalf("url arg=%q", got)
+	}
+	if !filepath.IsAbs(args[3]) {
+		t.Fatalf("relative script should be absolutized, got %q", args[3])
+	}
+}

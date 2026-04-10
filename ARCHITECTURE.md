@@ -42,14 +42,14 @@ Browser-based applications cannot speak gRPC directly. The `packages/bridge-clie
 │  │                    Provider Registry                           │  │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐  │  │
 │  │  │  codex   │  │  claude  │  │ opencode │  │ claude-chat │  │  │
-│  │  │  (exec)  │  │ (stdio)  │  │  (pty)   │  │(stream-json)│  │  │
+│  │  │  (pty)   │  │  (pty)   │  │  (pty)   │  │(stream-json)│  │  │
 │  │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬──────┘  │  │
 │  └───────┼─────────────┼─────────────┼────────────────┼──────────┘  │
 │          │             │             │                │              │
 │    ┌─────▼───┐   ┌─────▼───┐  ┌─────▼───┐   ┌───────▼───┐         │
 │    │  codex  │   │  claude │  │opencode │   │  claude   │         │
 │    │ process │   │ process │  │ process │   │  process  │         │
-│    │  (exec) │   │ (stdio) │  │  (pty)  │   │(stream-json│         │
+│    │  (pty)  │   │  (pty)  │  │  (pty)  │   │(stream-json│         │
 │    └─────────┘   └─────────┘  └─────────┘   └───────────┘         │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -156,17 +156,15 @@ Implements `bridge.v1.BridgeService`:
 
 Supports two distinct I/O modes, selected per provider config:
 
-**Stdio mode** (default) — pipes stdin/stdout/stderr directly. Used by `codex` and `claude --print`.
-
-**PTY mode** (`pty: true`) — attaches a pseudo-terminal via `creack/pty`. Required for interactive CLI tools (opencode, gemini) that need a TTY. Uses a configurable `prompt_pattern` regex to detect the shell prompt:
+**PTY mode** (default) — attaches a pseudo-terminal via `creack/pty`. Used by `claude`, `codex`, `opencode`, and `gemini`. Uses a configurable `prompt_pattern` regex to detect the shell prompt:
 - First prompt match → emit `AGENT_READY`
 - Subsequent prompt matches after output → emit `RESPONSE_COMPLETE`
 
-**stream-json mode** (`stream_json: true`) — parses the Claude Code CLI's `--output-format stream-json` NDJSON protocol. Extracts text from `assistant` content blocks and uses `result` events to emit `RESPONSE_COMPLETE`. `AGENT_READY` is emitted immediately on start since the process reads from stdin without a prompt.
+**stream-json mode** (`stream_json: true`) — parses the Claude Code CLI's `--output-format stream-json` NDJSON protocol. Extracts text from `assistant` content blocks and uses `result` events to emit `RESPONSE_COMPLETE`. `AGENT_READY` is emitted immediately on start since the process reads from stdin without a prompt. This mode is used by `claude-chat`.
 
 Provider-specific adapters set binary name and default args:
 - `codex.go` → `codex --quiet`
-- `claude.go` → `claude --print --verbose`
+- `claude.go` → `claude --verbose`
 - `opencode.go` → `opencode`
 
 Additional providers (`gemini`, `claude-chat`, etc.) are configured purely via YAML without a dedicated Go file; they are instantiated dynamically from `ProviderConfig` at daemon startup.
@@ -412,13 +410,14 @@ providers:
     startup_timeout: "30s"
     required_env: ["OPENAI_API_KEY"]
   claude:
-    binary: "claude"
-    args: ["--print", "--verbose"]
+    binary: "node"
+    args: ["./node_modules/@anthropic-ai/claude-code/cli.js", "--verbose"]
     startup_timeout: "30s"
     required_env: ["ANTHROPIC_API_KEY"]
   claude-chat:
-    binary: "claude"
-    args: ["--dangerously-skip-permissions", "--verbose",
+    binary: "node"
+    args: ["./node_modules/@anthropic-ai/claude-code/cli.js",
+           "--dangerously-skip-permissions", "--verbose",
            "--output-format", "stream-json", "--input-format", "stream-json"]
     startup_timeout: "30s"
     required_env: ["ANTHROPIC_API_KEY"]
@@ -428,13 +427,11 @@ providers:
     args: []
     startup_timeout: "30s"
     required_env: ["OPENAI_API_KEY"]
-    pty: true                       # Attach pseudo-terminal
     prompt_pattern: "❯"            # Regex to detect shell prompt
   gemini:
     binary: "gemini"
     args: []
     startup_timeout: "30s"
-    pty: true
     prompt_pattern: "^\\s*>\\s*$"
 
 allowed_paths: []                   # Repo path allowlist (glob patterns); empty = allow all

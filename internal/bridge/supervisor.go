@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -192,26 +193,31 @@ func processAlive(pid int) bool {
 func (s *Supervisor) monitorRecoveredProcess(ms *managedSession) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-	for range ticker.C {
-		ms.mu.Lock()
-		pid := ms.info.ProcessID
-		state := ms.info.State
-		ms.mu.Unlock()
-		if state == SessionStateStopped || state == SessionStateFailed {
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+			ms.mu.Lock()
+			pid := ms.info.ProcessID
+			state := ms.info.State
+			ms.mu.Unlock()
+			if state == SessionStateStopped || state == SessionStateFailed {
+				return
+			}
+			if processAlive(pid) {
+				continue
+			}
+			ms.mu.Lock()
+			if ms.info.State != SessionStateStopped && ms.info.State != SessionStateFailed {
+				ms.info.State = SessionStateStopped
+				ms.info.StoppedAt = nowUTC()
+				ms.info.ProcessID = 0
+			}
+			ms.mu.Unlock()
+			s.persistSession(ms.snapshotInfo())
 			return
 		}
-		if processAlive(pid) {
-			continue
-		}
-		ms.mu.Lock()
-		if ms.info.State != SessionStateStopped && ms.info.State != SessionStateFailed {
-			ms.info.State = SessionStateStopped
-			ms.info.StoppedAt = nowUTC()
-			ms.info.ProcessID = 0
-		}
-		ms.mu.Unlock()
-		s.persistSession(ms.snapshotInfo())
-		return
 	}
 }
 
@@ -519,11 +525,18 @@ type claudeStreamEvent struct {
 func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
 	defer func() { _ = r.Close() }()
 	defer s.closeLive(ms)
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if errors.Is(err, io.EOF) && len(line) == 0 {
+			return
+		}
+		line = bytes.TrimSuffix(line, []byte{'\n'})
+		line = bytes.TrimSuffix(line, []byte{'\r'})
 		if len(line) == 0 {
+			if errors.Is(err, io.EOF) {
+				return
+			}
 			continue
 		}
 		var ev claudeStreamEvent
@@ -544,13 +557,16 @@ func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
 				}
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
-		ms.mu.Lock()
-		if ms.info.Error == "" && !ms.info.ExitRecorded {
-			ms.info.Error = err.Error()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				ms.mu.Lock()
+				if ms.info.Error == "" && !ms.info.ExitRecorded {
+					ms.info.Error = err.Error()
+				}
+				ms.mu.Unlock()
+			}
+			return
 		}
-		ms.mu.Unlock()
 	}
 }
 

@@ -1,6 +1,51 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { buildCredentials, normalizeTTYInput, parseArgs } from "./lib";
+
+const TEST_CA_CERT = `-----BEGIN CERTIFICATE-----
+MIIB9zCCAX6gAwIBAgIQBh//PkqN68wf4YDLlhzapDAKBggqhkjOPQQDAzA8MRww
+GgYDVQQKExNhaS1hZ2VudC1icmlkZ2UtZGV2MRwwGgYDVQQDExNhaS1hZ2VudC1i
+cmlkZ2UtZGV2MB4XDTI2MDQxMDE2MjE1NVoXDTM2MDQxMDE2MjE1NVowPDEcMBoG
+A1UEChMTYWktYWdlbnQtYnJpZGdlLWRldjEcMBoGA1UEAxMTYWktYWdlbnQtYnJp
+ZGdlLWRldjB2MBAGByqGSM49AgEGBSuBBAAiA2IABH8feoqCs0Qwpbc4/zQyNYYb
+USuOXENwXJetwA3CJlac3sNzHmrHTB0aw+a/uG+LsJexwgceKI+MItJLQt8VBf0t
+jHrYb7s02PQG/Dgf3Zi1w3rSvJTFYO0r9KdDHgV1zKNFMEMwDgYDVR0PAQH/BAQD
+AgEGMBIGA1UdEwEB/wQIMAYBAf8CAQEwHQYDVR0OBBYEFJ1ewuS52GGODA0tQLwd
+gbanUtfgMAoGCCqGSM49BAMDA2cAMGQCMFlJuxUiFYKscjBoQ9dKk3z0EZlOUfIe
+ApOeazjVhXUZu26xJq1KIWoUP3r4f37xDgIwE60OTarhuK5/7ceSLNw299PBCG6I
+Rk1w665f64t0/wzmPBFnjOibJO9ApwZ9h5Ih
+-----END CERTIFICATE-----
+`;
+
+const TEST_CLIENT_CERT = `-----BEGIN CERTIFICATE-----
+MIIB1jCCAVugAwIBAgIRAP4zY93b05ChlT4drKSfH9IwCgYIKoZIzj0EAwMwPDEc
+MBoGA1UEChMTYWktYWdlbnQtYnJpZGdlLWRldjEcMBoGA1UEAxMTYWktYWdlbnQt
+YnJpZGdlLWRldjAeFw0yNjA0MTAxNjIxNTVaFw0yNjA3MDkxNjIxNTVaMBUxEzAR
+BgNVBAMTCmRldi1jbGllbnQwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAQzJPCmYwrJ
+FDIQD1KNRVQ0P8gZs1LK/uPE2BxTfMLypY9M7nrTqCoTnSzs86s7Qo7i8U0O6e9V
+lDrDm6Asddz5Pcs2NEPnTiUv1kEYJ0OsfrGla9xW+Msr9vsb0zRaYbmjSDBGMA4G
+A1UdDwEB/wQEAwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAjAfBgNVHSMEGDAWgBSd
+XsLkudhhjgwNLUC8HYG2p1LX4DAKBggqhkjOPQQDAwNpADBmAjEAmtTvhYmD7uWH
+HXXXwXyLyvkEXEDMyfZaIDCFKyAv0EIWWnAQFtrcCDphG9c4arEuAjEAozIhJcpj
+j6BkVYRga5geYziSEnVlQB1m8MHjL01VZJ38HvZDxL5kfsRAvyq+1Ei+
+-----END CERTIFICATE-----
+`;
+
+const TEST_CLIENT_KEY = `-----BEGIN EC PRIVATE KEY-----
+MIGkAgEBBDDpromoqM2dmaxoAQ0ilhDH997gVhVkzP7Y7eLtlqgm/SiO/1J14cc4
+/OCDJ/VWNEagBwYFK4EEACKhZANiAAQzJPCmYwrJFDIQD1KNRVQ0P8gZs1LK/uPE
+2BxTfMLypY9M7nrTqCoTnSzs86s7Qo7i8U0O6e9VlDrDm6Asddz5Pcs2NEPnTiUv
+1kEYJ0OsfrGla9xW+Msr9vsb0zRaYbk=
+-----END EC PRIVATE KEY-----
+`;
+
+const TEST_JWT_KEY = `-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEILUoSzUyrX2nZdXo1+TKHy6GmDSPno8Qh17TDoSMCZAW
+-----END PRIVATE KEY-----
+`;
 
 test("parseArgs applies defaults and keeps the repo path", () => {
   const parsed = parseArgs(["node", "chat-ts", "/tmp/repo"]);
@@ -57,11 +102,21 @@ test("parseArgs reads explicit flags", () => {
 });
 
 test("buildCredentials composes mTLS and JWT call credentials", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "chat-ts-creds-"));
+  const cacert = path.join(tmp, "ca.crt");
+  const cert = path.join(tmp, "client.crt");
+  const key = path.join(tmp, "client.key");
+  const jwtKey = path.join(tmp, "jwt.key");
+  fs.writeFileSync(cacert, TEST_CA_CERT);
+  fs.writeFileSync(cert, TEST_CLIENT_CERT);
+  fs.writeFileSync(key, TEST_CLIENT_KEY);
+  fs.writeFileSync(jwtKey, TEST_JWT_KEY);
+
   const creds = buildCredentials({
-    cacert: "../../certs/ca-bundle.crt",
-    cert: "../../certs/dev-client.crt",
-    key: "../../certs/dev-client.key",
-    jwtKey: "../../certs/jwt-signing.key",
+    cacert,
+    cert,
+    key,
+    jwtKey,
     jwtIssuer: "dev",
     jwtAudience: "bridge",
     project: "dev",

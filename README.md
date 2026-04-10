@@ -34,7 +34,7 @@ See [docs/service.md](docs/service.md) for architecture details.
 
 - [Go 1.25+](https://go.dev/dl/)
 - [nvm](https://github.com/nvm-sh/nvm)
-- Node.js 22 (LTS) or 24 (Active LTS). Use the version in `.nvmrc`.
+- Node.js 24.x. Use the version in `.nvmrc`.
 - (optional) `protoc` + `protoc-gen-go` + `protoc-gen-go-grpc` — only if modifying `.proto` files
 
 ### 1. Clone and configure
@@ -64,7 +64,7 @@ env-secrets aws secret upsert \
   --region <aws-region>
 ```
 
-The repo-local [`.env.example`](/home/marka/src/ai-agent-bridge/.env.example) contains only the non-secret `ENV_SECRETS_*` settings. After you copy it to `.env`, the main `make` targets will call `env-secrets aws` automatically and load the secret named by `ENV_SECRETS_AWS_SECRET`.
+The repo-local [`.env.example`](.env.example) contains only the non-secret `ENV_SECRETS_*` settings. After you copy it to `.env`, the main `make` targets will call `env-secrets aws` automatically and load the secret named by `ENV_SECRETS_AWS_SECRET`.
 
 ### 2. Start the daemon
 
