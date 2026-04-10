@@ -71,7 +71,7 @@ run: build
 	$(BRIDGE) --config $(CONFIG)
 
 dev-run: dev-setup
-	$(BRIDGE) --config $(DEV_CONFIG)
+	env $$(cat .env | xargs) $(BRIDGE) --config $(DEV_CONFIG)
 
 docker-run:
 	docker compose up --build bridge
