@@ -68,7 +68,10 @@ func (p *StdioProvider) BuildCommand(ctx context.Context, cfg bridge.SessionConf
 	if err != nil {
 		return nil, fmt.Errorf("%w: resolve binary %q: %v", bridge.ErrProviderUnavailable, p.cfg.Binary, err)
 	}
-	args := append([]string(nil), p.cfg.DefaultArgs...)
+	args, err := resolveCommandArgs(p.cfg.DefaultArgs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: resolve args for %q: %v", bridge.ErrProviderUnavailable, p.cfg.ProviderID, err)
+	}
 	for key, value := range cfg.Options {
 		if strings.HasPrefix(key, "arg:") {
 			args = append(args, value)
@@ -114,8 +117,12 @@ func (p *StdioProvider) validateStartupPrompt(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	args, err := resolveCommandArgs(p.cfg.DefaultArgs)
+	if err != nil {
+		return err
+	}
 	wd, _ := os.Getwd()
-	cmd := exec.CommandContext(probeCtx, binPath, p.cfg.DefaultArgs...)
+	cmd := exec.CommandContext(probeCtx, binPath, args...)
 	cmd.Dir = wd
 	cmd.Env = filterEnv(os.Environ())
 
@@ -161,8 +168,12 @@ func (p *StdioProvider) validateStartupOutput(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	args, err := resolveCommandArgs(p.cfg.DefaultArgs)
+	if err != nil {
+		return err
+	}
 	wd, _ := os.Getwd()
-	cmd := exec.CommandContext(probeCtx, binPath, p.cfg.DefaultArgs...)
+	cmd := exec.CommandContext(probeCtx, binPath, args...)
 	cmd.Dir = wd
 	cmd.Env = filterEnv(os.Environ())
 
@@ -236,6 +247,25 @@ func resolveBinaryPath(binary string) (string, error) {
 		return filepath.Abs(binary)
 	}
 	return exec.LookPath(binary)
+}
+
+func resolveCommandArgs(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+
+	resolved := append([]string(nil), args...)
+	for i, arg := range resolved {
+		if !strings.Contains(arg, "/") || filepath.IsAbs(arg) {
+			continue
+		}
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			return nil, err
+		}
+		resolved[i] = abs
+	}
+	return resolved, nil
 }
 
 // filterEnv returns a filtered environment excluding sensitive variables and

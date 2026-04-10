@@ -83,11 +83,16 @@ activate_required_node() {
     echo "==> Installing Node.js $required_node_major via nvm"
     nvm install "$required_node_major"
     nvm use "$required_node_major" >/dev/null
+    if [ -n "${NVM_BIN:-}" ]; then
+      export PATH="$NVM_BIN:$PATH"
+    fi
+    hash -r
     return
   fi
 
   if [ "$(uname -s)" = "Linux" ]; then
     install_node_with_nodesource_linux
+    hash -r
     return
   fi
 
