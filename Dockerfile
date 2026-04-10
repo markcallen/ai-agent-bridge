@@ -28,7 +28,7 @@ WORKDIR /app
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends bubblewrap ca-certificates curl && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -38,8 +38,9 @@ RUN useradd -m -s /bin/bash bridge && \
 
 COPY --from=build /out/bridge /usr/local/bin/bridge
 COPY --from=build /out/bridge-ca /usr/local/bin/bridge-ca
+COPY .nvmrc /app/.nvmrc
 COPY package.json package-lock.json /app/
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY config/bridge.yaml /app/config/bridge.yaml
 COPY config/bridge-docker.yaml /app/config/bridge-docker.yaml
 COPY docker-entrypoint.sh /app/entrypoint.sh
