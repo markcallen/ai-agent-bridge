@@ -163,11 +163,14 @@ Each `AttachSessionEvent` has:
 | Value | Name | Description |
 |-------|------|-------------|
 | 0 | `UNSPECIFIED` | Should not appear |
-| 1 | `ATTACHED` | First event; confirms attachment and delivers buffer metadata |
-| 2 | `OUTPUT` | Raw PTY bytes in `payload`; `replay=true` during replay phase |
-| 3 | `REPLAY_GAP` | Requested `after_seq` was evicted from the buffer; replay restarted from oldest retained |
+| 1 | `ATTACHED` | First event; confirms attachment and delivers buffer metadata (`oldest_seq`, `last_seq`, `cols`, `rows`) |
+| 2 | `OUTPUT` | Raw PTY bytes in `payload`; `replay=true` during replay phase, `false` for live output |
+| 3 | `REPLAY_GAP` | The requested `after_seq` was evicted from the ring buffer. Replay restarts from `oldest_seq`. Clients should treat the output as incomplete and re-render from the oldest available chunk. |
 | 4 | `SESSION_EXIT` | Agent process exited; `exit_code` and `exit_recorded` are set |
 | 5 | `ERROR` | Stream error; `error` field contains details |
+| 6 | `THINKING` | Provider-emitted thinking content in `thinking_text`; may be replayed from the retained buffer like other attach events |
+
+`THINKING` events are currently emitted by stream-JSON providers that surface thinking blocks. Clients should read the content from `thinking_text` instead of `payload`.
 
 **Reconnect pattern**
 
@@ -241,8 +244,9 @@ rpc Health(HealthRequest) returns (HealthResponse)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `status` | string | `"ok"` or `"degraded"` |
+| `status` | string | `"serving"` (always, for now) |
 | `providers` | repeated ProviderHealth | Per-provider health |
+| `server_instance_id` | string | UUID generated once at daemon startup. Compare across calls to detect a restart: a changed value means the process restarted. Persisted sessions and chunks are reloaded on restart; if a prior session's child PID is still alive it is surfaced again as `RUNNING`, but attach/input recovery is currently replay-only. |
 
 `ProviderHealth`:
 

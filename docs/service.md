@@ -56,6 +56,7 @@ STARTING → RUNNING → ATTACHED (client connected)
 - Only one client may be attached at a time.
 - If the client disconnects, the process keeps running and buffering.
 - A reconnecting client passes `after_seq` to resume from where it left off.
+- If the requested `after_seq` was evicted from the buffer (the ring wrapped), the server sends a `REPLAY_GAP` event before replaying from `oldest_seq`. Clients receiving this event should treat the session output as incomplete and re-render from the oldest available chunk.
 
 ### PTY Transport Model
 
@@ -132,13 +133,17 @@ rate_limits:
   send_input_per_session_rps:       5
   send_input_per_session_burst:     20
 
+feature_flags:
+  provider_fallbacks: true
+
 providers:
-  - name:            claude
-    binary:          "./node_modules/.bin/claude"
-    args:            []
+  claude:
+    binary:          "node"
+    args:            ["./node_modules/@anthropic-ai/claude-code/cli.js", "--verbose"]
     startup_timeout: "60s"
     startup_probe:   output
     required_env:    ["ANTHROPIC_API_KEY"]
+    fallbacks:       ["codex"]
     prompt_pattern:  '(?m)(❯|>\s*$)'
 
 logging:
@@ -169,6 +174,11 @@ logging:
 | `jwt_audience` | Required `aud` claim value |
 | `jwt_max_ttl` | Maximum accepted token lifetime |
 
+#### `feature_flags`
+| Field | Default | Description |
+|-------|---------|-------------|
+| `provider_fallbacks` | `false` | Enables config-driven provider fallback selection at session start. Keep this off to disable all `providers.<name>.fallbacks` entries without editing each provider block. |
+
 #### `sessions`
 | Field | Description |
 |-------|-------------|
@@ -178,15 +188,22 @@ logging:
 | `stop_grace_period` | Time to wait for graceful agent exit before SIGKILL |
 | `event_buffer_size` | Per-session ring buffer capacity in bytes |
 
+#### `persistence`
+| Field | Default | Description |
+|-------|---------|-------------|
+| `db_path` | `""` (disabled) | Path to the bbolt database file used to persist session metadata **and PTY output chunks** across daemon restarts. When set, `GetSession` and `ListSessions` surface completed sessions from previous daemon lifetimes. If a persisted non-terminal session still has a live PID at startup, the daemon recovers it into a `RUNNING` state, preserves replay from persisted chunks, and keeps `StopSession` available. Because the current PTY design does not re-open the original live transport, post-restart `AttachSession` is replay-only and `WriteInput`/`ResizeSession` return `UNAVAILABLE` for recovered sessions. |
+| `chunk_storage_bytes` | `0` (unlimited) | Soft upper bound on total PTY chunk bytes stored per session. Reserved for future enforcement; currently has no effect. |
+
 #### `providers`
 | Field | Description |
 |-------|-------------|
-| `name` | Provider name used in `StartSessionRequest.provider` |
+| `<id>` | Provider ID, expressed as the map key under `providers:` and used in `StartSessionRequest.provider` |
 | `binary` | Path to the agent binary |
 | `args` | Extra CLI arguments |
 | `startup_timeout` | Max time to wait for the process to become ready |
 | `startup_probe` | `output` — wait for first PTY output |
 | `required_env` | Environment variables that must be set; daemon refuses to start the provider otherwise |
+| `fallbacks` | Ordered list of up to 2 provider IDs to try if the requested provider is unavailable at session start. Fallback selection happens only before the session starts; the daemon does not migrate a running session. |
 | `prompt_pattern` | Regex that matches the agent's interactive prompt (used for ready detection) |
 
 ---

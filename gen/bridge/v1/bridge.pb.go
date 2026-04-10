@@ -7,13 +7,12 @@
 package bridgev1
 
 import (
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
-
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
 )
 
 const (
@@ -93,6 +92,9 @@ const (
 	AttachEventType_ATTACH_EVENT_TYPE_REPLAY_GAP   AttachEventType = 3
 	AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT AttachEventType = 4
 	AttachEventType_ATTACH_EVENT_TYPE_ERROR        AttachEventType = 5
+	// ATTACH_EVENT_TYPE_THINKING carries a thinking block emitted by an agent
+	// before its final response. Only emitted by stream-JSON providers (issue #1).
+	AttachEventType_ATTACH_EVENT_TYPE_THINKING AttachEventType = 6
 )
 
 // Enum value maps for AttachEventType.
@@ -104,6 +106,7 @@ var (
 		3: "ATTACH_EVENT_TYPE_REPLAY_GAP",
 		4: "ATTACH_EVENT_TYPE_SESSION_EXIT",
 		5: "ATTACH_EVENT_TYPE_ERROR",
+		6: "ATTACH_EVENT_TYPE_THINKING",
 	}
 	AttachEventType_value = map[string]int32{
 		"ATTACH_EVENT_TYPE_UNSPECIFIED":  0,
@@ -112,6 +115,7 @@ var (
 		"ATTACH_EVENT_TYPE_REPLAY_GAP":   3,
 		"ATTACH_EVENT_TYPE_SESSION_EXIT": 4,
 		"ATTACH_EVENT_TYPE_ERROR":        5,
+		"ATTACH_EVENT_TYPE_THINKING":     6,
 	}
 )
 
@@ -739,20 +743,22 @@ func (x *AttachSessionRequest) GetClientId() string {
 }
 
 type AttachSessionEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          AttachEventType        `protobuf:"varint,1,opt,name=type,proto3,enum=bridge.v1.AttachEventType" json:"type,omitempty"`
-	Seq           uint64                 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
-	Timestamp     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
-	Replay        bool                   `protobuf:"varint,6,opt,name=replay,proto3" json:"replay,omitempty"`
-	OldestSeq     uint64                 `protobuf:"varint,7,opt,name=oldest_seq,json=oldestSeq,proto3" json:"oldest_seq,omitempty"`
-	LastSeq       uint64                 `protobuf:"varint,8,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
-	ExitRecorded  bool                   `protobuf:"varint,9,opt,name=exit_recorded,json=exitRecorded,proto3" json:"exit_recorded,omitempty"`
-	ExitCode      int32                  `protobuf:"varint,10,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
-	Error         string                 `protobuf:"bytes,11,opt,name=error,proto3" json:"error,omitempty"`
-	Cols          uint32                 `protobuf:"varint,12,opt,name=cols,proto3" json:"cols,omitempty"`
-	Rows          uint32                 `protobuf:"varint,13,opt,name=rows,proto3" json:"rows,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Type         AttachEventType        `protobuf:"varint,1,opt,name=type,proto3,enum=bridge.v1.AttachEventType" json:"type,omitempty"`
+	Seq          uint64                 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
+	Timestamp    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	SessionId    string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Payload      []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	Replay       bool                   `protobuf:"varint,6,opt,name=replay,proto3" json:"replay,omitempty"`
+	OldestSeq    uint64                 `protobuf:"varint,7,opt,name=oldest_seq,json=oldestSeq,proto3" json:"oldest_seq,omitempty"`
+	LastSeq      uint64                 `protobuf:"varint,8,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
+	ExitRecorded bool                   `protobuf:"varint,9,opt,name=exit_recorded,json=exitRecorded,proto3" json:"exit_recorded,omitempty"`
+	ExitCode     int32                  `protobuf:"varint,10,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Error        string                 `protobuf:"bytes,11,opt,name=error,proto3" json:"error,omitempty"`
+	Cols         uint32                 `protobuf:"varint,12,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows         uint32                 `protobuf:"varint,13,opt,name=rows,proto3" json:"rows,omitempty"`
+	// thinking_text is set when type == ATTACH_EVENT_TYPE_THINKING (issue #1).
+	ThinkingText  string `protobuf:"bytes,14,opt,name=thinking_text,json=thinkingText,proto3" json:"thinking_text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -876,6 +882,13 @@ func (x *AttachSessionEvent) GetRows() uint32 {
 		return x.Rows
 	}
 	return 0
+}
+
+func (x *AttachSessionEvent) GetThinkingText() string {
+	if x != nil {
+		return x.ThinkingText
+	}
+	return ""
 }
 
 type WriteInputRequest struct {
@@ -1139,11 +1152,16 @@ func (*HealthRequest) Descriptor() ([]byte, []int) {
 }
 
 type HealthResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Providers     []*ProviderHealth      `protobuf:"bytes,2,rep,name=providers,proto3" json:"providers,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Status    string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	Providers []*ProviderHealth      `protobuf:"bytes,2,rep,name=providers,proto3" json:"providers,omitempty"`
+	// server_instance_id is a UUID generated once at daemon startup.
+	// Clients can compare this value across Health calls to detect a daemon
+	// restart (a changed ID means the process restarted and all in-memory
+	// session state has been lost).
+	ServerInstanceId string `protobuf:"bytes,3,opt,name=server_instance_id,json=serverInstanceId,proto3" json:"server_instance_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *HealthResponse) Reset() {
@@ -1188,6 +1206,13 @@ func (x *HealthResponse) GetProviders() []*ProviderHealth {
 		return x.Providers
 	}
 	return nil
+}
+
+func (x *HealthResponse) GetServerInstanceId() string {
+	if x != nil {
+		return x.ServerInstanceId
+	}
+	return ""
 }
 
 type ProviderHealth struct {
@@ -1463,7 +1488,7 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
 	"\tafter_seq\x18\x02 \x01(\x04R\bafterSeq\x12\x1b\n" +
-	"\tclient_id\x18\x03 \x01(\tR\bclientId\"\x9b\x03\n" +
+	"\tclient_id\x18\x03 \x01(\tR\bclientId\"\xc0\x03\n" +
 	"\x12AttachSessionEvent\x12.\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x1a.bridge.v1.AttachEventTypeR\x04type\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x128\n" +
@@ -1480,7 +1505,8 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	" \x01(\x05R\bexitCode\x12\x14\n" +
 	"\x05error\x18\v \x01(\tR\x05error\x12\x12\n" +
 	"\x04cols\x18\f \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\r \x01(\rR\x04rows\"c\n" +
+	"\x04rows\x18\r \x01(\rR\x04rows\x12#\n" +
+	"\rthinking_text\x18\x0e \x01(\tR\fthinkingText\"c\n" +
 	"\x11WriteInputRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
@@ -1497,10 +1523,11 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x04rows\x18\x04 \x01(\rR\x04rows\"1\n" +
 	"\x15ResizeSessionResponse\x12\x18\n" +
 	"\aapplied\x18\x01 \x01(\bR\aapplied\"\x0f\n" +
-	"\rHealthRequest\"a\n" +
+	"\rHealthRequest\"\x8f\x01\n" +
 	"\x0eHealthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x127\n" +
-	"\tproviders\x18\x02 \x03(\v2\x19.bridge.v1.ProviderHealthR\tproviders\"`\n" +
+	"\tproviders\x18\x02 \x03(\v2\x19.bridge.v1.ProviderHealthR\tproviders\x12,\n" +
+	"\x12server_instance_id\x18\x03 \x01(\tR\x10serverInstanceId\"`\n" +
 	"\x0eProviderHealth\x12\x1a\n" +
 	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x1c\n" +
 	"\tavailable\x18\x02 \x01(\bR\tavailable\x12\x14\n" +
@@ -1520,14 +1547,15 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x17SESSION_STATUS_ATTACHED\x10\x03\x12\x1b\n" +
 	"\x17SESSION_STATUS_STOPPING\x10\x04\x12\x1a\n" +
 	"\x16SESSION_STATUS_STOPPED\x10\x05\x12\x19\n" +
-	"\x15SESSION_STATUS_FAILED\x10\x06*\xd5\x01\n" +
+	"\x15SESSION_STATUS_FAILED\x10\x06*\xf5\x01\n" +
 	"\x0fAttachEventType\x12!\n" +
 	"\x1dATTACH_EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aATTACH_EVENT_TYPE_ATTACHED\x10\x01\x12\x1c\n" +
 	"\x18ATTACH_EVENT_TYPE_OUTPUT\x10\x02\x12 \n" +
 	"\x1cATTACH_EVENT_TYPE_REPLAY_GAP\x10\x03\x12\"\n" +
 	"\x1eATTACH_EVENT_TYPE_SESSION_EXIT\x10\x04\x12\x1b\n" +
-	"\x17ATTACH_EVENT_TYPE_ERROR\x10\x052\xcf\x05\n" +
+	"\x17ATTACH_EVENT_TYPE_ERROR\x10\x05\x12\x1e\n" +
+	"\x1aATTACH_EVENT_TYPE_THINKING\x10\x062\xcf\x05\n" +
 	"\rBridgeService\x12O\n" +
 	"\fStartSession\x12\x1e.bridge.v1.StartSessionRequest\x1a\x1f.bridge.v1.StartSessionResponse\x12L\n" +
 	"\vStopSession\x12\x1d.bridge.v1.StopSessionRequest\x1a\x1e.bridge.v1.StopSessionResponse\x12I\n" +

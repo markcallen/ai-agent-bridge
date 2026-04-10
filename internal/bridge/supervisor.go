@@ -1,10 +1,14 @@
 package bridge
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
@@ -27,6 +31,17 @@ type AttachState struct {
 	Rows         uint32
 }
 
+// SupervisorOption configures optional Supervisor behaviour.
+type SupervisorOption func(*Supervisor)
+
+// WithStore attaches a SessionStore so that session metadata is persisted on
+// every terminal state transition and reloaded at startup via LoadHistory.
+func WithStore(store SessionStore) SupervisorOption {
+	return func(s *Supervisor) {
+		s.store = store
+	}
+}
+
 // Supervisor manages the lifecycle of PTY-backed provider sessions.
 type Supervisor struct {
 	registry        *Registry
@@ -38,6 +53,10 @@ type Supervisor struct {
 	mu       sync.RWMutex
 	sessions map[string]*managedSession
 	done     chan struct{}
+
+	store   SessionStore
+	histMu  sync.RWMutex
+	history map[string]SessionInfo
 }
 
 type managedSession struct {
@@ -45,18 +64,21 @@ type managedSession struct {
 	info         SessionInfo
 	provider     Provider
 	cmd          *exec.Cmd
-	ptmx         *os.File
+	ptmx         *os.File       // non-nil for PTY-backed sessions
+	stdin        io.WriteCloser // non-nil for stream-JSON sessions
+	streamJSON   bool           // true when provider uses stream-JSON mode
 	buf          *ByteBuffer
 	cancel       context.CancelFunc
 	stopGrace    time.Duration
 	lastActivity time.Time
 	forceStop    bool
+	recovered    bool
 
 	attachedClient string
 	live           chan OutputChunk
 }
 
-func NewSupervisor(registry *Registry, policy Policy, outputBufSize int, idleTimeout time.Duration) *Supervisor {
+func NewSupervisor(registry *Registry, policy Policy, outputBufSize int, idleTimeout time.Duration, opts ...SupervisorOption) *Supervisor {
 	if outputBufSize <= 0 {
 		outputBufSize = 8 << 20
 	}
@@ -68,9 +90,202 @@ func NewSupervisor(registry *Registry, policy Policy, outputBufSize int, idleTim
 		cleanupInterval: 30 * time.Second,
 		sessions:        make(map[string]*managedSession),
 		done:            make(chan struct{}),
+		history:         make(map[string]SessionInfo),
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 	go s.cleanupLoop()
 	return s
+}
+
+// LoadHistory reads all persisted sessions from the store and places them in
+// the in-memory history map so they are visible via Get and List. Sessions
+// that were not in a terminal state (i.e. the daemon crashed mid-flight) are
+// marked as SessionStateFailed with an "orphaned by daemon restart" message
+// and their updated state is written back to the store.
+//
+// Call LoadHistory once, before serving requests.
+func (s *Supervisor) LoadHistory() error {
+	if s.store == nil {
+		return nil
+	}
+	infos, err := s.store.LoadAll()
+	if err != nil {
+		return err
+	}
+	s.histMu.Lock()
+	defer s.histMu.Unlock()
+	for _, info := range infos {
+		if info.State != SessionStateStopped && info.State != SessionStateFailed {
+			if s.recoverProcess(&info) {
+				continue
+			}
+			info.State = SessionStateFailed
+			if info.Error == "" {
+				info.Error = "orphaned by daemon restart"
+			}
+			if info.StoppedAt.IsZero() {
+				info.StoppedAt = nowUTC()
+			}
+			// Best-effort: ignore write errors during startup.
+			if saveErr := s.store.Save(info); saveErr != nil {
+				slog.Warn("session store: failed to update orphaned session", "session_id", info.SessionID, "error", saveErr)
+			}
+		}
+		s.history[info.SessionID] = info
+	}
+	return nil
+}
+
+func (s *Supervisor) recoverProcess(info *SessionInfo) bool {
+	if info.ProcessID <= 0 || !processAlive(info.ProcessID) {
+		return false
+	}
+
+	ms := &managedSession{
+		info: SessionInfo{
+			SessionID:    info.SessionID,
+			ProjectID:    info.ProjectID,
+			Provider:     info.Provider,
+			State:        SessionStateRunning,
+			ProcessID:    info.ProcessID,
+			CreatedAt:    info.CreatedAt,
+			Error:        "recovered after daemon restart; live attach/input unavailable",
+			Recovered:    true,
+			ExitRecorded: info.ExitRecorded,
+			ExitCode:     info.ExitCode,
+			Cols:         info.Cols,
+			Rows:         info.Rows,
+		},
+		buf:          NewByteBuffer(s.bufSize),
+		stopGrace:    500 * time.Millisecond,
+		lastActivity: time.Now(),
+		recovered:    true,
+	}
+
+	if chunks, err := s.store.LoadChunks(info.SessionID); err == nil {
+		for _, chunk := range chunks {
+			ms.buf.AppendChunk(chunk)
+		}
+	} else {
+		slog.Warn("session store: failed to load chunks for recovered session", "session_id", info.SessionID, "error", err)
+	}
+	ms.info.OldestSeq = ms.buf.OldestSeq()
+	ms.info.LastSeq = ms.buf.LastSeq()
+
+	s.mu.Lock()
+	s.sessions[info.SessionID] = ms
+	s.mu.Unlock()
+	s.persistSession(ms.snapshotInfo())
+	go s.monitorRecoveredProcess(ms)
+	return true
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func (s *Supervisor) monitorRecoveredProcess(ms *managedSession) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+			ms.mu.Lock()
+			pid := ms.info.ProcessID
+			state := ms.info.State
+			ms.mu.Unlock()
+			if state == SessionStateStopped || state == SessionStateFailed {
+				return
+			}
+			if processAlive(pid) {
+				continue
+			}
+			ms.mu.Lock()
+			if ms.info.State != SessionStateStopped && ms.info.State != SessionStateFailed {
+				ms.info.State = SessionStateStopped
+				ms.info.StoppedAt = nowUTC()
+				ms.info.ProcessID = 0
+			}
+			ms.mu.Unlock()
+			s.persistSession(ms.snapshotInfo())
+			return
+		}
+	}
+}
+
+// persistSession writes info to the store if one is configured. Errors are
+// logged at warn level and do not propagate — persistence is best-effort.
+func (s *Supervisor) persistSession(info SessionInfo) {
+	if s.store == nil {
+		return
+	}
+	if err := s.store.Save(info); err != nil {
+		slog.Warn("session store: failed to persist session", "session_id", info.SessionID, "error", err)
+	}
+}
+
+// persistChunk writes a single PTY output chunk to the store. Errors are
+// logged at warn level and do not propagate — persistence is best-effort.
+func (s *Supervisor) persistChunk(sessionID string, chunk OutputChunk) {
+	if s.store == nil {
+		return
+	}
+	if err := s.store.SaveChunk(sessionID, chunk); err != nil {
+		slog.Warn("session store: failed to persist chunk", "session_id", sessionID, "seq", chunk.Seq, "error", err)
+	}
+}
+
+// attachHistory serves a read-only replay for a session that exists only in
+// the persisted history (i.e. from a previous daemon lifetime). Returns
+// ErrSessionNotFound if the session is not in history or has no store.
+func (s *Supervisor) attachHistory(sessionID, clientID string, afterSeq uint64) (*AttachState, error) {
+	if s.store == nil {
+		return nil, ErrSessionNotFound
+	}
+	s.histMu.RLock()
+	info, ok := s.history[sessionID]
+	s.histMu.RUnlock()
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+	chunks, err := s.store.LoadChunks(sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load chunks for %q: %w", sessionID, err)
+	}
+	var replay []OutputChunk
+	for _, c := range chunks {
+		if c.Seq > afterSeq {
+			replay = append(replay, c)
+		}
+	}
+	var oldest, last uint64
+	if len(chunks) > 0 {
+		oldest = chunks[0].Seq
+		last = chunks[len(chunks)-1].Seq
+	}
+	// A closed channel signals EOF immediately to the server's streaming loop.
+	closed := make(chan OutputChunk)
+	close(closed)
+	return &AttachState{
+		ClientID:     clientID,
+		Replay:       replay,
+		Live:         closed,
+		ReplayGap:    oldest > 0 && afterSeq > 0 && afterSeq < oldest-1,
+		OldestSeq:    oldest,
+		LastSeq:      last,
+		ExitRecorded: info.ExitRecorded,
+		ExitCode:     info.ExitCode,
+		Cols:         info.Cols,
+		Rows:         info.Rows,
+	}, nil
 }
 
 func (s *Supervisor) cleanupLoop() {
@@ -100,6 +315,33 @@ func (s *Supervisor) cleanupLoop() {
 			}
 		}
 	}
+}
+
+// resolveProvider tries the primary provider ID, then each fallback in order,
+// returning the first one that is registered and passes its Health check. If
+// no candidate succeeds, the last error is returned.
+func (s *Supervisor) resolveProvider(ctx context.Context, primary string, fallbacks []string) (Provider, error) {
+	candidates := make([]string, 0, 1+len(fallbacks))
+	candidates = append(candidates, primary)
+	candidates = append(candidates, fallbacks...)
+	var lastErr error
+	for _, id := range candidates {
+		p, err := s.registry.Get(id)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := p.Health(ctx); err != nil {
+			lastErr = fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
+			slog.Warn("provider unavailable, trying fallback", "provider", id, "error", err)
+			continue
+		}
+		if id != primary {
+			slog.Info("using fallback provider", "requested", primary, "selected", id)
+		}
+		return p, nil
+	}
+	return nil, lastErr
 }
 
 func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo, error) {
@@ -137,12 +379,9 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	}
 	s.mu.Unlock()
 
-	provider, err := s.registry.Get(cfg.Options["provider"])
+	provider, err := s.resolveProvider(ctx, cfg.Options["provider"], cfg.Fallbacks)
 	if err != nil {
 		return nil, err
-	}
-	if err := provider.Health(ctx); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
 	}
 
 	if cfg.InitialCols == 0 {
@@ -158,13 +397,11 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		cancel()
 		return nil, err
 	}
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
-		Cols: uint16(cfg.InitialCols),
-		Rows: uint16(cfg.InitialRows),
-	})
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("start pty session: %w", err)
+
+	// Detect whether the provider requests stream-JSON mode (no PTY).
+	useStreamJSON := false
+	if sjp, ok := provider.(StreamJSONProvider); ok && sjp.IsStreamJSON() {
+		useStreamJSON = true
 	}
 
 	now := nowUTC()
@@ -180,44 +417,144 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		},
 		provider:     provider,
 		cmd:          cmd,
-		ptmx:         ptmx,
+		streamJSON:   useStreamJSON,
 		buf:          NewByteBuffer(s.bufSize),
 		cancel:       cancel,
 		stopGrace:    provider.StopGrace(),
 		lastActivity: time.Now(),
 	}
 
-	s.mu.Lock()
-	if _, exists := s.sessions[cfg.SessionID]; exists {
+	if useStreamJSON {
+		if cmd.SysProcAttr == nil {
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		} else {
+			cmd.SysProcAttr.Setpgid = true
+		}
+		stdinPipe, err := cmd.StdinPipe()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("get stdin pipe: %w", err)
+		}
+		stdoutPipe, err := cmd.StdoutPipe()
+		if err != nil {
+			cancel()
+			_ = stdinPipe.Close()
+			return nil, fmt.Errorf("get stdout pipe: %w", err)
+		}
+		if err := cmd.Start(); err != nil {
+			cancel()
+			_ = stdinPipe.Close()
+			return nil, fmt.Errorf("start stream-json session: %w", err)
+		}
+		ms.stdin = stdinPipe
+		ms.info.ProcessID = cmd.Process.Pid
+		s.mu.Lock()
+		if _, exists := s.sessions[cfg.SessionID]; exists {
+			s.mu.Unlock()
+			cancel()
+			_ = stdinPipe.Close()
+			return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
+		}
+		s.sessions[cfg.SessionID] = ms
 		s.mu.Unlock()
-		cancel()
-		_ = ptmx.Close()
-		return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
+		go s.readLoopStreamJSON(ms, stdoutPipe)
+		go s.waitLoop(ms)
+	} else {
+		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
+			Cols: uint16(cfg.InitialCols),
+			Rows: uint16(cfg.InitialRows),
+		})
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("start pty session: %w", err)
+		}
+		ms.ptmx = ptmx
+		ms.info.ProcessID = cmd.Process.Pid
+		s.mu.Lock()
+		if _, exists := s.sessions[cfg.SessionID]; exists {
+			s.mu.Unlock()
+			cancel()
+			_ = ptmx.Close()
+			return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
+		}
+		s.sessions[cfg.SessionID] = ms
+		s.mu.Unlock()
+		go s.readLoop(ms)
+		go s.waitLoop(ms)
 	}
-	s.sessions[cfg.SessionID] = ms
-	s.mu.Unlock()
-
-	go s.readLoop(ms)
-	go s.waitLoop(ms)
 
 	info := ms.snapshotInfo()
+	s.persistSession(info)
 	return &info, nil
 }
 
 func (s *Supervisor) readLoop(ms *managedSession) {
+	defer s.closeLive(ms)
 	buf := make([]byte, 8192)
 	for {
 		n, err := ms.ptmx.Read(buf)
 		if n > 0 {
-			chunk := ms.buf.Append(buf[:n])
-			ms.mu.Lock()
-			ms.info.OldestSeq = ms.buf.OldestSeq()
-			ms.info.LastSeq = ms.buf.LastSeq()
-			ms.lastActivity = time.Now()
-			live := ms.live
-			ms.mu.Unlock()
-			if live != nil {
-				live <- chunk
+			s.appendChunk(ms, buf[:n], ChunkTypeOutput)
+		}
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				ms.mu.Lock()
+				if ms.info.Error == "" && !ms.info.ExitRecorded {
+					ms.info.Error = err.Error()
+				}
+				ms.mu.Unlock()
+			}
+			return
+		}
+	}
+}
+
+// claudeStreamEvent is the JSON shape emitted by `claude --output-format stream-json`.
+// Only the fields we inspect are declared; unknown fields are discarded.
+type claudeStreamEvent struct {
+	Type  string `json:"type"`
+	Delta *struct {
+		Type     string `json:"type"`
+		Text     string `json:"text,omitempty"`
+		Thinking string `json:"thinking,omitempty"`
+	} `json:"delta,omitempty"`
+}
+
+// readLoopStreamJSON reads newline-delimited JSON from a stream-JSON provider's
+// stdout, parses thinking and text deltas, and appends typed OutputChunks.
+func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
+	defer func() { _ = r.Close() }()
+	defer s.closeLive(ms)
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if errors.Is(err, io.EOF) && len(line) == 0 {
+			return
+		}
+		line = bytes.TrimSuffix(line, []byte{'\n'})
+		line = bytes.TrimSuffix(line, []byte{'\r'})
+		if len(line) == 0 {
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			continue
+		}
+		var ev claudeStreamEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			// Non-JSON line (e.g. a log or warning): emit as raw output.
+			s.appendChunk(ms, line, ChunkTypeOutput)
+			continue
+		}
+		if ev.Type == "content_block_delta" && ev.Delta != nil {
+			switch ev.Delta.Type {
+			case "thinking_delta":
+				if ev.Delta.Thinking != "" {
+					s.appendChunk(ms, []byte(ev.Delta.Thinking), ChunkTypeThinking)
+				}
+			case "text_delta":
+				if ev.Delta.Text != "" {
+					s.appendChunk(ms, []byte(ev.Delta.Text), ChunkTypeOutput)
+				}
 			}
 		}
 		if err != nil {
@@ -230,6 +567,36 @@ func (s *Supervisor) readLoop(ms *managedSession) {
 			}
 			return
 		}
+	}
+}
+
+// closeLive closes the managed session's live channel exactly once. It
+// acquires ms.mu, reads and nils ms.live, then closes the old reference
+// outside the lock. This must only be called from readLoop or
+// readLoopStreamJSON — i.e. after all sends to the channel are complete.
+func (s *Supervisor) closeLive(ms *managedSession) {
+	ms.mu.Lock()
+	live := ms.live
+	ms.live = nil
+	ms.mu.Unlock()
+	if live != nil {
+		close(live)
+	}
+}
+
+// appendChunk adds a new chunk with the given type to the session buffer and
+// notifies any attached live client.
+func (s *Supervisor) appendChunk(ms *managedSession, payload []byte, ctype ChunkType) {
+	chunk := ms.buf.AppendTyped(payload, ctype)
+	s.persistChunk(ms.info.SessionID, chunk)
+	ms.mu.Lock()
+	ms.info.OldestSeq = ms.buf.OldestSeq()
+	ms.info.LastSeq = ms.buf.LastSeq()
+	ms.lastActivity = time.Now()
+	live := ms.live
+	ms.mu.Unlock()
+	if live != nil {
+		live <- chunk
 	}
 }
 
@@ -250,6 +617,7 @@ func (s *Supervisor) waitLoop(ms *managedSession) {
 	ms.info.StoppedAt = nowUTC()
 	ms.info.ExitRecorded = true
 	ms.info.ExitCode = exitCode
+	ms.info.ProcessID = 0
 	if err != nil && !ms.forceStop {
 		ms.info.State = SessionStateFailed
 		if ms.info.Error == "" {
@@ -260,6 +628,8 @@ func (s *Supervisor) waitLoop(ms *managedSession) {
 	}
 	ms.cancel()
 	ms.mu.Unlock()
+
+	s.persistSession(ms.snapshotInfo())
 }
 
 func (s *Supervisor) Stop(sessionID string, force bool) error {
@@ -275,11 +645,58 @@ func (s *Supervisor) Stop(sessionID string, force bool) error {
 		ms.mu.Unlock()
 		return nil
 	}
+	if ms.recovered {
+		ms.info.State = SessionStateStopping
+		ms.forceStop = force
+		pid := ms.info.ProcessID
+		grace := ms.stopGrace
+		ms.mu.Unlock()
+
+		if force {
+			if pid > 0 {
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+			}
+		} else if pid > 0 {
+			_ = syscall.Kill(-pid, syscall.SIGTERM)
+		}
+
+		go func() {
+			deadline := time.Now().Add(grace)
+			for time.Now().Before(deadline) {
+				if !processAlive(pid) {
+					ms.mu.Lock()
+					ms.info.State = SessionStateStopped
+					ms.info.StoppedAt = nowUTC()
+					ms.info.ProcessID = 0
+					ms.mu.Unlock()
+					s.persistSession(ms.snapshotInfo())
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			if !force && pid > 0 && processAlive(pid) {
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+			}
+			ms.mu.Lock()
+			ms.info.State = SessionStateStopped
+			ms.info.StoppedAt = nowUTC()
+			ms.info.ProcessID = 0
+			ms.mu.Unlock()
+			s.persistSession(ms.snapshotInfo())
+		}()
+		return nil
+	}
 	ms.info.State = SessionStateStopping
 	ms.forceStop = force
 	pid := ms.cmd.Process.Pid
 	grace := ms.stopGrace
+	stdin := ms.stdin
 	ms.mu.Unlock()
+
+	// Closing stdin signals EOF to stream-JSON providers that read from stdin.
+	if stdin != nil {
+		_ = stdin.Close()
+	}
 
 	if force {
 		if pid > 0 {
@@ -315,6 +732,10 @@ func (s *Supervisor) WriteInput(sessionID, clientID string, data []byte) (int, e
 		return 0, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	ms.mu.Lock()
+	if ms.recovered {
+		ms.mu.Unlock()
+		return 0, ErrSessionRecoveryUnavailable
+	}
 	if ms.attachedClient == "" {
 		ms.mu.Unlock()
 		return 0, ErrClientNotAttached
@@ -323,13 +744,21 @@ func (s *Supervisor) WriteInput(sessionID, clientID string, data []byte) (int, e
 		ms.mu.Unlock()
 		return 0, ErrClientMismatch
 	}
+	if ms.recovered {
+		ms.mu.Unlock()
+		return 0, ErrSessionRecoveryUnavailable
+	}
 	ms.lastActivity = time.Now()
+	streamJSON := ms.streamJSON
+	stdin := ms.stdin
+	ptmx := ms.ptmx
 	ms.mu.Unlock()
-	n, err := ms.ptmx.Write(data)
-	if err != nil {
+	if streamJSON {
+		n, err := stdin.Write(data)
 		return n, err
 	}
-	return n, nil
+	n, err := ptmx.Write(data)
+	return n, err
 }
 
 func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error {
@@ -340,6 +769,10 @@ func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error
 		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	ms.mu.Lock()
+	if ms.recovered {
+		ms.mu.Unlock()
+		return ErrSessionRecoveryUnavailable
+	}
 	if ms.attachedClient == "" {
 		ms.mu.Unlock()
 		return ErrClientNotAttached
@@ -348,11 +781,20 @@ func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error
 		ms.mu.Unlock()
 		return ErrClientMismatch
 	}
+	if ms.recovered {
+		ms.mu.Unlock()
+		return ErrSessionRecoveryUnavailable
+	}
 	ms.info.Cols = cols
 	ms.info.Rows = rows
 	ms.lastActivity = time.Now()
+	streamJSON := ms.streamJSON
+	ptmx := ms.ptmx
 	ms.mu.Unlock()
-	return pty.Setsize(ms.ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	if streamJSON {
+		return nil // no PTY to resize for stream-JSON sessions
+	}
+	return pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 }
 
 func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*AttachState, error) {
@@ -360,11 +802,34 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*Attac
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
+		// For stopped/failed sessions that were persisted in a previous daemon
+		// lifetime, serve the stored chunks in read-only mode (no live channel).
+		if state, err := s.attachHistory(sessionID, clientID, afterSeq); state != nil || err != ErrSessionNotFound {
+			return state, err
+		}
 		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	if ms.recovered {
+		oldest := ms.buf.OldestSeq()
+		last := ms.buf.LastSeq()
+		closed := make(chan OutputChunk)
+		close(closed)
+		return &AttachState{
+			ClientID:     clientID,
+			Replay:       ms.buf.After(afterSeq),
+			Live:         closed,
+			ReplayGap:    oldest > 0 && afterSeq > 0 && afterSeq < oldest-1,
+			OldestSeq:    oldest,
+			LastSeq:      last,
+			ExitRecorded: ms.info.ExitRecorded,
+			ExitCode:     ms.info.ExitCode,
+			Cols:         ms.info.Cols,
+			Rows:         ms.info.Rows,
+		}, nil
+	}
 	if ms.attachedClient != "" {
 		return nil, ErrSessionAlreadyAttached
 	}
@@ -396,10 +861,20 @@ func (s *Supervisor) Detach(sessionID, clientID string) error {
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
 	if !ok {
+		// History sessions are served read-only; detach is a no-op.
+		s.histMu.RLock()
+		_, inHistory := s.history[sessionID]
+		s.histMu.RUnlock()
+		if inHistory {
+			return nil
+		}
 		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	if ms.recovered {
+		return nil
+	}
 	if ms.attachedClient != clientID {
 		return ErrClientMismatch
 	}
@@ -417,24 +892,47 @@ func (s *Supervisor) Get(sessionID string) (*SessionInfo, error) {
 	s.mu.RLock()
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+	if ok {
+		info := ms.snapshotInfo()
+		return &info, nil
 	}
-	info := ms.snapshotInfo()
-	return &info, nil
+	// Fall back to history (sessions persisted from a previous daemon lifetime).
+	s.histMu.RLock()
+	info, ok := s.history[sessionID]
+	s.histMu.RUnlock()
+	if ok {
+		return &info, nil
+	}
+	return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 }
 
 func (s *Supervisor) List(projectID string) []SessionInfo {
+	// Snapshot live session IDs and their info under the live lock.
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	liveIDs := make(map[string]struct{}, len(s.sessions))
 	out := make([]SessionInfo, 0, len(s.sessions))
-	for _, ms := range s.sessions {
+	for id, ms := range s.sessions {
+		liveIDs[id] = struct{}{}
 		info := ms.snapshotInfo()
 		if projectID != "" && info.ProjectID != projectID {
 			continue
 		}
 		out = append(out, info)
 	}
+	s.mu.RUnlock()
+
+	// Append historical sessions not present in the live map.
+	s.histMu.RLock()
+	for id, info := range s.history {
+		if _, live := liveIDs[id]; live {
+			continue
+		}
+		if projectID != "" && info.ProjectID != projectID {
+			continue
+		}
+		out = append(out, info)
+	}
+	s.histMu.RUnlock()
 	return out
 }
 

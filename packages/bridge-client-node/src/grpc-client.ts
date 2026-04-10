@@ -50,6 +50,62 @@ function resolveProto(): { protoPath: string; includeDir: string } {
 
 const { protoPath: PROTO_PATH, includeDir: PROTO_INCLUDE_DIR } = resolveProto();
 
+type ChannelCredentialsLike = {
+  _isSecure?: () => boolean;
+  secureContext?: Parameters<typeof grpc.credentials.createFromSecureContext>[0];
+  verifyOptions?: Parameters<typeof grpc.credentials.createSsl>[3];
+  channelCredentials?: unknown;
+  callCredentials?: unknown;
+};
+
+function normalizeChannelCredentials(
+  credentials: unknown
+): grpc.ChannelCredentials {
+  if (!credentials) {
+    return grpc.credentials.createInsecure();
+  }
+
+  if (credentials instanceof grpc.ChannelCredentials) {
+    return credentials;
+  }
+
+  const maybeCredentials = credentials as ChannelCredentialsLike;
+
+  // Preserve insecure credentials when they come from a different grpc-js
+  // install by recreating them with the local package instance.
+  if (typeof maybeCredentials._isSecure === "function" && !maybeCredentials._isSecure()) {
+    return grpc.credentials.createInsecure();
+  }
+
+  // Rebuild secure credentials from the underlying secure context so the
+  // local grpc-js copy receives a ChannelCredentials instance it recognizes.
+  if (maybeCredentials.secureContext) {
+    const verifyOptions = maybeCredentials.verifyOptions ?? {};
+    return grpc.credentials.createFromSecureContext(
+      maybeCredentials.secureContext,
+      verifyOptions
+    );
+  }
+
+  // If the caller passed composed credentials from another grpc-js install,
+  // normalize the channel side and preserve the foreign call credentials.
+  if (
+    maybeCredentials.channelCredentials &&
+    maybeCredentials.callCredentials
+  ) {
+    const channelCredentials = normalizeChannelCredentials(
+      maybeCredentials.channelCredentials
+    );
+    return channelCredentials.compose(
+      maybeCredentials.callCredentials as grpc.CallCredentials
+    );
+  }
+
+  throw new TypeError(
+    "Channel credentials must be a ChannelCredentials object"
+  );
+}
+
 const PROTO_OPTIONS: protoLoader.Options = {
   keepCase: true,
   longs: Number,
@@ -292,9 +348,7 @@ export class BridgeGrpcClient {
     const v1Pkg = bridgePkg["v1"] as Record<string, unknown>;
     const ServiceCtor = v1Pkg["BridgeService"] as typeof grpc.Client;
 
-    const creds =
-      (credentials as grpc.ChannelCredentials) ??
-      grpc.credentials.createInsecure();
+    const creds = normalizeChannelCredentials(credentials);
 
     this.stub = new ServiceCtor(
       bridgeAddr,

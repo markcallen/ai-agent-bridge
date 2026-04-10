@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -34,6 +36,10 @@ func main() {
 		bootstrapLogger.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+	if err := config.ValidateNodeRuntime("."); err != nil {
+		bootstrapLogger.Error("node runtime validation failed", "error", err)
+		os.Exit(1)
+	}
 	if err := config.ValidateProviderEnv(cfg); err != nil {
 		bootstrapLogger.Error("provider environment validation failed", "error", err)
 		os.Exit(1)
@@ -57,6 +63,7 @@ func main() {
 			StartupProbe:   pcfg.StartupProbe,
 			PromptPattern:  pcfg.PromptPattern,
 			RequiredEnv:    pcfg.RequiredEnv,
+			StreamJSON:     pcfg.StreamJSON,
 		})
 		if err := registry.Register(p); err != nil {
 			logger.Error("register provider", "provider", name, "error", err)
@@ -104,10 +111,35 @@ func main() {
 		AllowedPaths:  cfg.AllowedPaths,
 	}
 
+	// Generate a stable UUID for this daemon instance. Clients can compare
+	// this value across Health calls to detect a restart (issue #6 phase 1).
+	serverInstanceID := generateServerID()
+	logger.Info("bridge instance id", "server_instance_id", serverInstanceID)
+
+	// Set up optional session persistence store (issue #6 phase 1).
+	var supOpts []bridge.SupervisorOption
+	if cfg.Persistence.DBPath != "" {
+		store, err := bridge.NewBoltSessionStore(cfg.Persistence.DBPath)
+		if err != nil {
+			logger.Error("open session store", "path", cfg.Persistence.DBPath, "error", err)
+			os.Exit(1)
+		}
+		defer func() {
+			if err := store.Close(); err != nil {
+				logger.Warn("close session store", "error", err)
+			}
+		}()
+		supOpts = append(supOpts, bridge.WithStore(store))
+		logger.Info("session persistence enabled", "db_path", cfg.Persistence.DBPath)
+	}
+
 	// Set up supervisor
 	idleTimeout := config.ParseDuration(cfg.Sessions.IdleTimeout, 30*time.Minute)
-	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, idleTimeout)
+	sup := bridge.NewSupervisor(registry, policy, cfg.Sessions.EventBufferSize, idleTimeout, supOpts...)
 	defer sup.Close()
+	if err := sup.LoadHistory(); err != nil {
+		logger.Warn("failed to load session history", "error", err)
+	}
 
 	// Set up JWT verifier
 	verifier := &auth.JWTVerifier{
@@ -168,6 +200,20 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer(grpcOpts...)
+	// Build per-provider fallback map from config.
+	providerFallbacks := map[string][]string{}
+	if cfg.FeatureFlags.ProviderFallbacks {
+		providerFallbacks = make(map[string][]string, len(cfg.Providers))
+		for name, pcfg := range cfg.Providers {
+			if len(pcfg.Fallbacks) > 0 {
+				providerFallbacks[name] = pcfg.Fallbacks
+			}
+		}
+		logger.Info("provider fallbacks enabled", "providers", len(providerFallbacks))
+	} else {
+		logger.Info("provider fallbacks disabled")
+	}
+
 	bridgeServer := server.New(sup, registry, logger, server.RateLimitConfig{
 		GlobalRPS:                  cfg.RateLimits.GlobalRPS,
 		GlobalBurst:                cfg.RateLimits.GlobalBurst,
@@ -175,7 +221,7 @@ func main() {
 		StartSessionPerClientBurst: cfg.RateLimits.StartSessionPerClientBurst,
 		SendInputPerSessionRPS:     cfg.RateLimits.SendInputPerSessionRPS,
 		SendInputPerSessionBurst:   cfg.RateLimits.SendInputPerSessionBurst,
-	})
+	}, serverInstanceID, providerFallbacks)
 	bridgev1.RegisterBridgeServiceServer(grpcServer, bridgeServer)
 
 	ln, err := net.Listen("tcp", cfg.Server.Listen)
@@ -198,6 +244,18 @@ func main() {
 		logger.Error("serve", "error", err)
 		os.Exit(1)
 	}
+}
+
+// generateServerID returns a random UUID (RFC 4122 v4) for this daemon instance.
+func generateServerID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("generateServerID: %v", err))
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant bits
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 func newLogger(cfg *config.Config, redactor *redact.Redactor) *slog.Logger {

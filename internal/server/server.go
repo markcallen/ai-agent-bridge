@@ -24,12 +24,15 @@ func generateID() string {
 type BridgeServer struct {
 	bridgev1.UnimplementedBridgeServiceServer
 
-	supervisor *bridge.Supervisor
-	registry   *bridge.Registry
-	logger     *slog.Logger
-	globalRL   *keyedLimiter
-	startRL    *keyedLimiter
-	writeRL    *keyedLimiter
+	supervisor       *bridge.Supervisor
+	registry         *bridge.Registry
+	logger           *slog.Logger
+	globalRL         *keyedLimiter
+	startRL          *keyedLimiter
+	writeRL          *keyedLimiter
+	serverInstanceID string
+	// providerFallbacks maps each provider ID to its ordered fallback list.
+	providerFallbacks map[string][]string
 }
 
 type RateLimitConfig struct {
@@ -41,14 +44,16 @@ type RateLimitConfig struct {
 	SendInputPerSessionBurst   int
 }
 
-func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger, rl RateLimitConfig) *BridgeServer {
+func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger, rl RateLimitConfig, serverInstanceID string, providerFallbacks map[string][]string) *BridgeServer {
 	return &BridgeServer{
-		supervisor: supervisor,
-		registry:   registry,
-		logger:     logger,
-		globalRL:   newKeyedLimiter(rl.GlobalRPS, rl.GlobalBurst),
-		startRL:    newKeyedLimiter(rl.StartSessionPerClientRPS, rl.StartSessionPerClientBurst),
-		writeRL:    newKeyedLimiter(rl.SendInputPerSessionRPS, rl.SendInputPerSessionBurst),
+		supervisor:        supervisor,
+		registry:          registry,
+		logger:            logger,
+		globalRL:          newKeyedLimiter(rl.GlobalRPS, rl.GlobalBurst),
+		startRL:           newKeyedLimiter(rl.StartSessionPerClientRPS, rl.StartSessionPerClientBurst),
+		writeRL:           newKeyedLimiter(rl.SendInputPerSessionRPS, rl.SendInputPerSessionBurst),
+		serverInstanceID:  serverInstanceID,
+		providerFallbacks: providerFallbacks,
 	}
 }
 
@@ -94,6 +99,7 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 		ProjectID:   req.ProjectId,
 		RepoPath:    req.RepoPath,
 		Options:     opts,
+		Fallbacks:   s.providerFallbacks[req.Provider],
 		InitialCols: req.InitialCols,
 		InitialRows: req.InitialRows,
 	})
@@ -342,7 +348,7 @@ func mapBridgeError(err error, op string) error {
 		return status.Errorf(codes.ResourceExhausted, "%s: %v", op, err)
 	case errors.Is(err, bridge.ErrClientNotAttached), errors.Is(err, bridge.ErrClientMismatch):
 		return status.Errorf(codes.PermissionDenied, "%s: %v", op, err)
-	case errors.Is(err, bridge.ErrProviderUnavailable):
+	case errors.Is(err, bridge.ErrProviderUnavailable), errors.Is(err, bridge.ErrSessionRecoveryUnavailable):
 		return status.Errorf(codes.Unavailable, "%s: %v", op, err)
 	case errors.Is(err, bridge.ErrSessionLimitReached):
 		return status.Errorf(codes.ResourceExhausted, "%s: %v", op, err)
@@ -361,7 +367,11 @@ func (s *BridgeServer) Health(ctx context.Context, req *bridgev1.HealthRequest) 
 		}
 		providers = append(providers, item)
 	}
-	return &bridgev1.HealthResponse{Status: "serving", Providers: providers}, nil
+	return &bridgev1.HealthResponse{
+		Status:           "serving",
+		Providers:        providers,
+		ServerInstanceId: s.serverInstanceID,
+	}, nil
 }
 
 func (s *BridgeServer) ListProviders(ctx context.Context, req *bridgev1.ListProvidersRequest) (*bridgev1.ListProvidersResponse, error) {
@@ -426,7 +436,7 @@ func mapState(s bridge.SessionState) bridgev1.SessionStatus {
 }
 
 func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *bridgev1.AttachSessionEvent {
-	return &bridgev1.AttachSessionEvent{
+	ev := &bridgev1.AttachSessionEvent{
 		Type:      bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT,
 		Seq:       chunk.Seq,
 		Timestamp: timestamppb.New(chunk.Timestamp),
@@ -434,4 +444,10 @@ func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *brid
 		Payload:   chunk.Payload,
 		Replay:    replay,
 	}
+	if chunk.Type == bridge.ChunkTypeThinking {
+		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_THINKING
+		ev.ThinkingText = string(chunk.Payload)
+		ev.Payload = nil
+	}
+	return ev
 }

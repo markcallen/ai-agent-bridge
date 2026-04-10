@@ -95,7 +95,7 @@ func TestBridgeHelpersAndProviderResponses(t *testing.T) {
 		t.Fatalf("Register broken: %v", err)
 	}
 
-	s := New(nil, registry, slog.Default(), RateLimitConfig{})
+	s := New(nil, registry, slog.Default(), RateLimitConfig{}, "test-instance", nil)
 	health, err := s.Health(context.Background(), &bridgev1.HealthRequest{})
 	if err != nil {
 		t.Fatalf("Health: %v", err)
@@ -170,6 +170,7 @@ func TestMapBridgeErrorAndState(t *testing.T) {
 		{err: bridge.ErrSessionAlreadyAttached, code: codes.ResourceExhausted},
 		{err: bridge.ErrClientMismatch, code: codes.PermissionDenied},
 		{err: bridge.ErrProviderUnavailable, code: codes.Unavailable},
+		{err: bridge.ErrSessionRecoveryUnavailable, code: codes.Unavailable},
 		{err: bridge.ErrSessionLimitReached, code: codes.ResourceExhausted},
 		{err: errors.New("boom"), code: codes.Internal},
 	}

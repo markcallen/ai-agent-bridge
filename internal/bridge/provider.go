@@ -22,10 +22,14 @@ type Provider interface {
 
 // SessionConfig holds configuration for starting a new provider session.
 type SessionConfig struct {
-	ProjectID   string
-	SessionID   string
-	RepoPath    string
-	Options     map[string]string
+	ProjectID string
+	SessionID string
+	RepoPath  string
+	Options   map[string]string
+	// Fallbacks is an ordered list of provider IDs to try if the primary
+	// provider (Options["provider"]) is unavailable. At most 2 entries are
+	// meaningful; extras are silently ignored.
+	Fallbacks   []string
 	InitialCols uint32
 	InitialRows uint32
 }
@@ -48,11 +52,13 @@ type SessionInfo struct {
 	ProjectID        string
 	Provider         string
 	State            SessionState
+	ProcessID        int
 	CreatedAt        time.Time
 	StoppedAt        time.Time
 	Error            string
 	Attached         bool
 	AttachedClientID string
+	Recovered        bool
 	ExitRecorded     bool
 	ExitCode         int
 	OldestSeq        uint64
@@ -61,9 +67,28 @@ type SessionInfo struct {
 	Rows             uint32
 }
 
-// OutputChunk is one retained PTY byte chunk.
+// ChunkType classifies an OutputChunk's content.
+type ChunkType uint8
+
+const (
+	// ChunkTypeOutput is raw terminal/text output (default, zero value).
+	ChunkTypeOutput ChunkType = 0
+	// ChunkTypeThinking carries a thinking block from a stream-JSON provider.
+	ChunkTypeThinking ChunkType = 1
+)
+
+// OutputChunk is one retained output chunk from an agent session.
 type OutputChunk struct {
 	Seq       uint64
 	Timestamp time.Time
 	Payload   []byte
+	Type      ChunkType // defaults to ChunkTypeOutput
+}
+
+// StreamJSONProvider is implemented by providers that emit structured JSONL
+// (e.g. claude --output-format stream-json) instead of raw PTY bytes.
+// These providers run without a PTY and have their stdout parsed for typed
+// events (text, thinking).
+type StreamJSONProvider interface {
+	IsStreamJSON() bool
 }

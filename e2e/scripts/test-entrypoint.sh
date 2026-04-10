@@ -26,29 +26,37 @@ else
   rm -rf /tmp/cache-cleaner-src
 fi
 
-echo "==> Running e2e test..."
-extra_args=()
-if [ -n "${E2E_ONLY:-}" ]; then
-  extra_args+=(-only "$E2E_ONLY")
+echo "==> Running e2e test suite..."
+
+# Map the optional E2E_ONLY env var to a -test.run filter.
+# E2E_ONLY=claude  → -test.run TestBridgeSuite/TestClaude
+# E2E_ONLY=all / unset → run all suite tests
+run_filter=""
+if [ -n "${E2E_ONLY:-}" ] && [ "${E2E_ONLY}" != "all" ]; then
+  # Capitalise first letter to match Go test method names (claude → Claude)
+  provider="$(echo "${E2E_ONLY}" | sed 's/./\u&/')"
+  run_filter="-test.run TestBridgeSuite/Test${provider}"
 fi
 
-e2e-test \
-  -target bridge:9445 \
-  -cacert "$CERT_DIR/ca-bundle.crt" \
-  -cert "$CERT_DIR/e2e-client.crt" \
-  -key "$CERT_DIR/e2e-client.key" \
-  -jwt-key "$CERT_DIR/jwt-signing.key" \
-  -jwt-issuer e2e \
-  -repo /tmp/cache-cleaner \
-  -timeout 300s \
-  "${extra_args[@]}"
+e2e-suite \
+  -test.v \
+  -test.timeout 300s \
+  ${run_filter} \
+  -bridge.target bridge:9445 \
+  -bridge.cacert "$CERT_DIR/ca-bundle.crt" \
+  -bridge.cert "$CERT_DIR/e2e-client.crt" \
+  -bridge.key "$CERT_DIR/e2e-client.key" \
+  -bridge.jwt-key "$CERT_DIR/jwt-signing.key" \
+  -bridge.jwt-issuer e2e \
+  -bridge.repo /tmp/cache-cleaner \
+  -bridge.timeout 300s
 
 exit_code=$?
 
 if [ $exit_code -eq 0 ]; then
-  echo "==> E2E test PASSED"
+  echo "==> E2E test suite PASSED"
 else
-  echo "==> E2E test FAILED (exit code $exit_code)" >&2
+  echo "==> E2E test suite FAILED (exit code $exit_code)" >&2
 fi
 
 exit $exit_code

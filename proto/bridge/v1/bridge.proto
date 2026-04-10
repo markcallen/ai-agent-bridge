@@ -37,6 +37,9 @@ enum AttachEventType {
   ATTACH_EVENT_TYPE_REPLAY_GAP = 3;
   ATTACH_EVENT_TYPE_SESSION_EXIT = 4;
   ATTACH_EVENT_TYPE_ERROR = 5;
+  // ATTACH_EVENT_TYPE_THINKING carries a thinking block emitted by an agent
+  // before its final response. Only emitted by stream-JSON providers (issue #1).
+  ATTACH_EVENT_TYPE_THINKING = 6;
 }
 
 message StartSessionRequest {
@@ -114,6 +117,8 @@ message AttachSessionEvent {
   string error = 11;
   uint32 cols = 12;
   uint32 rows = 13;
+  // thinking_text is set when type == ATTACH_EVENT_TYPE_THINKING (issue #1).
+  string thinking_text = 14;
 }
 
 message WriteInputRequest {
@@ -143,6 +148,11 @@ message HealthRequest {}
 message HealthResponse {
   string status = 1;
   repeated ProviderHealth providers = 2;
+  // server_instance_id is a UUID generated once at daemon startup.
+  // Clients can compare this value across Health calls to detect a daemon
+  // restart (a changed ID means the process restarted and all in-memory
+  // session state has been lost).
+  string server_instance_id = 3;
 }
 
 message ProviderHealth {

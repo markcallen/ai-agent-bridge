@@ -14,9 +14,11 @@ type Config struct {
 	Server       ServerConfig              `yaml:"server"`
 	TLS          TLSConfig                 `yaml:"tls"`
 	Auth         AuthConfig                `yaml:"auth"`
+	FeatureFlags FeatureFlagsConfig        `yaml:"feature_flags"`
 	Sessions     SessionsConfig            `yaml:"sessions"`
 	Input        InputConfig               `yaml:"input"`
 	RateLimits   RateLimitsConfig          `yaml:"rate_limits"`
+	Persistence  PersistenceConfig         `yaml:"persistence"`
 	Providers    map[string]ProviderConfig `yaml:"providers"`
 	AllowedPaths []string                  `yaml:"allowed_paths"`
 	Logging      LoggingConfig             `yaml:"logging"`
@@ -36,6 +38,10 @@ type AuthConfig struct {
 	JWTPublicKeys []JWTKeyConfig `yaml:"jwt_public_keys"`
 	JWTAudience   string         `yaml:"jwt_audience"`
 	JWTMaxTTL     string         `yaml:"jwt_max_ttl"`
+}
+
+type FeatureFlagsConfig struct {
+	ProviderFallbacks bool `yaml:"provider_fallbacks"`
 }
 
 type JWTKeyConfig struct {
@@ -68,22 +74,37 @@ type RateLimitsConfig struct {
 
 type ProviderConfig struct {
 	Binary          string   `yaml:"binary"`
-	Mode            string   `yaml:"mode"` // "exec" for one-shot exec providers (e.g. codex)
+	Mode            string   `yaml:"mode"` // deprecated: no longer supported; remove from config
 	Args            []string `yaml:"args"`
 	StartupTimeout  string   `yaml:"startup_timeout"`
 	ValidateStartup *bool    `yaml:"validate_startup"`
 	StartupProbe    string   `yaml:"startup_probe"`
 	RequiredEnv     []string `yaml:"required_env"`
-	PTY             bool     `yaml:"pty"`
+	PTY             *bool    `yaml:"pty"` // deprecated: PTY is the default; remove this field
 	StreamJSON      bool     `yaml:"stream_json"`
 	// PromptPattern is a regex matched against PTY output lines. When it
 	// matches the first time, AGENT_READY is emitted; on subsequent matches
 	// after output, RESPONSE_COMPLETE is emitted.
 	PromptPattern string `yaml:"prompt_pattern"`
+	// Fallbacks is an ordered list of provider IDs to try when this provider
+	// is unavailable at session start time. At most 2 entries are allowed.
+	Fallbacks []string `yaml:"fallbacks"`
 }
 
 func (p ProviderConfig) ShouldValidateStartup() bool {
 	return p.ValidateStartup == nil || *p.ValidateStartup
+}
+
+type PersistenceConfig struct {
+	// DBPath is the path to the bbolt database file used to persist session
+	// metadata and PTY output chunks across daemon restarts. An empty string
+	// disables persistence.
+	DBPath string `yaml:"db_path"`
+	// ChunkStorageBytes is the soft upper bound on total chunk bytes stored per
+	// session in the database. 0 means unlimited (the default). Enforcement is
+	// planned for a future release; this field is reserved for configuration
+	// compatibility.
+	ChunkStorageBytes int `yaml:"chunk_storage_bytes"`
 }
 
 type LoggingConfig struct {
@@ -224,6 +245,12 @@ func validate(cfg *Config) error {
 		if provider.Binary == "" {
 			return fmt.Errorf("config: providers.%s.binary is required", name)
 		}
+		if provider.Mode != "" {
+			return fmt.Errorf("config: providers.%s.mode is no longer supported; remove the field and use stream_json: true only for JSONL providers", name)
+		}
+		if provider.PTY != nil {
+			return fmt.Errorf("config: providers.%s.pty is no longer supported; PTY is the default and stream_json: true opts out of PTY allocation", name)
+		}
 		if provider.StartupProbe != "" {
 			switch provider.StartupProbe {
 			case "prompt", "output", "none":
@@ -239,6 +266,17 @@ func validate(cfg *Config) error {
 		for i, envName := range provider.RequiredEnv {
 			if strings.TrimSpace(envName) == "" {
 				return fmt.Errorf("config: providers.%s.required_env[%d] must not be empty", name, i)
+			}
+		}
+		if len(provider.Fallbacks) > 2 {
+			return fmt.Errorf("config: providers.%s.fallbacks must have at most 2 entries", name)
+		}
+		for i, fb := range provider.Fallbacks {
+			if fb == name {
+				return fmt.Errorf("config: providers.%s.fallbacks[%d]: provider cannot be its own fallback", name, i)
+			}
+			if _, ok := cfg.Providers[fb]; !ok {
+				return fmt.Errorf("config: providers.%s.fallbacks[%d]: unknown provider %q", name, i, fb)
 			}
 		}
 	}

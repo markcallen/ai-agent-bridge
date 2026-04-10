@@ -9,6 +9,7 @@ CHAT_TARGET ?= bridge.local:9445
 CHAT_PROVIDER ?= claude
 CHAT_PROJECT ?= dev
 CHAT_REPO ?= /repos/penduin
+CHAT_JWT_KEY ?= ../../certs/jwt-signing.key
 build: proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BRIDGE) ./cmd/bridge
@@ -70,16 +71,16 @@ run: build
 	$(BRIDGE) --config $(CONFIG)
 
 dev-run: dev-setup
-	$(BRIDGE) --config $(DEV_CONFIG)
+	./scripts/with_env_secrets.sh $(BRIDGE) --config $(DEV_CONFIG)
 
 docker-run:
-	docker compose up --build bridge
+	./scripts/with_env_secrets.sh docker compose up --build bridge
 
 smoke:
-	./scripts/smoke.sh
+	./scripts/with_env_secrets.sh ./scripts/smoke.sh
 
 up:
-	docker compose up --build
+	./scripts/with_env_secrets.sh docker compose up --build
 
 down:
 	docker compose down
@@ -97,7 +98,7 @@ logs-local:
 	docker compose -f docker-compose.yml -f docker-compose.local.yaml logs -f
 
 chat-example:
-	go run ./examples/chat \
+	./scripts/with_env_secrets.sh go run ./examples/chat \
 		-target $(CHAT_TARGET) \
 		-provider $(CHAT_PROVIDER) \
 		-project $(CHAT_PROJECT) \
@@ -123,13 +124,14 @@ chat-gemini: chat-example
 
 chat-ts-example:
 	cd examples/chat-ts && \
-	npx tsx src/index.ts \
+	../../scripts/with_env_secrets.sh npx tsx src/index.ts \
 		--target $(CHAT_TARGET) \
 		--provider $(CHAT_PROVIDER) \
 		--project $(CHAT_PROJECT) \
 		--cacert ../../certs/ca-bundle.crt \
 		--cert ../../certs/dev-client.crt \
 		--key ../../certs/dev-client.key \
+		--jwt-key $(CHAT_JWT_KEY) \
 		$(CHAT_REPO)
 
 chat-ts-claude: CHAT_PROVIDER=claude

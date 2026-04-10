@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as crypto from "crypto";
 import * as grpc from "@grpc/grpc-js";
 
 export interface ParsedArgs {
@@ -8,7 +9,20 @@ export interface ParsedArgs {
   cacert: string;
   cert: string;
   key: string;
+  jwtKey: string;
+  jwtIssuer: string;
+  jwtAudience: string;
   repoPath: string;
+}
+
+export interface CredentialsOptions {
+  cacert: string;
+  cert: string;
+  key: string;
+  jwtKey: string;
+  jwtIssuer: string;
+  jwtAudience: string;
+  project: string;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -36,23 +50,74 @@ export function parseArgs(argv: string[]): ParsedArgs {
     cacert: flags["cacert"] ?? "",
     cert: flags["cert"] ?? "",
     key: flags["key"] ?? "",
+    jwtKey: flags["jwt-key"] ?? "",
+    jwtIssuer: flags["jwt-issuer"] ?? "dev",
+    jwtAudience: flags["jwt-audience"] ?? "bridge",
     repoPath: positional[0],
   };
 }
 
+function mintJwtBearerToken(opts: {
+  jwtKey: string;
+  jwtIssuer: string;
+  jwtAudience: string;
+  project: string;
+}): string {
+  const privateKey = crypto.createPrivateKey(fs.readFileSync(opts.jwtKey));
+  const now = Math.floor(Date.now() / 1000);
+  const ttlSeconds = 300;
+  const header = Buffer.from(
+    JSON.stringify({ alg: "EdDSA", typ: "JWT" })
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      iss: opts.jwtIssuer,
+      sub: opts.jwtIssuer,
+      aud: [opts.jwtAudience],
+      iat: now,
+      exp: now + ttlSeconds,
+      project_id: opts.project,
+    })
+  ).toString("base64url");
+  const signingInput = `${header}.${payload}`;
+  const sig = crypto.sign(null, Buffer.from(signingInput), privateKey);
+  return `${signingInput}.${sig.toString("base64url")}`;
+}
+
 export function buildCredentials(
-  cacert: string,
-  cert: string,
-  key: string
+  opts: CredentialsOptions
 ): grpc.ChannelCredentials {
-  if (cacert && cert && key) {
-    return grpc.credentials.createSsl(
-      fs.readFileSync(cacert),
-      fs.readFileSync(key),
-      fs.readFileSync(cert)
-    );
+  const transportCreds =
+    opts.cacert && opts.cert && opts.key
+      ? grpc.credentials.createSsl(
+          fs.readFileSync(opts.cacert),
+          fs.readFileSync(opts.key),
+          fs.readFileSync(opts.cert)
+        )
+      : grpc.credentials.createInsecure();
+
+  if (!opts.jwtKey) {
+    return transportCreds;
   }
-  return grpc.credentials.createInsecure();
+
+  if (!opts.cacert || !opts.cert || !opts.key) {
+    throw new Error("JWT auth requires mTLS transport credentials");
+  }
+
+  const callCreds = grpc.credentials.createFromMetadataGenerator(
+    (_params, callback) => {
+      try {
+        const token = mintJwtBearerToken(opts);
+        const metadata = new grpc.Metadata();
+        metadata.add("authorization", `Bearer ${token}`);
+        callback(null, metadata);
+      } catch (error) {
+        callback(error as Error);
+      }
+    }
+  );
+
+  return grpc.credentials.combineChannelCredentials(transportCreds, callCreds);
 }
 
 export function currentTTYSize(): { cols: number; rows: number } {

@@ -18,6 +18,9 @@
  *   --cacert   <path>      CA bundle for mTLS
  *   --cert     <path>      Client certificate for mTLS
  *   --key      <path>      Client private key for mTLS
+ *   --jwt-key  <path>      JWT signing key for bridge auth
+ *   --jwt-issuer <name>    JWT issuer (default: dev)
+ *   --jwt-audience <name>  JWT audience (default: bridge)
  */
 
 import * as path from "path";
@@ -41,9 +44,20 @@ async function main(): Promise<void> {
     console.error("  --cacert   <path>   CA bundle for mTLS");
     console.error("  --cert     <path>   Client certificate for mTLS");
     console.error("  --key      <path>   Client private key for mTLS");
+    console.error("  --jwt-key  <path>   JWT signing key for bridge auth");
+    console.error("  --jwt-issuer <name> JWT issuer (default: dev)");
+    console.error("  --jwt-audience <name> JWT audience (default: bridge)");
     process.exit(1);
   }
-  const creds = buildCredentials(opts.cacert, opts.cert, opts.key);
+  const creds = buildCredentials({
+    cacert: opts.cacert,
+    cert: opts.cert,
+    key: opts.key,
+    jwtKey: opts.jwtKey,
+    jwtIssuer: opts.jwtIssuer,
+    jwtAudience: opts.jwtAudience,
+    project: opts.project,
+  });
 
   const client = new BridgeGrpcClient({
     bridgeAddr: opts.target,

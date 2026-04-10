@@ -174,6 +174,10 @@ stream2.RecvAll(ctx, handler)  // resumes from last processed seq
 
 Use `WithCursorStore` to plug in a persistent store (Redis, database) for durable cursor tracking across process restarts.
 
+> **Limitation**: Cursor persistence is only limited to a single daemon lifetime when bridge persistence is disabled. In that mode, a daemon restart drops in-memory session records, `GetSession` returns `NOT_FOUND` for previously running sessions, and stored cursor positions no longer apply.
+>
+> When daemon persistence is enabled with `persistence.db_path`, sessions and output history are retained across restarts. In that mode a stable `ClientId` plus a persistent cursor store can resume replay from the last processed sequence against the recovered session history. Fully live post-restart attach is still replay-only for recovered sessions until the bridge can re-open the original PTY transport.
+
 ---
 
 ## Sending Input

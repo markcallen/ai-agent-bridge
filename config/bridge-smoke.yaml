@@ -13,6 +13,9 @@ auth:
   jwt_audience: "bridge"
   jwt_max_ttl: "5m"
 
+feature_flags:
+  provider_fallbacks: true
+
 sessions:
   max_per_project: 2
   max_global: 2
@@ -32,6 +35,10 @@ rate_limits:
   send_input_per_session_burst: 10
 
 providers:
+  primary:
+    binary: "/bin/does-not-exist"
+    args: []
+    fallbacks: ["smoke"]
   smoke:
     binary: "/bin/true"
     args: []

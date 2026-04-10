@@ -26,6 +26,7 @@ type StdioConfig struct {
 	StartupProbe   string
 	PromptPattern  string
 	RequiredEnv    []string
+	StreamJSON     bool // if true, the provider uses stream-JSON mode (no PTY)
 }
 
 // StdioProvider defines how to launch and validate one interactive CLI.
@@ -57,12 +58,20 @@ func (p *StdioProvider) PromptPattern() *regexp.Regexp { return p.promptRe }
 func (p *StdioProvider) StartupTimeout() time.Duration { return p.cfg.StartupTimeout }
 func (p *StdioProvider) StopGrace() time.Duration      { return p.cfg.StopGrace }
 
+// IsStreamJSON implements bridge.StreamJSONProvider. It returns true when the
+// provider is configured with StreamJSON: true (i.e. it emits JSONL on stdout
+// instead of raw PTY bytes).
+func (p *StdioProvider) IsStreamJSON() bool { return p.cfg.StreamJSON }
+
 func (p *StdioProvider) BuildCommand(ctx context.Context, cfg bridge.SessionConfig) (*exec.Cmd, error) {
 	binPath, err := resolveBinaryPath(p.cfg.Binary)
 	if err != nil {
 		return nil, fmt.Errorf("%w: resolve binary %q: %v", bridge.ErrProviderUnavailable, p.cfg.Binary, err)
 	}
-	args := append([]string(nil), p.cfg.DefaultArgs...)
+	args, err := resolveCommandArgs(p.cfg.DefaultArgs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: resolve args for %q: %v", bridge.ErrProviderUnavailable, p.cfg.ProviderID, err)
+	}
 	for key, value := range cfg.Options {
 		if strings.HasPrefix(key, "arg:") {
 			args = append(args, value)
@@ -108,8 +117,12 @@ func (p *StdioProvider) validateStartupPrompt(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	args, err := resolveCommandArgs(p.cfg.DefaultArgs)
+	if err != nil {
+		return err
+	}
 	wd, _ := os.Getwd()
-	cmd := exec.CommandContext(probeCtx, binPath, p.cfg.DefaultArgs...)
+	cmd := exec.CommandContext(probeCtx, binPath, args...)
 	cmd.Dir = wd
 	cmd.Env = filterEnv(os.Environ())
 
@@ -155,8 +168,12 @@ func (p *StdioProvider) validateStartupOutput(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	args, err := resolveCommandArgs(p.cfg.DefaultArgs)
+	if err != nil {
+		return err
+	}
 	wd, _ := os.Getwd()
-	cmd := exec.CommandContext(probeCtx, binPath, p.cfg.DefaultArgs...)
+	cmd := exec.CommandContext(probeCtx, binPath, args...)
 	cmd.Dir = wd
 	cmd.Env = filterEnv(os.Environ())
 
@@ -230,6 +247,32 @@ func resolveBinaryPath(binary string) (string, error) {
 		return filepath.Abs(binary)
 	}
 	return exec.LookPath(binary)
+}
+
+func resolveCommandArgs(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+
+	resolved := append([]string(nil), args...)
+	for i, arg := range resolved {
+		if !isStandaloneRelativePathArg(arg) {
+			continue
+		}
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			return nil, err
+		}
+		resolved[i] = abs
+	}
+	return resolved, nil
+}
+
+func isStandaloneRelativePathArg(arg string) bool {
+	if arg == "." || arg == ".." {
+		return true
+	}
+	return strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../")
 }
 
 // filterEnv returns a filtered environment excluding sensitive variables and

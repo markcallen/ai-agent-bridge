@@ -22,6 +22,7 @@ repos:
         entry: gofmt -w
         language: system
         types: [go]
+        exclude: ^gen/
         stages: [pre-commit]
 
       - id: goimports
@@ -29,6 +30,7 @@ repos:
         entry: goimports -w
         language: system
         types: [go]
+        exclude: ^gen/
         stages: [pre-commit]
 
       - id: golangci-lint

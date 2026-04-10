@@ -13,6 +13,9 @@ auth:
   jwt_audience: "bridge"
   jwt_max_ttl: "5m"
 
+feature_flags:
+  provider_fallbacks: true
+
 sessions:
   max_per_project: 5
   max_global: 20
@@ -33,32 +36,34 @@ rate_limits:
 
 providers:
   claude:
-    binary: "./node_modules/.bin/claude"
-    args: ["--verbose"]
+    binary: "node"
+    args: ["./node_modules/@anthropic-ai/claude-code/cli.js", "--verbose"]
     startup_timeout: "60s"
     validate_startup: false
     startup_probe: "prompt"
     required_env: ["ANTHROPIC_API_KEY"]
+    fallbacks: ["codex"]
     prompt_pattern: "(?m)(❯|>\\s*$)"
   opencode:
-    binary: "./node_modules/.bin/opencode"
-    args: []
+    binary: "node"
+    args: ["./node_modules/opencode-ai/bin/opencode"]
     startup_timeout: "45s"
     validate_startup: false
     startup_probe: "output"
     required_env: ["OPENAI_API_KEY"]
+    fallbacks: ["codex"]
     prompt_pattern: "❯"
   codex:
-    binary: "./node_modules/.bin/codex"
-    args: []
+    binary: "node"
+    args: ["./node_modules/@openai/codex/bin/codex.js"]
     startup_timeout: "60s"
     validate_startup: false
     startup_probe: "output"
     required_env: ["OPENAI_API_KEY"]
     prompt_pattern: "(?m)(>\\s*$|›)"
   gemini:
-    binary: "./node_modules/.bin/gemini"
-    args: []
+    binary: "node"
+    args: ["./node_modules/@google/gemini-cli/dist/index.js"]
     startup_timeout: "60s"
     validate_startup: false
     startup_probe: "output"

@@ -19,6 +19,6 @@ This is the canonical documentation index for the repository.
 ## Local Development
 
 - Use the version in [`.nvmrc`](../.nvmrc) for Node.js-based tooling.
-- Load API keys through `env-secrets`, not `.env` files.
+- Load API keys through `env-secrets`, not `.env` files. The repo's `make` targets automatically use `env-secrets aws` when `ENV_SECRETS_AWS_SECRET` is set.
 - Run `make dev-setup` for certificates and local agent binaries.
 - Run `make smoke` to validate the Dockerized bridge startup path.
