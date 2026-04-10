@@ -36,6 +36,10 @@ func main() {
 		bootstrapLogger.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+	if err := config.ValidateNodeRuntime("."); err != nil {
+		bootstrapLogger.Error("node runtime validation failed", "error", err)
+		os.Exit(1)
+	}
 	if err := config.ValidateProviderEnv(cfg); err != nil {
 		bootstrapLogger.Error("provider environment validation failed", "error", err)
 		os.Exit(1)

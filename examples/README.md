@@ -7,11 +7,28 @@ These examples all connect to the same running `ai-agent-bridge` daemon. Start t
 From the repo root:
 
 ```bash
-eval "$(env-secrets export)"
+cp .env.example .env
+$EDITOR .env
 make dev-run
 ```
 
 This starts the bridge with local mTLS and JWT auth on `bridge.local:9445`.
+
+If you have not created the AWS secret yet:
+
+```bash
+cat > /tmp/ai-agent-bridge.secrets.env <<'EOF'
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+EOF
+$EDITOR /tmp/ai-agent-bridge.secrets.env
+env-secrets aws secret upsert \
+  --name ai-agent-bridge/dev \
+  --file /tmp/ai-agent-bridge.secrets.env \
+  --profile <aws-profile> \
+  --region <aws-region>
+```
 
 If this is your first local run, make sure `bridge.local` resolves locally:
 
@@ -101,7 +118,7 @@ Start the web app:
 make chat-web-dev
 ```
 
-Then open `http://localhost:5173`.
+Then open `http://localhost:3000`.
 
 To connect to the same running bridge with different providers:
 

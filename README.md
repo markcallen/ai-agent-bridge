@@ -44,18 +44,27 @@ git clone https://github.com/markcallen/ai-agent-bridge.git
 cd ai-agent-bridge
 nvm install
 nvm use
-eval "$(env-secrets export)"
 ```
 
-Store required API keys with `env-secrets`:
+Set up `env-secrets` once for this repo. `env-secrets` in this environment uses AWS Secrets Manager:
 
 ```bash
-env-secrets set ANTHROPIC_API_KEY sk-ant-...
-env-secrets set OPENAI_API_KEY sk-...
-env-secrets set GEMINI_API_KEY ...
+cp .env.example .env
+$EDITOR .env
+cat > /tmp/ai-agent-bridge.secrets.env <<'EOF'
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+EOF
+$EDITOR /tmp/ai-agent-bridge.secrets.env
+env-secrets aws secret upsert \
+  --name ai-agent-bridge/dev \
+  --file /tmp/ai-agent-bridge.secrets.env \
+  --profile <aws-profile> \
+  --region <aws-region>
 ```
 
-The expected secret names are listed in `env-secrets.example`. Do not commit `.env` files.
+The repo-local [`.env.example`](/home/marka/src/ai-agent-bridge/.env.example) contains only the non-secret `ENV_SECRETS_*` settings. After you copy it to `.env`, the main `make` targets will call `env-secrets aws` automatically and load the secret named by `ENV_SECRETS_AWS_SECRET`.
 
 ### 2. Start the daemon
 
@@ -74,7 +83,6 @@ make chat-claude     # or chat-opencode, chat-codex, chat-gemini
 ### Docker
 
 ```bash
-eval "$(env-secrets export)"
 make up
 ```
 
@@ -83,7 +91,6 @@ Mounts `~/repos` → `/repos` and `./certs` → `/app/certs`. The prebuilt image
 ### Smoke Test
 
 ```bash
-eval "$(env-secrets export)"
 make smoke
 ```
 

@@ -9,6 +9,7 @@
 
 # Local environment (load secrets with env-secrets)
 .env
+.env.secrets
 
 # Certificates (generated)
 certs/*.key

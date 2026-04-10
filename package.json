@@ -3,7 +3,7 @@
   "private": true,
   "description": "Pinned local AI agent CLIs for ai-agent-bridge",
   "engines": {
-    "node": ">=22"
+    "node": "24.x"
   },
   "scripts": {
     "setup:agents": "bash ./scripts/setup_ai_agents.sh",
