@@ -9,6 +9,7 @@ CHAT_TARGET ?= bridge.local:9445
 CHAT_PROVIDER ?= claude
 CHAT_PROJECT ?= dev
 CHAT_REPO ?= /repos/penduin
+CHAT_JWT_KEY ?= ../../certs/jwt-signing.key
 build: proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BRIDGE) ./cmd/bridge
@@ -130,6 +131,7 @@ chat-ts-example:
 		--cacert ../../certs/ca-bundle.crt \
 		--cert ../../certs/dev-client.crt \
 		--key ../../certs/dev-client.key \
+		--jwt-key $(CHAT_JWT_KEY) \
 		$(CHAT_REPO)
 
 chat-ts-claude: CHAT_PROVIDER=claude

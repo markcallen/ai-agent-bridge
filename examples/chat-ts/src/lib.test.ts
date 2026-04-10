@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeTTYInput, parseArgs } from "./lib";
+import { buildCredentials, normalizeTTYInput, parseArgs } from "./lib";
 
 test("parseArgs applies defaults and keeps the repo path", () => {
   const parsed = parseArgs(["node", "chat-ts", "/tmp/repo"]);
@@ -12,6 +12,9 @@ test("parseArgs applies defaults and keeps the repo path", () => {
     cacert: "",
     cert: "",
     key: "",
+    jwtKey: "",
+    jwtIssuer: "dev",
+    jwtAudience: "bridge",
     repoPath: "/tmp/repo",
   });
 });
@@ -32,6 +35,12 @@ test("parseArgs reads explicit flags", () => {
     "client.pem",
     "--key",
     "client.key",
+    "--jwt-key",
+    "jwt.key",
+    "--jwt-issuer",
+    "issuer-1",
+    "--jwt-audience",
+    "bridge-api",
     "/repo",
   ]);
 
@@ -41,7 +50,48 @@ test("parseArgs reads explicit flags", () => {
   assert.equal(parsed.cacert, "ca.pem");
   assert.equal(parsed.cert, "client.pem");
   assert.equal(parsed.key, "client.key");
+  assert.equal(parsed.jwtKey, "jwt.key");
+  assert.equal(parsed.jwtIssuer, "issuer-1");
+  assert.equal(parsed.jwtAudience, "bridge-api");
   assert.equal(parsed.repoPath, "/repo");
+});
+
+test("buildCredentials composes mTLS and JWT call credentials", async () => {
+  const creds = buildCredentials({
+    cacert: "../../certs/ca-bundle.crt",
+    cert: "../../certs/dev-client.crt",
+    key: "../../certs/dev-client.key",
+    jwtKey: "../../certs/jwt-signing.key",
+    jwtIssuer: "dev",
+    jwtAudience: "bridge",
+    project: "dev",
+  }) as unknown as {
+    channelCredentials: object;
+    callCredentials: {
+      metadataGenerator: (
+        options: object,
+        callback: (err: Error | null, metadata?: { get: (key: string) => string[] }) => void
+      ) => void;
+    };
+  };
+
+  assert.ok(creds.channelCredentials);
+  assert.ok(creds.callCredentials);
+
+  const metadata = await new Promise<{ get: (key: string) => string[] }>(
+    (resolve, reject) => {
+      creds.callCredentials.metadataGenerator({}, (err, md) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(md as { get: (key: string) => string[] });
+      });
+    }
+  );
+
+  const authHeader = metadata.get("authorization")[0];
+  assert.match(authHeader, /^Bearer [A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
 });
 
 test("parseArgs requires a repo path", () => {
