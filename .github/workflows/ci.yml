@@ -74,7 +74,7 @@ jobs:
             examples/chat-ts/package-lock.json
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
@@ -108,7 +108,7 @@ jobs:
             examples/chat-ts/package-lock.json
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
