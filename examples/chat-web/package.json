@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "dev": "tsx scripts/dev.ts",
@@ -31,7 +31,7 @@
     "@vitest/coverage-v8": "^3.2.4",
     "@tailwindcss/vite": "^4.0.0",
     "@types/express": "^5.0.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.5.12",
