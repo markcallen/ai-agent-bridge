@@ -11,9 +11,13 @@
     "publishing",
     "linting",
     "logging",
-    "testing"
+    "testing",
+    "git-hooks"
   ],
-  "ballastVersion": "5.4.2",
+  "skills": [
+    "github-health-check"
+  ],
+  "ballastVersion": "5.7.3",
   "languages": [
     "typescript",
     "go"

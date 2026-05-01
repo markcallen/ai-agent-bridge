@@ -27,9 +27,18 @@ Read and follow these rule files in `.claude/rules/` when they apply:
 - `.claude/rules/common/publishing-libraries.md` — Rules for common/publishing-libraries
 - `.claude/rules/common/publishing-sdks.md` — Rules for common/publishing-sdks
 - `.claude/rules/common/publishing-apps.md` — Rules for common/publishing-apps
+- `.claude/rules/common/git-hooks.md` — Rules for common/git-hooks
 - `.claude/rules/typescript/typescript-linting.md` — Rules for typescript/linting
 - `.claude/rules/typescript/typescript-logging.md` — Rules for typescript/logging
 - `.claude/rules/typescript/typescript-testing.md` — Rules for typescript/testing
 - `.claude/rules/go/go-linting.md` — Rules for go/linting
 - `.claude/rules/go/go-logging.md` — Rules for go/logging
 - `.claude/rules/go/go-testing.md` — Rules for go/testing
+
+## Installed skills
+
+Created by Ballast. Do not edit this section.
+
+Read and use these skill files in `.claude/skills/` when they are relevant:
+
+- `.claude/skills/github-health-check.skill` — run a comprehensive GitHub repository health check covering CI status, branch hygiene, and repo configuration
