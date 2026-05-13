@@ -28,9 +28,9 @@
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.11.0",
-    "@grpc/proto-loader": "^0.8.0",
+    "@grpc/proto-loader": "^0.8.1",
     "uuid": "^10.0.0",
-    "ws": "^8.20.0"
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "c8": "^10.1.3",
