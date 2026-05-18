@@ -1,0 +1,24 @@
+[Unit]
+Description=AI Agent Bridge daemon
+Documentation=https://github.com/markcallen/ai-agent-bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-agent-bridge
+Group=ai-agent-bridge
+StateDirectory=ai-agent-bridge
+WorkingDirectory=/var/lib/ai-agent-bridge
+ExecStart=/usr/bin/bridge --config /etc/ai-agent-bridge/bridge.yaml
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/ai-agent-bridge
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

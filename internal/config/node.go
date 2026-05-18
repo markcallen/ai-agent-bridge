@@ -83,3 +83,7 @@ func ValidateNodeRuntime(projectRoot string) error {
 	}
 	return nil
 }
+
+func RequiresNodeRuntime(cfg *Config) bool {
+	return cfg != nil && len(cfg.Providers) > 0
+}
