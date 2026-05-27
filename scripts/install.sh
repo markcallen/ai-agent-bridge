@@ -17,11 +17,11 @@ if [[ -z "$suite" && -r /etc/os-release ]]; then
 fi
 
 case "$suite" in
-  noble|resolute)
+  noble|plucky)
     ;;
   *)
     echo "install.sh: unsupported Ubuntu suite: ${suite:-unknown}" >&2
-    echo "Supported suites: noble, resolute" >&2
+    echo "Supported suites: noble, plucky" >&2
     exit 1
     ;;
 esac

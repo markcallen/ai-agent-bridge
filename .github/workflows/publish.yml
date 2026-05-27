@@ -294,7 +294,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: gh-pages
           publish_dir: ./dist/gh-pages
-          force_orphan: true
+          force_orphan: false
 
   smoke_apt_ec2:
     name: Smoke apt install on EC2
@@ -303,7 +303,11 @@ jobs:
       - bump_and_tag
       - verify_release
       - publish_apt_repository
-    if: always() && needs.verify_release.result == 'success' && needs.publish_apt_repository.result == 'success'
+    if: >-
+      always() &&
+      needs.verify_release.result == 'success' &&
+      needs.publish_apt_repository.result == 'success' &&
+      secrets.AWS_SMOKE_ROLE_ARN != ''
     permissions:
       id-token: write
       contents: read
@@ -355,7 +359,13 @@ jobs:
       - build_apt_packages
       - publish_apt_repository
       - smoke_apt_ec2
-    if: always() && needs.verify_release.result == 'success' && needs.publish_container.result == 'success' && needs.build_apt_packages.result == 'success' && needs.publish_apt_repository.result == 'success' && needs.smoke_apt_ec2.result == 'success'
+    if: >-
+      always() &&
+      needs.verify_release.result == 'success' &&
+      needs.publish_container.result == 'success' &&
+      needs.build_apt_packages.result == 'success' &&
+      needs.publish_apt_repository.result == 'success' &&
+      (needs.smoke_apt_ec2.result == 'success' || needs.smoke_apt_ec2.result == 'skipped')
     permissions:
       contents: write
     env:

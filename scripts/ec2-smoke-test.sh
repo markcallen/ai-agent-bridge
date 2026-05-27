@@ -139,8 +139,8 @@ ami_id() {
     noble)
       ssm_path="/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
       ;;
-    resolute)
-      ssm_path="/aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+    plucky)
+      ssm_path="/aws/service/canonical/ubuntu/server/25.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
       ;;
     *)
       echo "ec2-smoke-test: unsupported apt suite for EC2 smoke: $suite" >&2

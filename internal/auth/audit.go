@@ -76,7 +76,7 @@ func requestStringField(req any, field string) string {
 		return ""
 	}
 	v := reflect.ValueOf(req)
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return ""
 		}

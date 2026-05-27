@@ -7,7 +7,7 @@ GNUPGHOME="$TMP_DIR/gnupg"
 REPO_DIR="$TMP_DIR/repo"
 PACKAGES_DIR="$TMP_DIR/packages"
 HEALTHCHECK_BIN="$TMP_DIR/plain-healthcheck"
-SUITES="${SUITES:-noble resolute}"
+SUITES="${SUITES:-noble plucky}"
 : "${GOCACHE:=/tmp/ai-agent-bridge-go-build}"
 : "${GOFLAGS:=-buildvcs=false}"
 
@@ -52,8 +52,8 @@ run_suite() {
     noble)
       image_tag="24.04"
       ;;
-    resolute)
-      image_tag="26.04"
+    plucky)
+      image_tag="25.04"
       ;;
     *)
       echo "APT SMOKE FAILED: unsupported suite=$suite" >&2
