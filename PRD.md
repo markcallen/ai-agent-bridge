@@ -218,7 +218,7 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
 - Ship a Debian package named `ai-agent-bridge`.
 - Initial supported targets:
   - Ubuntu `24.04` (`noble`) on `amd64`
-  - Ubuntu `26.04` (`resolute`) on `amd64`
+  - Ubuntu `25.04` (`plucky`) on `amd64`
 - Install package contents to conventional system locations:
   - `bridge` and `bridge-ca` binaries in `/usr/bin`
   - default config in `/etc/ai-agent-bridge/bridge.yaml`

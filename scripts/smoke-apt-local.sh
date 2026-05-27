@@ -44,7 +44,6 @@ go build -o "$HEALTHCHECK_BIN" ./e2e/cmd/plain-healthcheck
 
 run_suite() {
   local suite="$1"
-  local port="$2"
   local container="apt-smoke-$suite"
   local image_tag=""
 
@@ -103,8 +102,6 @@ run_suite() {
   exit 1
 }
 
-port=19445
 for suite in $SUITES; do
-  run_suite "$suite" "$port"
-  port=$((port + 10000))
+  run_suite "$suite"
 done

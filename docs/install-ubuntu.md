@@ -1,6 +1,6 @@
 # Ubuntu Install
 
-`ai-agent-bridge` is published as a signed apt repository for Ubuntu `24.04` (`noble`) and Ubuntu `26.04` (`resolute`) on `amd64`.
+`ai-agent-bridge` is published as a signed apt repository for Ubuntu `24.04` (`noble`) and Ubuntu `25.04` (`plucky`) on `amd64`.
 
 ## Quick Install
 
@@ -26,13 +26,13 @@ sudo apt-get update
 sudo apt-get install -y ai-agent-bridge
 ```
 
-### Ubuntu 26.04 (`resolute`)
+### Ubuntu 25.04 (`plucky`)
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc \
   | sudo gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt resolute main" \
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt plucky main" \
   | sudo tee /etc/apt/sources.list.d/ai-agent-bridge.list >/dev/null
 sudo apt-get update
 sudo apt-get install -y ai-agent-bridge
@@ -66,7 +66,7 @@ sudo journalctl -u ai-agent-bridge --no-pager -n 50
 
 The release workflow validates this path in two ways:
 
-- container smoke: installs the package from a generated apt repo on Ubuntu `noble` and `resolute`
+- container smoke: installs the package from a generated apt repo on Ubuntu `noble` and `plucky`
 - EC2 smoke: provisions an Ubuntu EC2 instance, installs from the hosted apt repo, starts the systemd service, and runs a gRPC health check through an SSH tunnel
 
 ## Customizing For Real Use

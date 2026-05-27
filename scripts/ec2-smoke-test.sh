@@ -299,7 +299,6 @@ EOF
 main() {
   require_cmd aws
   require_cmd curl
-  require_cmd gpg
   require_cmd go
   require_cmd scp
   require_cmd ssh
