@@ -86,11 +86,11 @@ smoke-apt-local:
 	./scripts/smoke-apt-local.sh
 
 smoke-deb:
-	@if [[ -z "$$DEB" ]]; then echo "Usage: make smoke-deb DEB=<path-to-.deb> SUITE=<noble|plucky>"; exit 1; fi
+	@if [ -z "$$DEB" ]; then echo "Usage: make smoke-deb DEB=<path-to-.deb> SUITE=<noble|plucky>"; exit 1; fi
 	./scripts/smoke-deb-docker.sh "$$DEB" "$${SUITE:-noble}"
 
 smoke-container:
-	@if [[ -z "$$IMAGE" ]]; then echo "Usage: make smoke-container IMAGE=<image>"; exit 1; fi
+	@if [ -z "$$IMAGE" ]; then echo "Usage: make smoke-container IMAGE=<image>"; exit 1; fi
 	./scripts/smoke-container.sh "$$IMAGE"
 
 smoke-ec2:

@@ -17,6 +17,8 @@ if [[ ! -f "$DEB_PATH" ]]; then
   exit 1
 fi
 
+DEB_PATH="$(realpath "$DEB_PATH")"
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 HEALTHCHECK_BIN="$TMP_DIR/plain-healthcheck"
