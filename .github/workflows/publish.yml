@@ -306,32 +306,36 @@ jobs:
     if: >-
       always() &&
       needs.verify_release.result == 'success' &&
-      needs.publish_apt_repository.result == 'success' &&
-      secrets.AWS_SMOKE_ROLE_ARN != ''
+      needs.publish_apt_repository.result == 'success'
     permissions:
       id-token: write
       contents: read
     env:
       REPO_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apt
+      AWS_SMOKE_ROLE_ARN: ${{ secrets.AWS_SMOKE_ROLE_ARN }}
     steps:
       - name: Check out release tag
+        if: env.AWS_SMOKE_ROLE_ARN != ''
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
 
       - name: Set up Go
+        if: env.AWS_SMOKE_ROLE_ARN != ''
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
       - name: Configure AWS credentials
+        if: env.AWS_SMOKE_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_SMOKE_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_SMOKE_ROLE_ARN }}
           aws-region: ${{ secrets.SMOKE_AWS_REGION }}
 
       - name: Wait for apt repository publication
+        if: env.AWS_SMOKE_ROLE_ARN != ''
         run: |
           for _ in $(seq 1 30); do
             if curl -fsSL "$REPO_BASE_URL/dists/noble/InRelease" >/dev/null; then
@@ -343,6 +347,7 @@ jobs:
           exit 1
 
       - name: Run EC2 smoke test
+        if: env.AWS_SMOKE_ROLE_ARN != ''
         env:
           SMOKE_AWS_REGION: ${{ secrets.SMOKE_AWS_REGION }}
           SMOKE_APT_SUITE: noble
