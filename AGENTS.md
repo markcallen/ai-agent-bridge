@@ -13,13 +13,13 @@ Core binaries live in `cmd/`: `cmd/bridge` (daemon) and `cmd/bridge-ca` (certifi
 - `make dev-setup`: Builds binaries and generates development certificates.
 
 ## Coding Style & Naming Conventions
-Use standard Go formatting and imports (`make fmt` before commits). Keep packages focused and lower-case; exported identifiers use `CamelCase`, unexported use `camelCase`. Prefer descriptive file names aligned to domain behavior (for example, `supervisor.go`, `interceptors.go`). Do not edit generated files in `gen/`; update `proto/` and rerun `make proto`.
+Use standard Go formatting and imports (`make fmt` before commits). Keep packages focused and lower-case; exported identifiers use `CamelCase`, unexported use `camelCase`. Prefer descriptive file names aligned to domain behavior (for example, `supervisor.go`, `interceptors.go`). Never hand-edit files under `gen/`; they are generated from `proto/`. To update them, edit the relevant `.proto` file and run `make proto`, then commit the resulting changes in `gen/` together with the proto change.
 
 ## Testing Guidelines
 Write table-driven unit tests beside implementation files with `_test.go` suffix (for example, `internal/bridge/eventbuf_test.go`). Favor deterministic tests and include race-safe behavior checks for concurrent code paths. Run `make test` locally before opening a PR; use `make test-cover` when changing critical auth, session, or provider flows.
 
 ## Commit & Pull Request Guidelines
-History follows concise, imperative subjects (for example, `Add gRPC server...`, `Fix data races...`). Keep commits scoped to a single logical change and include regenerated artifacts when proto changes require them. PRs should include:
+History follows concise, imperative subjects (for example, `Add gRPC server...`, `Fix data races...`). Keep commits scoped to a single logical change. When a proto change regenerates files under `gen/`, always include those regenerated files in the same commit as the `.proto` change — never leave them as unstaged modifications. PRs should include:
 - A short problem/solution summary.
 - Linked issue or task reference when available.
 - Test evidence (`make test`, and e2e notes when relevant).
