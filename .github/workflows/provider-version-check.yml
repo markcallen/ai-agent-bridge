@@ -24,7 +24,7 @@ jobs:
         run: ./scripts/check-provider-versions.sh | tee provider-versions.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload version report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: provider-versions
           path: provider-versions.md
