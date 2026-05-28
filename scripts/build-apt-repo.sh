@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="${REPO_DIR:-$ROOT_DIR/dist/apt-repo}"
 PACKAGES_DIR="${PACKAGES_DIR:-$ROOT_DIR/dist/deb}"
-ARCH="${ARCH:-amd64}"
+ARCHES="${ARCHES:-amd64}"
 SUITES="${SUITES:-noble plucky}"
 COMPONENT="${COMPONENT:-main}"
 KEYRING_NAME="${KEYRING_NAME:-ai-agent-bridge-archive-keyring.asc}"
@@ -46,18 +46,19 @@ cp "${packages[@]}" "$REPO_DIR/pool/$COMPONENT/"
 pushd "$REPO_DIR" >/dev/null
 
 for suite in $SUITES; do
-  binary_dir="dists/$suite/$COMPONENT/binary-$ARCH"
-  mkdir -p "$binary_dir"
-
-  dpkg-scanpackages --arch "$ARCH" "pool/$COMPONENT" >"$binary_dir/Packages"
-  gzip -9c "$binary_dir/Packages" >"$binary_dir/Packages.gz"
+  for arch in $ARCHES; do
+    binary_dir="dists/$suite/$COMPONENT/binary-$arch"
+    mkdir -p "$binary_dir"
+    dpkg-scanpackages --arch "$arch" "pool/$COMPONENT" >"$binary_dir/Packages"
+    gzip -9c "$binary_dir/Packages" >"$binary_dir/Packages.gz"
+  done
 
   cat >"dists/$suite/Release" <<EOF
 Origin: AI Agent Bridge
 Label: AI Agent Bridge
 Suite: $suite
 Codename: $suite
-Architectures: $ARCH
+Architectures: $ARCHES
 Components: $COMPONENT
 Description: Apt repository for ai-agent-bridge
 EOF

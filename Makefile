@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke smoke-apt-local smoke-ec2 build-deb up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
+.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 build-deb up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
@@ -84,6 +84,14 @@ build-deb:
 
 smoke-apt-local:
 	./scripts/smoke-apt-local.sh
+
+smoke-deb:
+	@if [ -z "$$DEB" ]; then echo "Usage: make smoke-deb DEB=<path-to-.deb> SUITE=<noble|plucky>"; exit 1; fi
+	./scripts/smoke-deb-docker.sh "$$DEB" "$${SUITE:-noble}"
+
+smoke-container:
+	@if [ -z "$$IMAGE" ]; then echo "Usage: make smoke-container IMAGE=<image>"; exit 1; fi
+	./scripts/smoke-container.sh "$$IMAGE"
 
 smoke-ec2:
 	./scripts/with_env_secrets.sh ./scripts/smoke-ec2.sh
