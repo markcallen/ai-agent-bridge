@@ -76,6 +76,7 @@ type managedSession struct {
 
 	attachedClient string
 	live           chan OutputChunk
+	liveClosed     bool // set by closeLive; Attach returns a pre-closed channel when true
 }
 
 func NewSupervisor(registry *Registry, policy Policy, outputBufSize int, idleTimeout time.Duration, opts ...SupervisorOption) *Supervisor {
@@ -534,7 +535,8 @@ func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
 		line = bytes.TrimSuffix(line, []byte{'\n'})
 		line = bytes.TrimSuffix(line, []byte{'\r'})
 		if len(line) == 0 {
-			if errors.Is(err, io.EOF) {
+			if err != nil {
+				// EOF or pipe closed by cmd.Wait — either way, no more data.
 				return
 			}
 			continue
@@ -578,6 +580,7 @@ func (s *Supervisor) closeLive(ms *managedSession) {
 	ms.mu.Lock()
 	live := ms.live
 	ms.live = nil
+	ms.liveClosed = true
 	ms.mu.Unlock()
 	if live != nil {
 		close(live)
@@ -834,11 +837,21 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*Attac
 		return nil, ErrSessionAlreadyAttached
 	}
 	ms.attachedClient = clientID
-	ms.live = make(chan OutputChunk, 128)
 	ms.info.Attached = true
 	ms.info.AttachedClientID = clientID
 	ms.info.State = SessionStateAttached
 	ms.lastActivity = time.Now()
+
+	// If the read loop already finished before Attach was called, ms.live is nil
+	// and liveClosed is true. Return a pre-closed channel so callers drain
+	// immediately instead of blocking forever.
+	if ms.liveClosed {
+		closed := make(chan OutputChunk)
+		close(closed)
+		ms.live = closed
+	} else {
+		ms.live = make(chan OutputChunk, 128)
+	}
 
 	oldest := ms.buf.OldestSeq()
 	last := ms.buf.LastSeq()

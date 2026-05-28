@@ -676,8 +676,11 @@ func TestStreamJSONSessionLifecycle(t *testing.T) {
 		t.Fatalf("Attach: %v", err)
 	}
 
-	// Drain until the live channel closes (process exits).
-	var collected []OutputChunk
+	// Seed collected with any chunks already buffered before Attach was called.
+	collected := make([]OutputChunk, len(state.Replay))
+	copy(collected, state.Replay)
+
+	// Drain the live channel until closed (process exits).
 	timeout := time.After(5 * time.Second)
 drainLoop:
 	for {
