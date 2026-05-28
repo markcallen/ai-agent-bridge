@@ -32,8 +32,9 @@ apt-get install -y ca-certificates curl gnupg
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL "$REPO_BASE_URL/ai-agent-bridge-archive-keyring.asc" | gpg --dearmor -o "$KEYRING_PATH"
 chmod 0644 "$KEYRING_PATH"
+arch="$(dpkg --print-architecture)"
 cat >"$LIST_PATH" <<EOF
-deb [arch=amd64 signed-by=$KEYRING_PATH] $REPO_BASE_URL $suite main
+deb [arch=$arch signed-by=$KEYRING_PATH] $REPO_BASE_URL $suite main
 EOF
 apt-get update
 apt-get install -y ai-agent-bridge
