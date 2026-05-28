@@ -64,8 +64,8 @@ agents-setup:
 	./scripts/setup_ai_agents.sh
 
 fmt:
-	gofmt -s -w .
-	goimports -w .
+	gofmt -s -w $(shell find . -name '*.go' -not -path './gen/*' -not -path './node_modules/*')
+	goimports -w $(shell find . -name '*.go' -not -path './gen/*' -not -path './node_modules/*')
 
 run: build
 	$(BRIDGE) --config $(CONFIG)
