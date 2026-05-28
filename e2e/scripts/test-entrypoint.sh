@@ -33,8 +33,8 @@ echo "==> Running e2e test suite..."
 # E2E_ONLY=all / unset → run all suite tests
 run_filter=""
 if [ -n "${E2E_ONLY:-}" ] && [ "${E2E_ONLY}" != "all" ]; then
-  # Capitalise first letter to match Go test method names (claude → Claude)
-  provider="$(echo "${E2E_ONLY}" | sed 's/./\u&/')"
+  # Capitalise first letter to match Go test method names (claude → Claude, echo → Echo)
+  provider="$(echo "${E2E_ONLY}" | sed 's/\(.\)/\u\1/')"
   run_filter="-test.run TestBridgeSuite/Test${provider}"
 fi
 
