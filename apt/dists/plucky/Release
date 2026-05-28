@@ -1,0 +1,24 @@
+Origin: AI Agent Bridge
+Label: AI Agent Bridge
+Suite: plucky
+Codename: plucky
+Architectures: amd64
+Components: main
+Description: Apt repository for ai-agent-bridge
+Date: Thu, 28 May 2026 16:53:40 +0000
+MD5Sum:
+ 4ebed597e5b26105d6913c5d885a5bfd              202 Release
+ e575b0662bb310f9b7bb1179b5596f1d              605 main/binary-amd64/Packages
+ 65af198b0c1d9060e3c3c1f3cb61b6dc              443 main/binary-amd64/Packages.gz
+SHA1:
+ a5e41563ed23d50f8816825926c228c9d7eb8090              202 Release
+ e2e8bd91bfd8ef3336dbfa31a14178e945217788              605 main/binary-amd64/Packages
+ a15da282758c47ded86809b48c0bf0f2e26ac5a9              443 main/binary-amd64/Packages.gz
+SHA256:
+ 8def4c580b5a9e6487245cafedcf49593e128aa72343dee6368e04a4cc3924af              202 Release
+ 600a6f11663d63ca46ea8b9b57c2368821b4f739d61f92f7cf1817add45c8e23              605 main/binary-amd64/Packages
+ 4082216a1f97b8772ac9bd728fdbca5ee1e176b69278c3d713821a9f429b7ced              443 main/binary-amd64/Packages.gz
+SHA512:
+ 048852a72dc1c83193439c25f67be0b627a2ac727b159e87831d9671295b614b78d5135a1fcf547fe164b71a15dd51f8757373437e290a2ea0d5a2cc73aaf10a              202 Release
+ e977075dbc23988a9db33743e16b3dbd3445f98b1e9b6c49da6f240e36849154e37ed1bffca9ad57af05c1d7c572bc4cb07c31e1bbbaefa85b1e463c0266f31c              605 main/binary-amd64/Packages
+ 2c8a8493c9f1ae9a4f7b8d37d72ac61fbd09df9d3473ef7e46e6b33ef04a9d9a6cccf628b36a505fd78c2eda20087424aae678cbfef26a12e4c6c03799a45cfe              443 main/binary-amd64/Packages.gz
