@@ -40,8 +40,8 @@ sudo apt-get install -y ai-agent-bridge
 
 ## What The Package Installs
 
-- `/usr/bin/bridge`
-- `/usr/bin/bridge-ca`
+- `/usr/bin/ai-agent-bridge`
+- `/usr/bin/ai-agent-bridge-ca`
 - `/etc/ai-agent-bridge/bridge.yaml`
 - `/lib/systemd/system/ai-agent-bridge.service`
 

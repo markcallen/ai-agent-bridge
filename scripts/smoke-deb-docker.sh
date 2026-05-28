@@ -58,7 +58,7 @@ docker run -d \
     apt-get update -qq
     dpkg -i /tmp/$DEB_BASENAME || true
     apt-get install -f -y -qq
-    /usr/bin/bridge --config /etc/ai-agent-bridge/bridge.yaml >/tmp/bridge.log 2>&1 &
+    /usr/bin/ai-agent-bridge --config /etc/ai-agent-bridge/bridge.yaml >/tmp/bridge.log 2>&1 &
     bridge_pid=\$!
     for i in \$(seq 1 15); do
       if ! kill -0 \"\$bridge_pid\" 2>/dev/null; then
