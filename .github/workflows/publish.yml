@@ -221,17 +221,56 @@ jobs:
       - name: Run local apt smoke test
         run: ./scripts/smoke-apt-local.sh
 
-      - name: Build release .deb package
+      - name: Build release .deb packages
         env:
           RELEASE_VERSION: ${{ env.RELEASE_TAG }}
         run: |
-          VERSION="${RELEASE_VERSION#v}" OUTPUT_DIR="$PWD/dist/deb" ./scripts/build-deb.sh
+          for arch in amd64 arm64; do
+            ARCH="$arch" VERSION="${RELEASE_VERSION#v}" OUTPUT_DIR="$PWD/dist/deb" ./scripts/build-deb.sh
+          done
 
       - name: Upload .deb artifacts
         uses: actions/upload-artifact@v4
         with:
           name: deb-packages
           path: dist/deb/*.deb
+
+  smoke_deb_artifacts:
+    name: Smoke test .deb artifacts
+    runs-on: ubuntu-latest
+    needs:
+      - bump_and_tag
+      - verify_release
+      - build_apt_packages
+    if: always() && needs.verify_release.result == 'success' && needs.build_apt_packages.result == 'success'
+    permissions:
+      contents: read
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Download .deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-packages
+          path: dist/deb
+
+      - name: Smoke test amd64 deb on noble
+        run: |
+          deb="$(ls dist/deb/*_amd64.deb | head -1)"
+          ./scripts/smoke-deb-docker.sh "$deb" noble
+
+      - name: Smoke test amd64 deb on plucky
+        run: |
+          deb="$(ls dist/deb/*_amd64.deb | head -1)"
+          ./scripts/smoke-deb-docker.sh "$deb" plucky
 
   publish_apt_repository:
     name: Publish apt repository
@@ -240,7 +279,8 @@ jobs:
       - bump_and_tag
       - verify_release
       - build_apt_packages
-    if: always() && needs.verify_release.result == 'success' && needs.build_apt_packages.result == 'success'
+      - smoke_deb_artifacts
+    if: always() && needs.verify_release.result == 'success' && needs.build_apt_packages.result == 'success' && needs.smoke_deb_artifacts.result == 'success'
     permissions:
       contents: write
     env:
@@ -284,6 +324,7 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.APT_REPO_GPG_PASSPHRASE }}
           REPO_DIR: ${{ github.workspace }}/dist/gh-pages/apt
           PACKAGES_DIR: ${{ github.workspace }}/dist/deb
+          ARCHES: amd64 arm64
         run: |
           ./scripts/build-apt-repo.sh
           cp scripts/install.sh dist/gh-pages/install.sh
@@ -362,6 +403,7 @@ jobs:
       - verify_release
       - publish_container
       - build_apt_packages
+      - smoke_deb_artifacts
       - publish_apt_repository
       - smoke_apt_ec2
     if: >-
@@ -369,6 +411,7 @@ jobs:
       needs.verify_release.result == 'success' &&
       needs.publish_container.result == 'success' &&
       needs.build_apt_packages.result == 'success' &&
+      needs.smoke_deb_artifacts.result == 'success' &&
       needs.publish_apt_repository.result == 'success' &&
       (needs.smoke_apt_ec2.result == 'success' || needs.smoke_apt_ec2.result == 'skipped')
     permissions:
