@@ -436,17 +436,26 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 			cancel()
 			return nil, fmt.Errorf("get stdin pipe: %w", err)
 		}
-		stdoutPipe, err := cmd.StdoutPipe()
+		// Use os.Pipe directly so that cmd.Wait does not close the read end via
+		// closeAfterWait. readLoopStreamJSON owns the read end and receives a
+		// natural EOF when the child process exits and the write end closes.
+		stdoutR, stdoutW, err := os.Pipe()
 		if err != nil {
 			cancel()
 			_ = stdinPipe.Close()
-			return nil, fmt.Errorf("get stdout pipe: %w", err)
+			return nil, fmt.Errorf("create stdout pipe: %w", err)
 		}
+		cmd.Stdout = stdoutW
 		if err := cmd.Start(); err != nil {
 			cancel()
 			_ = stdinPipe.Close()
+			_ = stdoutR.Close()
+			_ = stdoutW.Close()
 			return nil, fmt.Errorf("start stream-json session: %w", err)
 		}
+		// Close the write end in the parent; only the child holds it now.
+		_ = stdoutW.Close()
+		stdoutPipe := stdoutR
 		ms.stdin = stdinPipe
 		ms.info.ProcessID = cmd.Process.Pid
 		s.mu.Lock()
