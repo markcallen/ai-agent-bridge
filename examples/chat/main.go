@@ -65,7 +65,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to connect: %v\n", err)
 		os.Exit(1)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	client.SetProject(*project)
 
 	cols, rows := currentTTYSize()

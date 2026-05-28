@@ -39,6 +39,7 @@ e2e/.env
 
 # Build
 /dist/
+/.tmp/
 
 # Local JS dependencies
 /node_modules/

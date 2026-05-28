@@ -189,16 +189,15 @@ jobs:
           echo "${{ steps.meta.outputs.tags }}"
           echo "Digest: ${{ steps.build.outputs.digest }}"
 
-  publish_go_sdk:
-    name: Publish Go SDK release
+  build_apt_packages:
+    name: Build apt packages
     runs-on: ubuntu-latest
     needs:
       - bump_and_tag
       - verify_release
-      - publish_container
-    if: always() && needs.verify_release.result == 'success' && needs.publish_container.result == 'success'
+    if: always() && needs.verify_release.result == 'success'
     permissions:
-      contents: write
+      contents: read
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && needs.bump_and_tag.outputs.tag || github.ref_name }}
       RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
@@ -214,17 +213,197 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install packaging tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils dpkg-dev gnupg
+
+      - name: Run local apt smoke test
+        run: ./scripts/smoke-apt-local.sh
+
+      - name: Build release .deb package
+        env:
+          RELEASE_VERSION: ${{ env.RELEASE_TAG }}
+        run: |
+          VERSION="${RELEASE_VERSION#v}" OUTPUT_DIR="$PWD/dist/deb" ./scripts/build-deb.sh
+
+      - name: Upload .deb artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-packages
+          path: dist/deb/*.deb
+
+  publish_apt_repository:
+    name: Publish apt repository
+    runs-on: ubuntu-latest
+    needs:
+      - bump_and_tag
+      - verify_release
+      - build_apt_packages
+    if: always() && needs.verify_release.result == 'success' && needs.build_apt_packages.result == 'success'
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && needs.bump_and_tag.outputs.tag || github.ref_name }}
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
+      REPO_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apt
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Install packaging tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils dpkg-dev gnupg
+
+      - name: Download .deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-packages
+          path: dist/deb
+
+      - name: Import apt signing key
+        env:
+          APT_REPO_GPG_PRIVATE_KEY_B64: ${{ secrets.APT_REPO_GPG_PRIVATE_KEY_B64 }}
+        run: |
+          if [[ -z "$APT_REPO_GPG_PRIVATE_KEY_B64" ]]; then
+            echo "APT_REPO_GPG_PRIVATE_KEY_B64 secret is required" >&2
+            exit 1
+          fi
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          printf '%s' "$APT_REPO_GPG_PRIVATE_KEY_B64" | base64 -d > /tmp/apt-signing.key
+          gpg --batch --import /tmp/apt-signing.key
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+
+      - name: Build apt repository
+        env:
+          GPG_PASSPHRASE: ${{ secrets.APT_REPO_GPG_PASSPHRASE }}
+          REPO_DIR: ${{ github.workspace }}/dist/gh-pages/apt
+          PACKAGES_DIR: ${{ github.workspace }}/dist/deb
+        run: |
+          ./scripts/build-apt-repo.sh
+          cp scripts/install.sh dist/gh-pages/install.sh
+
+      - name: Publish apt repository to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./dist/gh-pages
+          force_orphan: false
+
+  smoke_apt_ec2:
+    name: Smoke apt install on EC2
+    runs-on: ubuntu-latest
+    needs:
+      - bump_and_tag
+      - verify_release
+      - publish_apt_repository
+    if: >-
+      always() &&
+      needs.verify_release.result == 'success' &&
+      needs.publish_apt_repository.result == 'success' &&
+      secrets.AWS_SMOKE_ROLE_ARN != ''
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      REPO_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apt
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_SMOKE_ROLE_ARN }}
+          aws-region: ${{ secrets.SMOKE_AWS_REGION }}
+
+      - name: Wait for apt repository publication
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsSL "$REPO_BASE_URL/dists/noble/InRelease" >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for apt repository publication" >&2
+          exit 1
+
+      - name: Run EC2 smoke test
+        env:
+          SMOKE_AWS_REGION: ${{ secrets.SMOKE_AWS_REGION }}
+          SMOKE_APT_SUITE: noble
+          SMOKE_REPO_BASE_URL: ${{ env.REPO_BASE_URL }}
+        run: ./scripts/smoke-ec2.sh
+
+  publish_release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs:
+      - bump_and_tag
+      - verify_release
+      - publish_container
+      - build_apt_packages
+      - publish_apt_repository
+      - smoke_apt_ec2
+    if: >-
+      always() &&
+      needs.verify_release.result == 'success' &&
+      needs.publish_container.result == 'success' &&
+      needs.build_apt_packages.result == 'success' &&
+      needs.publish_apt_repository.result == 'success' &&
+      (needs.smoke_apt_ec2.result == 'success' || needs.smoke_apt_ec2.result == 'skipped')
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && needs.bump_and_tag.outputs.tag || github.ref_name }}
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
+      REPO_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apt
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
       - name: Verify SDK package still builds
         run: go build ./pkg/bridgeclient
+
+      - name: Download .deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-packages
+          path: dist/deb
 
       - name: Create GitHub release for Go SDK tag
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           generate_release_notes: true
+          files: dist/deb/*.deb
           body: |
             ## Published artifacts
 
             - Go SDK module tag: `${{ env.RELEASE_TAG }}`
             - Docker image: `ghcr.io/${{ github.repository }}:${{ env.RELEASE_TAG }}`
             - Docker image digest: `${{ needs.publish_container.outputs.digest }}`
+            - Apt repository: `${{ env.REPO_BASE_URL }}`
+            - Install helper: `https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/install.sh`

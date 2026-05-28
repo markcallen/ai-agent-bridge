@@ -1,7 +1,7 @@
 # AI Agent Bridge
 
 [![CI](https://github.com/markcallen/ai-agent-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/ci.yml)
-[![Smoke Tests](https://github.com/markcallen/ai-agent-bridge/actions/workflows/smoke.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/smoke.yml)
+[![Smoke Tests](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml/badge.svg?event=workflow_dispatch)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml)
 [![Publish](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml)
 [![License](https://img.shields.io/github/license/markcallen/ai-agent-bridge)](LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/markcallen/ai-agent-bridge)](https://github.com/markcallen/ai-agent-bridge/releases)
@@ -96,6 +96,30 @@ make smoke
 
 This validates the repo Dockerfile and Compose stack by starting the bridge in Docker and running an authenticated gRPC health check.
 It also verifies config-driven provider fallback by requesting a deliberately unavailable smoke provider and asserting the configured fallback provider is selected.
+
+### Ubuntu Package Install
+
+Install from the hosted apt repository on supported Ubuntu releases:
+
+```bash
+curl -fsSL https://markcallen.github.io/ai-agent-bridge/install.sh | sudo bash
+sudo systemctl enable --now ai-agent-bridge
+```
+
+Manual apt setup is also supported:
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt noble main" \
+  | sudo tee /etc/apt/sources.list.d/ai-agent-bridge.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y ai-agent-bridge
+sudo systemctl enable --now ai-agent-bridge
+```
+
+The packaged service installs a minimal config at `/etc/ai-agent-bridge/bridge.yaml` and listens on `127.0.0.1:9445` by default. It does not bundle provider CLIs or API keys. For production use you must install the provider CLIs separately, add provider configuration, and decide how the service account should access the target repositories.
 
 ---
 
@@ -287,6 +311,9 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs
 | `make test` | Run unit tests with race detection |
 | `make test-e2e` | Run the Dockerized end-to-end test suite |
 | `make test-cover` | Run tests with coverage report |
+| `make smoke` | Run Docker-based smoke validation |
+| `make smoke-apt-local` | Build a `.deb`, create a local apt repo, and verify install in Ubuntu containers |
+| `make smoke-ec2` | Provision an EC2 host, install from the hosted apt repo, and run a health check |
 | `make chat-claude` | Interactive PTY session with Claude |
 | `make chat-opencode` | Interactive PTY session with OpenCode |
 | `make chat-codex` | Interactive PTY session with Codex |

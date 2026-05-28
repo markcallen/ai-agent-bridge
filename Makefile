@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
+.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke smoke-apt-local smoke-ec2 build-deb up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/bridge
@@ -64,8 +64,8 @@ agents-setup:
 	./scripts/setup_ai_agents.sh
 
 fmt:
-	gofmt -s -w .
-	goimports -w .
+	gofmt -s -w $(shell find . -name '*.go' -not -path './gen/*' -not -path './node_modules/*')
+	goimports -w $(shell find . -name '*.go' -not -path './gen/*' -not -path './node_modules/*')
 
 run: build
 	$(BRIDGE) --config $(CONFIG)
@@ -78,6 +78,15 @@ docker-run:
 
 smoke:
 	./scripts/with_env_secrets.sh ./scripts/smoke.sh
+
+build-deb:
+	VERSION=$${VERSION:?VERSION is required} ./scripts/build-deb.sh
+
+smoke-apt-local:
+	./scripts/smoke-apt-local.sh
+
+smoke-ec2:
+	./scripts/with_env_secrets.sh ./scripts/smoke-ec2.sh
 
 up:
 	./scripts/with_env_secrets.sh docker compose up --build

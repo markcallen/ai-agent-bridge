@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+if ! getent group ai-agent-bridge >/dev/null 2>&1; then
+  addgroup --system ai-agent-bridge >/dev/null
+fi
+
+if ! getent passwd ai-agent-bridge >/dev/null 2>&1; then
+  adduser \
+    --system \
+    --ingroup ai-agent-bridge \
+    --home /var/lib/ai-agent-bridge \
+    --no-create-home \
+    --shell /usr/sbin/nologin \
+    ai-agent-bridge >/dev/null
+fi
+
+mkdir -p /var/lib/ai-agent-bridge
+chown ai-agent-bridge:ai-agent-bridge /var/lib/ai-agent-bridge
+
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable ai-agent-bridge.service >/dev/null 2>&1 || true
+fi

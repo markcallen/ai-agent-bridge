@@ -128,6 +128,7 @@ The bridge replaces direct in-process agent management with a networked, provide
 | `pkg/bridgeclient` | Go SDK for consumer integration (gRPC client) |
 | `pkg/bridgelib` | Embeddable Go library (no separate gRPC server; includes WebSocket handler) |
 | `packages/bridge-client-node` | Node.js gRPC→WebSocket adapter + React hook (`useBridgeSession`) |
+| Debian/Ubuntu package distribution | Signed `.deb` packages, apt repository metadata, install helper, and Ubuntu install docs |
 | `proto/bridge/v1` | Protobuf service definitions |
 | `internal/bridge` | Session supervisor, provider adapters, event buffer |
 | `internal/auth` | mTLS, JWT, and zero-trust security primitives |
@@ -205,6 +206,49 @@ bridge-ca (root)
 - Secret redaction in event streams and logs.
 - Audit logging of all authentication and authorization decisions.
 - No plaintext traffic under any configuration.
+
+---
+
+## 7.6 Debian/Ubuntu Distribution
+
+The bridge must be installable on supported Ubuntu hosts through a signed apt repository so operators can install and upgrade it with standard package-management workflows instead of building from source.
+
+### Packaging Scope
+
+- Ship a Debian package named `ai-agent-bridge`.
+- Initial supported targets:
+  - Ubuntu `24.04` (`noble`) on `amd64`
+  - Ubuntu `25.04` (`plucky`) on `amd64`
+- Install package contents to conventional system locations:
+  - `bridge` and `bridge-ca` binaries in `/usr/bin`
+  - default config in `/etc/ai-agent-bridge/bridge.yaml`
+  - systemd unit in `/lib/systemd/system/ai-agent-bridge.service`
+- Provide a default packaged config that allows the daemon to start on a fresh host without bundled provider CLIs or API keys.
+- Provider CLIs and their API credentials remain operator-managed prerequisites and must be documented separately from the package install flow.
+
+### Publishing and Hosting
+
+- Release automation must build `.deb` artifacts from release tags using the existing release workflow pattern.
+- The apt repository must be published in a GitHub-hosted location with the full Debian repository structure (`dists/`, `pool/`, `Packages`, `Release`, `InRelease`).
+- Repository metadata and packages must be signed with a GPG key stored in GitHub Actions secrets.
+- Release artifacts must also be attached to the GitHub release for direct inspection/download.
+
+### Installation Flow
+
+- Provide an `install.sh` helper that:
+  - installs the repository signing key into `/etc/apt/keyrings`
+  - writes the apt source list entry
+  - runs `apt-get update`
+  - installs `ai-agent-bridge`
+- Installation documentation must include both the helper-script path and the equivalent manual apt commands.
+
+### Acceptance Criteria
+
+- A release tag builds a signed `.deb` for each supported Ubuntu target.
+- The published apt repository is consumable with standard `apt` commands on supported Ubuntu releases.
+- A clean Ubuntu host can install `ai-agent-bridge`, start the systemd service, and pass a basic daemon health check.
+- The release workflow includes smoke coverage that validates apt installation in containers and on an EC2 host.
+- `README.md` and `docs/` describe package installation, runtime prerequisites, and service behavior accurately.
 
 ---
 
