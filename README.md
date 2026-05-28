@@ -121,16 +121,17 @@ sudo systemctl enable --now ai-agent-bridge
 
 **Supported Ubuntu suites:** `noble` (24.04 LTS) and `plucky` (25.04). Replace `noble` above with `plucky` if you are on Ubuntu 25.04. The repository does not publish a `stable` or `jammy` suite — using any other suite name will result in a "does not have a Release file" error from apt.
 
-**Ansible:** use `ansible_distribution_release` to select the correct suite automatically:
+**Ansible:** use `ansible_distribution_release` for the suite and `dpkg --print-architecture` for the arch. Do not use `ansible_architecture` — it returns the kernel arch (`x86_64`) rather than the Debian package arch (`amd64`), which causes apt to look for a non-existent `binary-x86_64/Packages` path.
 
 ```yaml
+- name: Get Debian architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: dpkg_arch
+  changed_when: false
+
 - name: Add ai-agent-bridge apt repository
   ansible.builtin.apt_repository:
-    repo: >-
-      deb [arch={{ ansible_architecture }}
-      signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg]
-      https://markcallen.github.io/ai-agent-bridge/apt
-      {{ ansible_distribution_release }} main
+    repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt {{ ansible_distribution_release }} main"
     state: present
     filename: ai-agent-bridge
 ```
