@@ -119,6 +119,22 @@ sudo apt-get install -y ai-agent-bridge
 sudo systemctl enable --now ai-agent-bridge
 ```
 
+**Supported Ubuntu suites:** `noble` (24.04 LTS) and `plucky` (25.04). Replace `noble` above with `plucky` if you are on Ubuntu 25.04. The repository does not publish a `stable` or `jammy` suite — using any other suite name will result in a "does not have a Release file" error from apt.
+
+**Ansible:** use `ansible_distribution_release` to select the correct suite automatically:
+
+```yaml
+- name: Add ai-agent-bridge apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ ansible_architecture }}
+      signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg]
+      https://markcallen.github.io/ai-agent-bridge/apt
+      {{ ansible_distribution_release }} main
+    state: present
+    filename: ai-agent-bridge
+```
+
 The packaged service installs a minimal config at `/etc/ai-agent-bridge/bridge.yaml` and listens on `127.0.0.1:9445` by default. It does not bundle provider CLIs or API keys. For production use you must install the provider CLIs separately, add provider configuration, and decide how the service account should access the target repositories.
 
 ---
