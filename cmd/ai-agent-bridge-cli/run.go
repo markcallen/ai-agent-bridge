@@ -144,16 +144,15 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 				})
 				continue
 			}
-			// SIGINT/SIGTERM → stop session.
-			cancel()
+			// SIGINT/SIGTERM → stop session and let RecvAll unwind.
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			_, _ = client.StopSession(stopCtx, &bridgev1.StopSessionRequest{
 				SessionId: sessionID,
 				Force:     true,
 			})
 			stopCancel()
-			restore()
-			os.Exit(0)
+			cancel()
+			return
 		}
 	}()
 

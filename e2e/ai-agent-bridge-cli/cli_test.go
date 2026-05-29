@@ -284,8 +284,8 @@ func TestMultipleSessionsSameServer(t *testing.T) {
 	}
 }
 
-// TestServerDoesNotDoubleStart verifies that starting a server when one is
-// already running returns the existing server.
+// TestServerDoesNotDoubleStart verifies that discovery finds the already-running
+// server, so a second caller would connect to it instead of starting a new one.
 func TestServerDoesNotDoubleStart(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in short mode")

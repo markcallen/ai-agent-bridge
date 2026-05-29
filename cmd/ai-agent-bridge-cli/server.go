@@ -125,9 +125,14 @@ func newServerStopCmd() *cobra.Command {
 				return fmt.Errorf("find process %d: %w", pid, err)
 			}
 			if err := proc.Signal(syscall.SIGTERM); err != nil {
-				return fmt.Errorf("signal process %d: %w", pid, err)
+				// SIGTERM is not supported on Windows; fall back to Kill.
+				if killErr := proc.Kill(); killErr != nil {
+					return fmt.Errorf("kill process %d: %w (SIGTERM failed: %v)", pid, killErr, err)
+				}
+				fmt.Printf("Killed server (pid %d)\n", pid)
+			} else {
+				fmt.Printf("Sent SIGTERM to server (pid %d)\n", pid)
 			}
-			fmt.Printf("Sent SIGTERM to server (pid %d)\n", pid)
 
 			// Clean up stale files after a brief wait.
 			time.Sleep(500 * time.Millisecond)

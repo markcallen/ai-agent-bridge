@@ -22,7 +22,6 @@ import (
 	"github.com/markcallen/ai-agent-bridge/internal/auth"
 	"github.com/markcallen/ai-agent-bridge/internal/bridge"
 	"github.com/markcallen/ai-agent-bridge/internal/provider"
-	"github.com/markcallen/ai-agent-bridge/internal/redact"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -149,9 +148,6 @@ func Start(cfg Config) (*Server, error) {
 	}
 	grpcServer := grpc.NewServer(grpcOpts...)
 
-	redactor, _ := redact.New(nil)
-	_ = redactor // unused but kept for consistency
-
 	bridgeServer := server.New(sup, registry, logger, server.RateLimitConfig{
 		GlobalRPS:                  100,
 		GlobalBurst:                200,
@@ -235,14 +231,19 @@ func (s *Server) Stop() {
 	// Clean up state files.
 	_ = os.Remove(filepath.Join(s.stateDir, "server.pid"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.addr"))
-	sockPath := filepath.Join(s.stateDir, "server.sock")
-	_ = os.Remove(sockPath)
+	_ = os.Remove(filepath.Join(s.stateDir, "server.sock"))
+	_ = os.Remove(filepath.Join(s.stateDir, "server.lock"))
 }
 
 // listen creates the appropriate listener for the platform.
+// On unix, it acquires an exclusive lockfile before replacing the socket
+// to prevent a concurrent start from unlinking an active listener.
 func listen(stateDir string) (net.Listener, string, error) {
 	if runtime.GOOS == "windows" {
 		// Windows: use TCP on localhost with a random port.
+		// NOTE: local mode disables TLS/JWT, so any local process that
+		// discovers the port can call RPCs. This is a known limitation;
+		// consider a named pipe with ACLs for hardened Windows support.
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			return nil, "", err
@@ -252,12 +253,29 @@ func listen(stateDir string) (net.Listener, string, error) {
 
 	// Unix socket for macOS and Linux.
 	sockPath := filepath.Join(stateDir, "server.sock")
-	// Remove stale socket.
+	lockPath := filepath.Join(stateDir, "server.lock")
+
+	// Acquire an exclusive lockfile so concurrent starts don't race on
+	// socket removal. The lock is released when the file is closed (on
+	// process exit or when Stop removes the socket).
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, "", fmt.Errorf("open lockfile: %w", err)
+	}
+	if err := acquireLock(lockFile); err != nil {
+		_ = lockFile.Close()
+		return nil, "", fmt.Errorf("acquire lock (another server starting?): %w", err)
+	}
+
+	// Safe to remove a stale socket now that we hold the lock.
 	_ = os.Remove(sockPath)
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
+		_ = lockFile.Close()
 		return nil, "", err
 	}
+	// Keep lockFile open for the lifetime of the listener; it will be
+	// released when the process exits or Stop() cleans up.
 	return ln, sockPath, nil
 }
 

@@ -196,8 +196,7 @@ func attachSession(target, sessionID string) error {
 				continue
 			}
 			cancel()
-			restore()
-			os.Exit(0)
+			return
 		}
 	}()
 

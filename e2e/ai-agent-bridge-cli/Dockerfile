@@ -9,7 +9,7 @@ RUN go mod download
 # Copy the full source tree.
 COPY . .
 
-# Build the ai-agent-bridge-cli binary so TestMain doesn't have to.
+# Pre-build the binary to warm the Go build cache (TestMain rebuilds it).
 RUN go build -o /usr/local/bin/ai-agent-bridge-cli ./cmd/ai-agent-bridge-cli
 
 # Run the e2e test suite.
