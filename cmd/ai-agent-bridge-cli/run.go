@@ -227,12 +227,17 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 		return nil
 	}
 
-	// Normal exit or signal — stop the owned server if we started it.
-	if ownedServer != nil {
-		ownedServer.Stop()
-	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\nsession ended: %v\r\n", err)
+	}
+
+	// Only stop the owned server if no sessions are still running.
+	if ownedServer != nil {
+		if hasActiveSessions(client, project) {
+			fmt.Fprintf(os.Stderr, "Server kept alive (other sessions still running)\r\n")
+		} else {
+			ownedServer.Stop()
+		}
 	}
 	return nil
 }
@@ -253,6 +258,29 @@ func ensureServer() (string, *localserver.Server, error) {
 		return "", nil, fmt.Errorf("start local server: %w", err)
 	}
 	return srv.Target(), srv, nil
+}
+
+// hasActiveSessions returns true if the server has any sessions that are
+// still running (not stopped/failed).
+func hasActiveSessions(client *bridgeclient.Client, project string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	resp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
+		ProjectId: project,
+	})
+	if err != nil {
+		return false
+	}
+	for _, s := range resp.Sessions {
+		switch s.Status {
+		case bridgev1.SessionStatus_SESSION_STATUS_STOPPED,
+			bridgev1.SessionStatus_SESSION_STATUS_FAILED:
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func currentTTYSize() (uint32, uint32) {
