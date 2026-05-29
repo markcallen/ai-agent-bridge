@@ -129,11 +129,30 @@ sudo systemctl enable --now ai-agent-bridge
   register: dpkg_arch
   changed_when: false
 
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download ai-agent-bridge signing key
+  ansible.builtin.get_url:
+    url: https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc
+    dest: /tmp/ai-agent-bridge-keyring.asc
+    mode: '0644'
+
+- name: Dearmor signing key
+  ansible.builtin.command: >
+    gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg /tmp/ai-agent-bridge-keyring.asc
+  args:
+    creates: /etc/apt/keyrings/ai-agent-bridge.gpg
+
 - name: Add ai-agent-bridge apt repository
   ansible.builtin.apt_repository:
     repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt {{ ansible_distribution_release }} main"
     state: present
     filename: ai-agent-bridge
+  notify: Update apt cache
 ```
 
 The packaged service installs a minimal config at `/etc/ai-agent-bridge/bridge.yaml` and listens on `127.0.0.1:9445` by default. It does not bundle provider CLIs or API keys. For production use you must install the provider CLIs separately, add provider configuration, and decide how the service account should access the target repositories.
