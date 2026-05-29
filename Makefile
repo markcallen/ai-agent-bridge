@@ -1,8 +1,9 @@
-.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 build-deb up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start
+.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 build-deb up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker check-deps
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/ai-agent-bridge
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
+BRIDGE_CLI := $(BIN_DIR)/ai-agent-bridge-cli
 CONFIG ?= config/bridge.yaml
 DEV_CONFIG ?= config/bridge-dev.yaml
 CHAT_TARGET ?= bridge.local:9445
@@ -14,6 +15,11 @@ build: proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BRIDGE) ./cmd/bridge
 	go build -o $(BRIDGE_CA) ./cmd/bridge-ca
+	go build -o $(BRIDGE_CLI) ./cmd/ai-agent-bridge-cli
+
+build-cli:
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BRIDGE_CLI) ./cmd/ai-agent-bridge-cli
 
 proto:
 	protoc \
@@ -181,3 +187,12 @@ chat-web-docker-dev:
 
 chat-web-docker-start:
 	docker compose up --build chat-web
+
+test-cli-e2e:
+	go test -v -count=1 -race -timeout 120s ./e2e/ai-agent-bridge-cli/
+
+test-cli-e2e-docker:
+	./scripts/test-cli-e2e-docker.sh
+
+check-deps:
+	./scripts/check-deps.sh
