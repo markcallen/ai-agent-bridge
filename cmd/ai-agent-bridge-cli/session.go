@@ -178,6 +178,8 @@ func attachSession(target, sessionID string) error {
 		return fmt.Errorf("attach: %w", err)
 	}
 
+	detached := false
+
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	setupSigwinch(sigCh)
@@ -205,6 +207,13 @@ func attachSession(target, sessionID string) error {
 		for {
 			n, readErr := os.Stdin.Read(buf)
 			if n > 0 {
+				for i := 0; i < n; i++ {
+					if buf[i] == detachKey {
+						detached = true
+						cancel()
+						return
+					}
+				}
 				data := normalizeTTYInput(buf[:n])
 				_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
 					SessionId: sessionID,
@@ -233,6 +242,12 @@ func attachSession(target, sessionID string) error {
 		}
 	})
 	restore()
+
+	if detached {
+		fmt.Fprintf(os.Stderr, "\r\nDetached from session %s\r\n", sessionID)
+		fmt.Fprintf(os.Stderr, "Reattach with: ai-agent-bridge-cli session attach %s\r\n", sessionID)
+		return nil
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\nsession ended: %v\r\n", err)
 	}

@@ -22,6 +22,9 @@ import (
 	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
 
+// detachKey is ctrl-] (0x1d), used to detach from a session without stopping it.
+const detachKey = 0x1d
+
 func newRunCmd() *cobra.Command {
 	var (
 		providerName string
@@ -35,7 +38,10 @@ func newRunCmd() *cobra.Command {
 		Long: `Start a local bridge server (if not already running), create a new
 session with the specified provider, and attach your terminal.
 
-If another instance is already running, the existing server is reused.`,
+If another instance is already running, the existing server is reused.
+
+Press ctrl-] to detach from the session without stopping it.
+Use 'ai-agent-bridge-cli session attach <id>' to reattach later.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "."
@@ -66,9 +72,6 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	if err != nil {
 		return err
 	}
-	if ownedServer != nil {
-		defer ownedServer.Stop()
-	}
 
 	// Connect as client.
 	client, err := bridgeclient.New(
@@ -94,16 +97,25 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 		InitialCols: cols,
 		InitialRows: rows,
 	}); err != nil {
+		if ownedServer != nil {
+			ownedServer.Stop()
+		}
 		return fmt.Errorf("start session: %w", err)
 	}
 
 	// Put terminal in raw mode.
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
+		if ownedServer != nil {
+			ownedServer.Stop()
+		}
 		return fmt.Errorf("stdin is not a terminal")
 	}
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
+		if ownedServer != nil {
+			ownedServer.Stop()
+		}
 		return fmt.Errorf("set raw terminal: %w", err)
 	}
 	var restoreOnce sync.Once
@@ -121,8 +133,13 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	})
 	if err != nil {
 		restore()
+		if ownedServer != nil {
+			ownedServer.Stop()
+		}
 		return fmt.Errorf("attach session: %w", err)
 	}
+
+	detached := false
 
 	// Handle signals.
 	sigCh := make(chan os.Signal, 2)
@@ -156,12 +173,20 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 		}
 	}()
 
-	// Forward stdin → session.
+	// Forward stdin → session, watching for detach key.
 	go func() {
 		buf := make([]byte, 1024)
 		for {
 			n, readErr := os.Stdin.Read(buf)
 			if n > 0 {
+				// Check for detach key (ctrl-]).
+				for i := 0; i < n; i++ {
+					if buf[i] == detachKey {
+						detached = true
+						cancel()
+						return
+					}
+				}
 				data := normalizeTTYInput(buf[:n])
 				_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
 					SessionId: sessionID,
@@ -194,6 +219,18 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 		}
 	})
 	restore()
+
+	if detached {
+		fmt.Fprintf(os.Stderr, "\r\nDetached from session %s\r\n", sessionID)
+		fmt.Fprintf(os.Stderr, "Reattach with: ai-agent-bridge-cli session attach %s\r\n", sessionID)
+		// Don't stop the server — session is still running.
+		return nil
+	}
+
+	// Normal exit or signal — stop the owned server if we started it.
+	if ownedServer != nil {
+		ownedServer.Stop()
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\nsession ended: %v\r\n", err)
 	}
