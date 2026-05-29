@@ -307,7 +307,7 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs
 | Target | Description |
 |--------|-------------|
 | `make dev-run` | Build, generate dev certs, start the daemon |
-| `make build` | Build `bin/bridge` and `bin/bridge-ca` |
+| `make build` | Build `bin/ai-agent-bridge` and `bin/ai-agent-bridge-ca` |
 | `make test` | Run unit tests with race detection |
 | `make test-e2e` | Run the Dockerized end-to-end test suite |
 | `make test-cover` | Run tests with coverage report |
@@ -327,18 +327,18 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs
 
 ---
 
-## bridge-ca: Certificate and Key Management
+## ai-agent-bridge-ca: Certificate and Key Management
 
 ```bash
-bridge-ca init          # Initialize a new ECDSA P-384 CA
-bridge-ca issue         # Issue a server or client certificate
-bridge-ca cross-sign    # Cross-sign an external CA for multi-tenant trust
-bridge-ca bundle        # Build a trust bundle from multiple CA certs
-bridge-ca jwt-keygen    # Generate an Ed25519 keypair for JWT signing
-bridge-ca verify        # Verify a certificate against a trust bundle
+ai-agent-bridge-ca init          # Initialize a new ECDSA P-384 CA
+ai-agent-bridge-ca issue         # Issue a server or client certificate
+ai-agent-bridge-ca cross-sign    # Cross-sign an external CA for multi-tenant trust
+ai-agent-bridge-ca bundle        # Build a trust bundle from multiple CA certs
+ai-agent-bridge-ca jwt-keygen    # Generate an Ed25519 keypair for JWT signing
+ai-agent-bridge-ca verify        # Verify a certificate against a trust bundle
 ```
 
-Run `bridge-ca <command> --help` for flags.
+Run `ai-agent-bridge-ca <command> --help` for flags.
 
 ---
 

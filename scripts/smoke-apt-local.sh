@@ -76,7 +76,7 @@ run_suite() {
       echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] file:/opt/aptrepo '"$suite"' main" > /etc/apt/sources.list.d/ai-agent-bridge.list
       apt-get update
       apt-get install -y ai-agent-bridge
-      /usr/bin/bridge --config /etc/ai-agent-bridge/bridge.yaml >/tmp/bridge.log 2>&1 &
+      /usr/bin/ai-agent-bridge --config /etc/ai-agent-bridge/bridge.yaml >/tmp/bridge.log 2>&1 &
       bridge_pid=$!
       for i in $(seq 1 15); do
         if ! kill -0 "$bridge_pid" 2>/dev/null; then
