@@ -279,30 +279,30 @@ Each consumer project runs its own CA. The bridge cross-signs consumer CAs to bu
 
 ```bash
 # 1. Each project initializes its own CA
-bridge-ca init --name my-app --out my-app/certs/
-bridge-ca init --name ai-agent-bridge --out bridge/certs/
+ai-agent-bridge-ca init --name my-app --out my-app/certs/
+ai-agent-bridge-ca init --name ai-agent-bridge --out bridge/certs/
 
 # 2. Bridge cross-signs consumer CAs
-bridge-ca cross-sign \
+ai-agent-bridge-ca cross-sign \
   --signer-ca bridge/certs/ca.crt --signer-key bridge/certs/ca.key \
   --target-ca my-app/certs/ca.crt \
   --out bridge/certs/my-app-cross.crt
 
 # 3. Build trust bundle
-bridge-ca bundle --out bridge/certs/ca-bundle.crt \
+ai-agent-bridge-ca bundle --out bridge/certs/ca-bundle.crt \
   bridge/certs/ca.crt \
   bridge/certs/my-app-cross.crt
 
 # 4. Issue certs
-bridge-ca issue --type server --cn bridge.local --san "bridge.local,127.0.0.1" \
+ai-agent-bridge-ca issue --type server --cn bridge.local --san "bridge.local,127.0.0.1" \
   --ca bridge/certs/ca.crt --ca-key bridge/certs/ca.key --out bridge/certs/
 
-bridge-ca issue --type client --cn my-app \
+ai-agent-bridge-ca issue --type client --cn my-app \
   --ca my-app/certs/ca.crt --ca-key my-app/certs/ca.key \
   --out my-app/certs/
 
 # 5. Generate JWT keys
-bridge-ca jwt-keygen --out my-app/certs/jwt-signing
+ai-agent-bridge-ca jwt-keygen --out my-app/certs/jwt-signing
 ```
 
 ## Data Flow

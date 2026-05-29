@@ -31,6 +31,7 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 
+mkdir -p "$ROOT_DIR/bin"
 GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/ai-agent-bridge" ./cmd/bridge
 GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/ai-agent-bridge-ca" ./cmd/bridge-ca
 

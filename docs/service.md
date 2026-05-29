@@ -212,25 +212,25 @@ logging:
 
 ### mTLS (transport)
 
-The daemon requires client certificates. Use `bridge-ca` to issue them:
+The daemon requires client certificates. Use `ai-agent-bridge-ca` to issue them:
 
 ```bash
 # Initialize a CA
-bridge-ca init --out certs/
+ai-agent-bridge-ca init --out certs/
 
 # Issue a server cert
-bridge-ca issue --ca certs/ca.crt --ca-key certs/ca.key \
+ai-agent-bridge-ca issue --ca certs/ca.crt --ca-key certs/ca.key \
   --type server --cn bridge.local --san bridge.local --out certs/
 
 # Issue a client cert
-bridge-ca issue --ca certs/ca.crt --ca-key certs/ca.key \
+ai-agent-bridge-ca issue --ca certs/ca.crt --ca-key certs/ca.key \
   --type client --cn my-service --out certs/
 
 # Build a trust bundle
-bridge-ca bundle --certs certs/ca.crt --out certs/ca-bundle.crt
+ai-agent-bridge-ca bundle --certs certs/ca.crt --out certs/ca-bundle.crt
 
 # Generate JWT signing keypair
-bridge-ca jwt-keygen --out certs/jwt-signing
+ai-agent-bridge-ca jwt-keygen --out certs/jwt-signing
 ```
 
 ### JWT (per-RPC)

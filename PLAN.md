@@ -54,9 +54,9 @@ The MVP wires `project_id`, `session_id`, `caller_cn`, `caller_sub` into audit e
 
 ### 2.4 CRL Distribution Point
 - [ ] Serve a CRL endpoint from the bridge daemon (`GET /crl` on a separate HTTP port or via gRPC reflection)
-- [ ] `bridge-ca` generates a CRL file on `init` and `revoke`
+- [ ] `ai-agent-bridge-ca` generates a CRL file on `init` and `revoke`
 - [ ] Bridge TLS config references CRL for client cert revocation checks
-- [ ] Add `bridge-ca revoke --cert <path>` subcommand
+- [ ] Add `ai-agent-bridge-ca revoke --cert <path>` subcommand
 
 ---
 
@@ -64,7 +64,7 @@ The MVP wires `project_id`, `session_id`, `caller_cn`, `caller_sub` into audit e
 
 **Goal**: Full certificate lifecycle tooling as specified in PRD section 12.
 
-### 3.1 `bridge-ca renew` Command
+### 3.1 `ai-agent-bridge-ca renew` Command
 - [ ] Implement `renew` subcommand in `cmd/bridge-ca/main.go`
   - Re-issue a certificate with the same CN and SANs but a new validity period
   - Accept `--cert`, `--ca`, `--ca-key`, `--out` flags
@@ -114,7 +114,7 @@ The MVP wires `project_id`, `session_id`, `caller_cn`, `caller_sub` into audit e
 ### 5.1 General Consumer Integration Guide
 - [ ] Write `docs/integration-guide.md`: step-by-step setup of `bridgeclient` in a consumer app
   - Module dependency, config struct additions (`bridge_target`, cert paths, JWT key path)
-  - Certificate setup walkthrough: `bridge-ca init`, `issue`, `cross-sign`, `bundle`
+  - Certificate setup walkthrough: `ai-agent-bridge-ca init`, `issue`, `cross-sign`, `bundle`
   - Code snippets: create client, start session, send input, stream events, stop session
   - Event type mapping examples for common consumer patterns
   - Multi-tenant trust setup for multiple consumer projects

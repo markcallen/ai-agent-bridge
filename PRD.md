@@ -43,7 +43,7 @@ The bridge replaces direct in-process agent management with a networked, provide
 - Support both local and remote agent communication from day one.
 - Ship a Go SDK (`bridgeclient`) for integration by consumer projects.
 - Provide durable per-session pub/sub replay so SDK clients can reconnect and receive events they missed while disconnected (while bridge process is alive).
-- Provide a CLI tool for CA/cert management (`bridge-ca`).
+- Provide a CLI tool for CA/cert management (`ai-agent-bridge-ca`).
 
 ---
 
@@ -156,7 +156,7 @@ Project A CA                    Project B CA
 ### 7.2 Certificate Hierarchy
 
 ```
-bridge-ca (root)
+ai-agent-bridge-ca (root)
 ├── Bridge Server Certificate
 │   └── SAN: bridge host FQDN/IP
 ├── Bridge Client Certificates (one per consumer)
@@ -195,7 +195,7 @@ bridge-ca (root)
 - Ed25519 keypairs for JWT signing (one per consumer project).
 - RSA 4096 or ECDSA P-384 for TLS certificates.
 - CA keys stored encrypted at rest (passphrase-protected PEM).
-- Certificate rotation: certs expire after 90 days; automated renewal via `bridge-ca renew`.
+- Certificate rotation: certs expire after 90 days; automated renewal via `ai-agent-bridge-ca renew`.
 - Revocation: CRL distribution point served by bridge daemon.
 
 ### 7.5 Defense in Depth
@@ -220,7 +220,7 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
   - Ubuntu `24.04` (`noble`) on `amd64`
   - Ubuntu `25.04` (`plucky`) on `amd64`
 - Install package contents to conventional system locations:
-  - `bridge` and `bridge-ca` binaries in `/usr/bin`
+  - `ai-agent-bridge` and `ai-agent-bridge-ca` binaries in `/usr/bin`
   - default config in `/etc/ai-agent-bridge/bridge.yaml`
   - systemd unit in `/lib/systemd/system/ai-agent-bridge.service`
 - Provide a default packaged config that allows the daemon to start on a fresh host without bundled provider CLIs or API keys.
@@ -533,46 +533,46 @@ for {
 
 ---
 
-## 12. CLI Tool: `bridge-ca`
+## 12. CLI Tool: `ai-agent-bridge-ca`
 
 ### 12.1 Commands
 
 ```bash
 # Initialize a new CA for this project
-bridge-ca init --name "ai-agent-bridge" --out certs/
+ai-agent-bridge-ca init --name "ai-agent-bridge" --out certs/
 
 # Generate server certificate for the bridge daemon
-bridge-ca issue --type server --cn "bridge.example.com" \
+ai-agent-bridge-ca issue --type server --cn "bridge.example.com" \
     --san "bridge.example.com,192.168.1.10" \
     --ca certs/ca.crt --ca-key certs/ca.key \
     --out certs/bridge
 
 # Generate client certificate for a consumer project
-bridge-ca issue --type client --cn "prd-manager" \
+ai-agent-bridge-ca issue --type client --cn "prd-manager" \
     --ca certs/ca.crt --ca-key certs/ca.key \
     --out certs/prd-manager-client
 
 # Cross-sign another project's CA
-bridge-ca cross-sign \
+ai-agent-bridge-ca cross-sign \
     --signer-ca certs/ca.crt --signer-key certs/ca.key \
     --target-ca ../prd-manager-control-plane/certs/ca.crt \
     --out certs/prd-manager-ca-cross-signed.crt
 
 # Build a trust bundle (own CA + all cross-signed CAs)
-bridge-ca bundle \
+ai-agent-bridge-ca bundle \
     --ca certs/ca.crt \
     --cross-signed certs/prd-manager-ca-cross-signed.crt \
     --cross-signed certs/ndara-ca-cross-signed.crt \
     --out certs/ca-bundle.crt
 
 # Generate Ed25519 keypair for JWT signing
-bridge-ca jwt-keygen --out certs/jwt-signing
+ai-agent-bridge-ca jwt-keygen --out certs/jwt-signing
 
 # Renew expiring certificates
-bridge-ca renew --cert certs/bridge.crt --ca certs/ca.crt --ca-key certs/ca.key
+ai-agent-bridge-ca renew --cert certs/bridge.crt --ca certs/ca.crt --ca-key certs/ca.key
 
 # Verify a certificate chain
-bridge-ca verify --cert certs/bridge.crt --bundle certs/ca-bundle.crt
+ai-agent-bridge-ca verify --cert certs/bridge.crt --bundle certs/ca-bundle.crt
 ```
 
 ---

@@ -16,24 +16,24 @@ chown -R bridge:bridge /home/bridge
 
 if [ ! -f "$CERT_DIR/ca.crt" ]; then
   echo "==> Initializing CA..."
-  bridge-ca init --name bridge-ca --out "$CERT_DIR"
+  ai-agent-bridge-ca init --name ai-agent-bridge-ca --out "$CERT_DIR"
 
   echo "==> Issuing server certificate..."
-  bridge-ca issue --type server --cn "$BRIDGE_CN" \
+  ai-agent-bridge-ca issue --type server --cn "$BRIDGE_CN" \
     --san "$BRIDGE_SANS" \
     --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
     --out "$CERT_DIR"
 
   echo "==> Issuing client certificate..."
-  bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
+  ai-agent-bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
     --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
     --out "$CERT_DIR"
 
   echo "==> Generating JWT signing keypair..."
-  bridge-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
+  ai-agent-bridge-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
 
   echo "==> Building trust bundle..."
-  bridge-ca bundle --out "$CERT_DIR/ca-bundle.crt" "$CERT_DIR/ca.crt"
+  ai-agent-bridge-ca bundle --out "$CERT_DIR/ca-bundle.crt" "$CERT_DIR/ca.crt"
 
   chmod 644 "$CERT_DIR"/*
 fi
@@ -180,4 +180,4 @@ fs.writeFileSync(configPath, configToml);
 EOF'
 
 echo "==> Starting bridge as non-root user..."
-exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec bridge --config $BRIDGE_CONFIG"
+exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec ai-agent-bridge --config $BRIDGE_CONFIG"
