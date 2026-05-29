@@ -223,21 +223,15 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	if detached {
 		fmt.Fprintf(os.Stderr, "\r\nDetached from session %s\r\n", sessionID)
 		fmt.Fprintf(os.Stderr, "Reattach with: ai-agent-bridge-cli session attach %s\r\n", sessionID)
-		// Don't stop the server — session is still running.
-		return nil
-	}
-
-	if err != nil {
+	} else if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\nsession ended: %v\r\n", err)
 	}
 
-	// Only stop the owned server if no sessions are still running.
+	// If we own the server, keep the process alive while other sessions
+	// are still running — the server lives in our process, so exiting
+	// would kill all sessions.
 	if ownedServer != nil {
-		if hasActiveSessions(client, project) {
-			fmt.Fprintf(os.Stderr, "Server kept alive (other sessions still running)\r\n")
-		} else {
-			ownedServer.Stop()
-		}
+		waitForActiveSessions(client, project, ownedServer)
 	}
 	return nil
 }
@@ -260,9 +254,43 @@ func ensureServer() (string, *localserver.Server, error) {
 	return srv.Target(), srv, nil
 }
 
-// hasActiveSessions returns true if the server has any sessions that are
+// waitForActiveSessions blocks while other sessions are still running on
+// the owned server. The server lives in this process, so we must stay alive
+// until all sessions finish. Ctrl-c during the wait shuts everything down.
+func waitForActiveSessions(client *bridgeclient.Client, project string, srv *localserver.Server) {
+	if !countActiveSessions(client, project) {
+		srv.Stop()
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "Waiting for other sessions to finish (ctrl-c to force shutdown)...\r\n")
+
+	forceCh := make(chan os.Signal, 1)
+	signal.Notify(forceCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(forceCh)
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-forceCh:
+			fmt.Fprintf(os.Stderr, "\r\nForce shutdown — stopping all sessions.\r\n")
+			srv.Stop()
+			return
+		case <-ticker.C:
+			if !countActiveSessions(client, project) {
+				fmt.Fprintf(os.Stderr, "All sessions finished. Shutting down server.\r\n")
+				srv.Stop()
+				return
+			}
+		}
+	}
+}
+
+// countActiveSessions returns true if the server has any sessions that are
 // still running (not stopped/failed).
-func hasActiveSessions(client *bridgeclient.Client, project string) bool {
+func countActiveSessions(client *bridgeclient.Client, project string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	resp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
