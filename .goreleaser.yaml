@@ -25,6 +25,21 @@ builds:
       - amd64
       - arm64
 
+  - id: ai-agent-bridge-cli
+    binary: ai-agent-bridge-cli
+    main: ./cmd/ai-agent-bridge-cli
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
 dockers:
   - id: bridge-amd64
     goos: linux
