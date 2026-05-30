@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -178,7 +179,7 @@ func attachSession(target, sessionID string) error {
 		return fmt.Errorf("attach: %w", err)
 	}
 
-	detached := false
+	var detached atomic.Bool
 
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
@@ -209,7 +210,7 @@ func attachSession(target, sessionID string) error {
 			if n > 0 {
 				for i := 0; i < n; i++ {
 					if buf[i] == detachKey {
-						detached = true
+						detached.Store(true)
 						cancel()
 						return
 					}
@@ -243,7 +244,7 @@ func attachSession(target, sessionID string) error {
 	})
 	restore()
 
-	if detached {
+	if detached.Load() {
 		fmt.Fprintf(os.Stderr, "\r\nDetached from session %s\r\n", sessionID)
 		fmt.Fprintf(os.Stderr, "Reattach with: ai-agent-bridge-cli session attach %s\r\n", sessionID)
 		return nil

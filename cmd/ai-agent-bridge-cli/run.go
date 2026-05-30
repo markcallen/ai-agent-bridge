@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -67,8 +69,8 @@ Use 'ai-agent-bridge-cli session attach <id>' to reattach later.`,
 }
 
 func runSession(dir, providerName, project string, timeout time.Duration) error {
-	// Ensure a server is running.
-	target, ownedServer, err := ensureServer()
+	// Ensure a server is running (spawns a background process if needed).
+	target, err := ensureServer()
 	if err != nil {
 		return err
 	}
@@ -97,25 +99,16 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 		InitialCols: cols,
 		InitialRows: rows,
 	}); err != nil {
-		if ownedServer != nil {
-			ownedServer.Stop()
-		}
 		return fmt.Errorf("start session: %w", err)
 	}
 
 	// Put terminal in raw mode.
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
-		if ownedServer != nil {
-			ownedServer.Stop()
-		}
 		return fmt.Errorf("stdin is not a terminal")
 	}
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
-		if ownedServer != nil {
-			ownedServer.Stop()
-		}
 		return fmt.Errorf("set raw terminal: %w", err)
 	}
 	var restoreOnce sync.Once
@@ -133,13 +126,10 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	})
 	if err != nil {
 		restore()
-		if ownedServer != nil {
-			ownedServer.Stop()
-		}
 		return fmt.Errorf("attach session: %w", err)
 	}
 
-	detached := false
+	var detached atomic.Bool
 
 	// Handle signals.
 	sigCh := make(chan os.Signal, 2)
@@ -182,7 +172,7 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 				// Check for detach key (ctrl-]).
 				for i := 0; i < n; i++ {
 					if buf[i] == detachKey {
-						detached = true
+						detached.Store(true)
 						cancel()
 						return
 					}
@@ -220,95 +210,52 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	})
 	restore()
 
-	if detached {
+	if detached.Load() {
 		fmt.Fprintf(os.Stderr, "\r\nDetached from session %s\r\n", sessionID)
 		fmt.Fprintf(os.Stderr, "Reattach with: ai-agent-bridge-cli session attach %s\r\n", sessionID)
 	} else if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\nsession ended: %v\r\n", err)
 	}
-
-	// If we own the server, keep the process alive while other sessions
-	// are still running — the server lives in our process, so exiting
-	// would kill all sessions.
-	if ownedServer != nil {
-		waitForActiveSessions(client, project, ownedServer)
-	}
 	return nil
 }
 
-// ensureServer returns a gRPC target, starting a server if needed.
-// If this process starts the server, it returns a non-nil *localserver.Server
-// that the caller must Stop.
-func ensureServer() (string, *localserver.Server, error) {
+// ensureServer returns a gRPC dial target for a running server. If no server
+// is running, it spawns "ai-agent-bridge-cli server start" as a background
+// process and waits for it to become healthy. The server runs independently
+// so any client can exit without killing sessions.
+func ensureServer() (string, error) {
 	// Check for existing server.
 	target := localserver.DiscoverTarget("")
 	if target != "" {
-		return target, nil, nil
+		return target, nil
 	}
 
-	// Start a new server.
-	srv, err := localserver.Start(localserver.Config{})
+	// Find our own binary to spawn the server.
+	self, err := os.Executable()
 	if err != nil {
-		return "", nil, fmt.Errorf("start local server: %w", err)
-	}
-	return srv.Target(), srv, nil
-}
-
-// waitForActiveSessions blocks while other sessions are still running on
-// the owned server. The server lives in this process, so we must stay alive
-// until all sessions finish. Ctrl-c during the wait shuts everything down.
-func waitForActiveSessions(client *bridgeclient.Client, project string, srv *localserver.Server) {
-	if !countActiveSessions(client, project) {
-		srv.Stop()
-		return
+		return "", fmt.Errorf("find executable: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Waiting for other sessions to finish (ctrl-c to force shutdown)...\r\n")
+	cmd := exec.Command(self, "server", "start")
+	setDetachedProcess(cmd)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start server process: %w", err)
+	}
+	// Detach — don't wait for the child.
+	go func() { _ = cmd.Wait() }()
 
-	forceCh := make(chan os.Signal, 1)
-	signal.Notify(forceCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(forceCh)
-
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-forceCh:
-			fmt.Fprintf(os.Stderr, "\r\nForce shutdown — stopping all sessions.\r\n")
-			srv.Stop()
-			return
-		case <-ticker.C:
-			if !countActiveSessions(client, project) {
-				fmt.Fprintf(os.Stderr, "All sessions finished. Shutting down server.\r\n")
-				srv.Stop()
-				return
-			}
+	// Poll until the server is healthy.
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		target = localserver.DiscoverTarget("")
+		if target != "" {
+			return target, nil
 		}
 	}
-}
-
-// countActiveSessions returns true if the server has any sessions that are
-// still running (not stopped/failed).
-func countActiveSessions(client *bridgeclient.Client, project string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	resp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
-		ProjectId: project,
-	})
-	if err != nil {
-		return false
-	}
-	for _, s := range resp.Sessions {
-		switch s.Status {
-		case bridgev1.SessionStatus_SESSION_STATUS_STOPPED,
-			bridgev1.SessionStatus_SESSION_STATUS_FAILED:
-			continue
-		default:
-			return true
-		}
-	}
-	return false
+	return "", fmt.Errorf("server did not start within 5s")
 }
 
 func currentTTYSize() (uint32, uint32) {
