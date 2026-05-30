@@ -31,8 +31,9 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 
-GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/bridge" ./cmd/bridge
-GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/bridge-ca" ./cmd/bridge-ca
+mkdir -p "$ROOT_DIR/bin"
+GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/ai-agent-bridge" ./cmd/bridge
+GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/ai-agent-bridge-ca" ./cmd/bridge-ca
 
 mkdir -p \
   "$PKG_ROOT/DEBIAN" \
@@ -40,8 +41,8 @@ mkdir -p \
   "$PKG_ROOT/etc/ai-agent-bridge" \
   "$PKG_ROOT/lib/systemd/system"
 
-install -m 0755 "$ROOT_DIR/bin/bridge" "$PKG_ROOT/usr/bin/bridge"
-install -m 0755 "$ROOT_DIR/bin/bridge-ca" "$PKG_ROOT/usr/bin/bridge-ca"
+install -m 0755 "$ROOT_DIR/bin/ai-agent-bridge" "$PKG_ROOT/usr/bin/ai-agent-bridge"
+install -m 0755 "$ROOT_DIR/bin/ai-agent-bridge-ca" "$PKG_ROOT/usr/bin/ai-agent-bridge-ca"
 install -m 0644 "$ROOT_DIR/packaging/bridge.yaml" "$PKG_ROOT/etc/ai-agent-bridge/bridge.yaml"
 install -m 0644 "$ROOT_DIR/packaging/ai-agent-bridge.service" "$PKG_ROOT/lib/systemd/system/ai-agent-bridge.service"
 install -m 0755 "$ROOT_DIR/packaging/debian/postinst" "$PKG_ROOT/DEBIAN/postinst"

@@ -141,7 +141,7 @@ ai-agent-bridge/
   - Minimum TLS 1.3
 - [x] `internal/auth/jwt.go` - Ed25519 JWT signing and verification
   - `JWTVerifier` - verifies tokens with multiple public keys (one per issuer)
-  - `JWTIssuer` - mints tokens (used by SDK and bridge-ca)
+  - `JWTIssuer` - mints tokens (used by SDK and ai-agent-bridge-ca)
   - Claims: `sub`, `project_id`, `aud`, `iat`, `exp`
   - Max TTL enforcement (reject tokens with TTL > configured max)
 - [x] `internal/auth/interceptors.go` - gRPC interceptors for JWT extraction and verification
@@ -245,7 +245,7 @@ ai-agent-bridge/
   - Start gRPC server with mTLS + JWT interceptors
   - Graceful shutdown on SIGINT/SIGTERM
   - Health/ready logging on startup
-- [x] `scripts/dev_certs.sh` - Generate dev certs using `bridge-ca`
+- [x] `scripts/dev_certs.sh` - Generate dev certs using `ai-agent-bridge-ca`
 
 ---
 

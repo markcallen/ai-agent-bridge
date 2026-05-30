@@ -38,7 +38,7 @@ var scenarios = []providerScenario{
 	},
 	{
 		name:          "opencode",
-		requiredEnv:   "OPENAI_API_KEY",
+		requiredEnv:   "OPENCODE_ENABLED",
 		promptRe:      regexp.MustCompile(`❯`),
 		startTimeout:  90 * time.Second,
 		turnTimeout:   240 * time.Second,

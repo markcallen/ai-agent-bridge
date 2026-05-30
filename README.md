@@ -122,9 +122,43 @@ sudo apt-get install -y ai-agent-bridge
 sudo systemctl enable --now ai-agent-bridge
 ```
 
-Replace `noble` with `plucky` for Ubuntu 25.04.
+**Supported Ubuntu suites:** `noble` (24.04 LTS) and `plucky` (25.04). Replace `noble` above with `plucky` if you are on Ubuntu 25.04. The repository does not publish a `stable` or `jammy` suite — using any other suite name will result in a "does not have a Release file" error from apt.
 
-The packaged service installs a minimal config at `/etc/ai-agent-bridge/bridge.yaml` and listens on `127.0.0.1:9445` by default. It does not bundle provider CLIs or API keys — see [docs/install-ubuntu.md](docs/install-ubuntu.md) for full install and configuration guidance.
+**Ansible:** use `ansible_distribution_release` for the suite and `dpkg --print-architecture` for the arch. Do not use `ansible_architecture` — it returns the kernel arch (`x86_64`) rather than the Debian package arch (`amd64`), which causes apt to look for a non-existent `binary-x86_64/Packages` path.
+
+```yaml
+- name: Get Debian architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: dpkg_arch
+  changed_when: false
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download ai-agent-bridge signing key
+  ansible.builtin.get_url:
+    url: https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc
+    dest: /tmp/ai-agent-bridge-keyring.asc
+    mode: '0644'
+
+- name: Dearmor signing key
+  ansible.builtin.command: >
+    gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg /tmp/ai-agent-bridge-keyring.asc
+  args:
+    creates: /etc/apt/keyrings/ai-agent-bridge.gpg
+
+- name: Add ai-agent-bridge apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt {{ ansible_distribution_release }} main"
+    state: present
+    filename: ai-agent-bridge
+  notify: Update apt cache
+```
+
+The packaged service installs a minimal config at `/etc/ai-agent-bridge/bridge.yaml` and listens on `127.0.0.1:9445` by default. It does not bundle provider CLIs or API keys. For production use you must install the provider CLIs separately, add provider configuration, and decide how the service account should access the target repositories.
 
 ---
 
@@ -312,7 +346,7 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs
 | Target | Description |
 |--------|-------------|
 | `make dev-run` | Build, generate dev certs, start the daemon |
-| `make build` | Build `bin/bridge` and `bin/bridge-ca` |
+| `make build` | Build `bin/ai-agent-bridge` and `bin/ai-agent-bridge-ca` |
 | `make test` | Run unit tests with race detection |
 | `make test-e2e` | Run the Dockerized end-to-end test suite |
 | `make test-cover` | Run tests with coverage report |
@@ -332,18 +366,18 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs
 
 ---
 
-## bridge-ca: Certificate and Key Management
+## ai-agent-bridge-ca: Certificate and Key Management
 
 ```bash
-bridge-ca init          # Initialize a new ECDSA P-384 CA
-bridge-ca issue         # Issue a server or client certificate
-bridge-ca cross-sign    # Cross-sign an external CA for multi-tenant trust
-bridge-ca bundle        # Build a trust bundle from multiple CA certs
-bridge-ca jwt-keygen    # Generate an Ed25519 keypair for JWT signing
-bridge-ca verify        # Verify a certificate against a trust bundle
+ai-agent-bridge-ca init          # Initialize a new ECDSA P-384 CA
+ai-agent-bridge-ca issue         # Issue a server or client certificate
+ai-agent-bridge-ca cross-sign    # Cross-sign an external CA for multi-tenant trust
+ai-agent-bridge-ca bundle        # Build a trust bundle from multiple CA certs
+ai-agent-bridge-ca jwt-keygen    # Generate an Ed25519 keypair for JWT signing
+ai-agent-bridge-ca verify        # Verify a certificate against a trust bundle
 ```
 
-Run `bridge-ca <command> --help` for flags.
+Run `ai-agent-bridge-ca <command> --help` for flags.
 
 ---
 

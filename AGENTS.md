@@ -4,7 +4,7 @@
 Core binaries live in `cmd/`: `cmd/bridge` (daemon) and `cmd/bridge-ca` (certificate tooling). Service contracts are in `proto/bridge/v1`, with generated Go stubs in `gen/bridge/v1` (regenerate, do not hand-edit). Runtime internals are organized under `internal/` by domain: `auth`, `bridge`, `config`, `pki`, `provider`, and `server`. Public SDK code is in `pkg/bridgeclient`. Supporting artifacts live in `config/`, `scripts/`, `certs/`, and integration scenarios in `e2e/`.
 
 ## Build, Test, and Development Commands
-- `make build`: Generates protobuf stubs, then builds `bin/bridge` and `bin/bridge-ca`.
+- `make build`: Generates protobuf stubs, then builds `bin/ai-agent-bridge` and `bin/ai-agent-bridge-ca`.
 - `make proto`: Regenerates Go code from `proto/bridge/v1/bridge.proto`.
 - `make test`: Runs all Go tests with race detection (`go test -race -count=1 ./...`).
 - `make test-cover`: Produces `coverage.out` and `coverage.html`.

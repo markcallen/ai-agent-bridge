@@ -41,10 +41,10 @@ providers:
     validate_startup: false
     prompt_pattern: "(?m)(❯|>\\s*$)"
   opencode:
-    binary: "./node_modules/.bin/opencode"
-    args: []
+    binary: "node"
+    args: ["/app/scripts/opencode_repl.js"]
     startup_timeout: "30s"
-    startup_probe: "output"
+    startup_probe: "prompt"
     required_env: ["OPENAI_API_KEY"]
     validate_startup: false
     prompt_pattern: "❯"
@@ -64,6 +64,7 @@ providers:
     required_env: ["GEMINI_API_KEY"]
     validate_startup: false
     prompt_pattern: ">"
+    strip_ansi: true
   echo:
     binary: "cat"
     args: []
@@ -73,7 +74,7 @@ allowed_paths:
   - "/tmp"
 
 logging:
-  level: "info"
+  level: "debug"
   format: "json"
   redact_patterns:
     - "(?i)(api[_-]?key|token|secret|password)\\s*[:=]\\s*\\S+"

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ type StdioConfig struct {
 	PromptPattern  string
 	RequiredEnv    []string
 	StreamJSON     bool // if true, the provider uses stream-JSON mode (no PTY)
+	StripANSI      bool // if true, ANSI escape codes are stripped from PTY output
 }
 
 // StdioProvider defines how to launch and validate one interactive CLI.
@@ -62,6 +64,11 @@ func (p *StdioProvider) StopGrace() time.Duration      { return p.cfg.StopGrace 
 // provider is configured with StreamJSON: true (i.e. it emits JSONL on stdout
 // instead of raw PTY bytes).
 func (p *StdioProvider) IsStreamJSON() bool { return p.cfg.StreamJSON }
+
+// IsStripANSI implements bridge.StripANSIProvider. It returns true when the
+// provider is configured with StripANSI: true so the supervisor strips ANSI
+// escape codes from PTY output before forwarding to clients.
+func (p *StdioProvider) IsStripANSI() bool { return p.cfg.StripANSI }
 
 func (p *StdioProvider) BuildCommand(ctx context.Context, cfg bridge.SessionConfig) (*exec.Cmd, error) {
 	binPath, err := resolveBinaryPath(p.cfg.Binary)
@@ -198,6 +205,7 @@ func (p *StdioProvider) validateStartupOutput(ctx context.Context) error {
 		n, readErr := ptmx.Read(buf)
 		if n > 0 {
 			seen.Write(buf[:n])
+			slog.Debug("provider startup probe output", "provider", p.cfg.ProviderID, "data", string(buf[:n]))
 			time.Sleep(250 * time.Millisecond)
 			return nil
 		}

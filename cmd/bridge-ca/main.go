@@ -41,7 +41,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `bridge-ca - Certificate Authority management for ai-agent-bridge
+	fmt.Fprintf(os.Stderr, `ai-agent-bridge-ca - Certificate Authority management for ai-agent-bridge
 
 Commands:
   init         Initialize a new CA
@@ -51,7 +51,7 @@ Commands:
   jwt-keygen   Generate Ed25519 keypair for JWT signing
   verify       Verify a certificate against a trust bundle
 
-Run 'bridge-ca <command> --help' for details.
+Run 'ai-agent-bridge-ca <command> --help' for details.
 `)
 }
 
@@ -173,7 +173,7 @@ func cmdBundle() {
 	args := fs.Args()
 	if *out == "" || len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "error: --out and at least one cert path are required")
-		fmt.Fprintln(os.Stderr, "usage: bridge-ca bundle --out bundle.crt cert1.crt cert2.crt ...")
+		fmt.Fprintln(os.Stderr, "usage: ai-agent-bridge-ca bundle --out bundle.crt cert1.crt cert2.crt ...")
 		os.Exit(1)
 	}
 

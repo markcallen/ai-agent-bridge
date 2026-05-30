@@ -4,7 +4,7 @@ project_name: ai-agent-bridge
 
 builds:
   - id: bridge
-    binary: bridge
+    binary: ai-agent-bridge
     main: ./cmd/bridge
     env:
       - CGO_ENABLED=0
@@ -15,7 +15,7 @@ builds:
       - arm64
 
   - id: bridge-ca
-    binary: bridge-ca
+    binary: ai-agent-bridge-ca
     main: ./cmd/bridge-ca
     env:
       - CGO_ENABLED=0

@@ -16,24 +16,24 @@ chown -R bridge:bridge /home/bridge
 
 if [ ! -f "$CERT_DIR/ca.crt" ]; then
   echo "==> Initializing CA..."
-  bridge-ca init --name bridge-ca --out "$CERT_DIR"
+  ai-agent-bridge-ca init --name ai-agent-bridge-ca --out "$CERT_DIR"
 
   echo "==> Issuing server certificate..."
-  bridge-ca issue --type server --cn "$BRIDGE_CN" \
+  ai-agent-bridge-ca issue --type server --cn "$BRIDGE_CN" \
     --san "$BRIDGE_SANS" \
     --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
     --out "$CERT_DIR"
 
   echo "==> Issuing client certificate..."
-  bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
+  ai-agent-bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
     --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
     --out "$CERT_DIR"
 
   echo "==> Generating JWT signing keypair..."
-  bridge-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
+  ai-agent-bridge-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
 
   echo "==> Building trust bundle..."
-  bridge-ca bundle --out "$CERT_DIR/ca-bundle.crt" "$CERT_DIR/ca.crt"
+  ai-agent-bridge-ca bundle --out "$CERT_DIR/ca-bundle.crt" "$CERT_DIR/ca.crt"
 
   chmod 644 "$CERT_DIR"/*
 fi
@@ -72,6 +72,27 @@ state.theme = state.theme || "dark";
 state.hasCompletedOnboarding = true;
 state.lastOnboardingVersion = pkg.version;
 
+// Pre-trust the e2e repo path so the trust dialog is suppressed
+state.projects = state.projects || {};
+const trustedPaths = ["/tmp/cache-cleaner", "/tmp"];
+for (const p of trustedPaths) {
+  state.projects[p] = state.projects[p] || {};
+  state.projects[p].hasTrustDialogAccepted = true;
+  state.projects[p].projectOnboardingSeenCount = 1;
+}
+
+// Pre-approve the ANTHROPIC_API_KEY so the "use this API key?" dialog is suppressed.
+// Claude stores the last 20 chars of the key as the approval token.
+const apiKey = process.env.ANTHROPIC_API_KEY || "";
+if (apiKey) {
+  const keyToken = apiKey.slice(-20);
+  state.customApiKeyResponses = state.customApiKeyResponses || {};
+  const approved = state.customApiKeyResponses.approved || [];
+  if (!approved.includes(keyToken)) approved.push(keyToken);
+  state.customApiKeyResponses.approved = approved;
+  state.customApiKeyResponses.rejected = (state.customApiKeyResponses.rejected || []).filter(k => k !== keyToken);
+}
+
 fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n");
 EOF'
 
@@ -99,6 +120,11 @@ settings.security = settings.security || {};
 settings.security.auth = settings.security.auth || {};
 settings.security.auth.selectedType = "gemini-api-key";
 
+// Disable auto-update notifications so Gemini does not try to update during e2e tests
+settings.general = settings.general || {};
+settings.general.enableAutoUpdateNotification = false;
+settings.general.autoUpdate = false;
+
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 
 let trustedFolders = {};
@@ -109,6 +135,8 @@ try {
 }
 
 trustedFolders["/repos"] = "TRUST_FOLDER";
+trustedFolders["/tmp"] = "TRUST_FOLDER";
+trustedFolders["/tmp/cache-cleaner"] = "TRUST_FOLDER";
 
 fs.writeFileSync(trustedFoldersPath, JSON.stringify(trustedFolders, null, 2) + "\n");
 
@@ -180,4 +208,4 @@ fs.writeFileSync(configPath, configToml);
 EOF'
 
 echo "==> Starting bridge as non-root user..."
-exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec bridge --config $BRIDGE_CONFIG"
+exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec ai-agent-bridge --config $BRIDGE_CONFIG"

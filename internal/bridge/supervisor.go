@@ -11,12 +11,17 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/creack/pty"
 )
+
+// ansiEscape matches ANSI/VT100 escape sequences (CSI sequences and 2-char
+// escape sequences) so they can be stripped from PTY output when needed.
+var ansiEscape = regexp.MustCompile(`\x1b(?:\[[0-9;?=<>]*[a-zA-Z~]|[@-Z\x5c-_])`)
 
 type AttachState struct {
 	ClientID     string
@@ -73,6 +78,8 @@ type managedSession struct {
 	lastActivity time.Time
 	forceStop    bool
 	recovered    bool
+
+	stripANSI bool // strip ANSI escape codes from PTY output before forwarding
 
 	attachedClient string
 	live           chan OutputChunk
@@ -405,6 +412,12 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		useStreamJSON = true
 	}
 
+	// Detect whether the provider requests ANSI escape code stripping.
+	stripANSI := false
+	if sap, ok := provider.(StripANSIProvider); ok && sap.IsStripANSI() {
+		stripANSI = true
+	}
+
 	now := nowUTC()
 	ms := &managedSession{
 		info: SessionInfo{
@@ -419,6 +432,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		provider:     provider,
 		cmd:          cmd,
 		streamJSON:   useStreamJSON,
+		stripANSI:    stripANSI,
 		buf:          NewByteBuffer(s.bufSize),
 		cancel:       cancel,
 		stopGrace:    provider.StopGrace(),
@@ -504,7 +518,12 @@ func (s *Supervisor) readLoop(ms *managedSession) {
 	for {
 		n, err := ms.ptmx.Read(buf)
 		if n > 0 {
-			s.appendChunk(ms, buf[:n], ChunkTypeOutput)
+			chunk := buf[:n]
+			if ms.stripANSI {
+				chunk = ansiEscape.ReplaceAll(chunk, nil)
+			}
+			slog.Debug("provider output", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "bytes", len(chunk), "data", string(chunk))
+			s.appendChunk(ms, chunk, ChunkTypeOutput)
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
@@ -765,6 +784,7 @@ func (s *Supervisor) WriteInput(sessionID, clientID string, data []byte) (int, e
 	stdin := ms.stdin
 	ptmx := ms.ptmx
 	ms.mu.Unlock()
+	slog.Debug("provider input", "session_id", sessionID, "provider", ms.info.Provider, "bytes", len(data), "data", string(data))
 	if streamJSON {
 		n, err := stdin.Write(data)
 		return n, err
