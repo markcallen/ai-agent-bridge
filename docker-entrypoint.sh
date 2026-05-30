@@ -74,7 +74,7 @@ state.lastOnboardingVersion = pkg.version;
 
 // Pre-trust the e2e repo path so the trust dialog is suppressed
 state.projects = state.projects || {};
-const trustedPaths = ["/tmp/cache-cleaner", "/tmp"];
+const trustedPaths = ["/tmp/ai-agent-bridge"];
 for (const p of trustedPaths) {
   state.projects[p] = state.projects[p] || {};
   state.projects[p].hasTrustDialogAccepted = true;
@@ -134,9 +134,7 @@ try {
   trustedFolders = {};
 }
 
-trustedFolders["/repos"] = "TRUST_FOLDER";
-trustedFolders["/tmp"] = "TRUST_FOLDER";
-trustedFolders["/tmp/cache-cleaner"] = "TRUST_FOLDER";
+trustedFolders["/tmp/ai-agent-bridge"] = "TRUST_FOLDER";
 
 fs.writeFileSync(trustedFoldersPath, JSON.stringify(trustedFolders, null, 2) + "\n");
 

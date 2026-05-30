@@ -205,7 +205,7 @@ func (p *StdioProvider) validateStartupOutput(ctx context.Context) error {
 		n, readErr := ptmx.Read(buf)
 		if n > 0 {
 			seen.Write(buf[:n])
-			slog.Debug("provider startup probe output", "provider", p.cfg.ProviderID, "data", string(buf[:n]))
+			slog.Debug("provider startup probe output", "provider", p.cfg.ProviderID, "bytes", n)
 			time.Sleep(250 * time.Millisecond)
 			return nil
 		}

@@ -522,7 +522,7 @@ func (s *Supervisor) readLoop(ms *managedSession) {
 			if ms.stripANSI {
 				chunk = ansiEscape.ReplaceAll(chunk, nil)
 			}
-			slog.Debug("provider output", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "bytes", len(chunk), "data", string(chunk))
+			slog.Debug("provider output", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "bytes", len(chunk))
 			s.appendChunk(ms, chunk, ChunkTypeOutput)
 		}
 		if err != nil {

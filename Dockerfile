@@ -43,7 +43,8 @@ COPY package.json package-lock.json /app/
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force && \
     sed -i "s|'  Type your message or @path/to/file'|' '|g" \
         /app/node_modules/@google/gemini-cli/dist/src/ui/components/Composer.js \
-        /app/node_modules/@google/gemini-cli/dist/src/ui/components/InputPrompt.js
+        /app/node_modules/@google/gemini-cli/dist/src/ui/components/InputPrompt.js \
+    || true
 COPY config/bridge.yaml /app/config/bridge.yaml
 COPY config/bridge-docker.yaml /app/config/bridge-docker.yaml
 COPY docker-entrypoint.sh /app/entrypoint.sh
