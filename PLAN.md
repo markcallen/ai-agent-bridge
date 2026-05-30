@@ -211,6 +211,84 @@ The MVP wires `project_id`, `session_id`, `caller_cn`, `caller_sub` into audit e
 
 ---
 
+## Phase 8: Antigravity CLI Migration (Gemini → `agy`)
+
+**Goal**: Replace `@google/gemini-cli` with Google's Antigravity CLI (`agy`) before the June 18, 2026 deprecation deadline.
+
+**Background**: Google is retiring Gemini CLI for individual/Pro users on June 18, 2026 in favour of Antigravity CLI. See the [transition announcement](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
+
+**Key differences requiring work**:
+
+| Aspect | Gemini CLI | Antigravity CLI |
+|---|---|---|
+| Distribution | npm `@google/gemini-cli` | Native Go binary via `curl … \| bash` |
+| Binary | `./node_modules/.bin/gemini` | `agy` (`~/.local/bin/agy`) |
+| Auth | `GEMINI_API_KEY` env var | OAuth2 credentials (`~/.gemini/oauth_creds.json`) |
+| Model flag | `-m gemini-2.5-flash` arg | Configured in `~/.gemini/antigravity-cli/settings.json` |
+| Config dir | `~/.gemini/` | `~/.gemini/antigravity-cli/` |
+
+### 8.1 Resolve e2e / Docker auth strategy (BLOCKER)
+
+The biggest open question: `agy` uses browser-based OAuth2 rather than an API key, which breaks the current Docker/CI flow that passes `GEMINI_API_KEY` as an env var.
+
+Options to investigate:
+
+- **Mount credentials file**: volume-mount `~/.gemini/oauth_creds.json` into the container and set `HOME` or the config path accordingly. Credentials contain a long-lived refresh token so this may work for CI if the token is stored as a secret.
+- **Service account / Workload Identity**: determine whether `agy` supports a non-interactive auth path (e.g. `GOOGLE_APPLICATION_CREDENTIALS` ADC, a service account JSON, or Workload Identity for GCP CI). The binary references `GOOGLE_API_USE_CLIENT_CERTIFICATE` internally — worth testing.
+- **`agy install` headless flow**: the `agy install` subcommand configures shell paths; check if it also supports a `--token` or `--credentials-file` flag for headless setup.
+- **Pre-bake credentials in image**: bake a CI-only OAuth token into the Docker image via a build secret. Least preferred due to credential rotation overhead.
+
+**This item must be resolved before any other Phase 8 work merges.**
+
+### 8.2 Remove `@google/gemini-cli` npm dependency
+
+- Remove `@google/gemini-cli` from `dependencies` in `package.json`
+- Run `npm install` to update `package-lock.json`
+- Confirm `node_modules/@google/gemini-cli` is no longer present
+
+### 8.3 Update provider configs
+
+Files: `config/bridge.yaml`, `config/bridge-dev.yaml`, `config/bridge-docker.yaml`, `e2e/bridge-e2e.yaml`
+
+Changes to the `gemini:` provider block in each:
+- `binary`: update from `./node_modules/@google/gemini-cli/dist/index.js` / `./node_modules/.bin/gemini` to `agy` (or absolute path)
+- `args`: remove `-m gemini-2.5-flash` — model is now set in `settings.json`
+- `required_env`: remove `GEMINI_API_KEY` — replace with whatever auth mechanism is chosen in 8.1
+- `prompt_pattern`: verify the interactive prompt regex still matches `agy`'s prompt (currently `">"` or `"^\s*>\s*$"`)
+
+### 8.4 Update Dockerfile and Docker Compose
+
+Files: `Dockerfile`, `docker-compose.yml`, `e2e/docker-compose.yml`
+
+- Add `agy` install step to `Dockerfile` using the official install script:
+  ```sh
+  RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
+  ```
+- Remove `GEMINI_API_KEY` env var from both compose files
+- Add whatever auth mechanism is resolved in 8.1 (volume mount, build secret, or env var for ADC)
+
+### 8.5 Update e2e test runner
+
+File: `e2e/cmd/e2e-test/main.go`
+
+- Remove `requiredEnv: "GEMINI_API_KEY"` from the gemini test case
+- Update `promptRe` if the `agy` prompt pattern differs from the current `(?m)>\s*$`
+- Update `name` field if the provider key is renamed from `gemini` to `antigravity`
+
+### 8.6 Update documentation
+
+Files: `README.md`, `examples/README.md`
+
+- Replace `@google/gemini-cli` install instructions with `agy` install command
+- Replace `GEMINI_API_KEY=` with the new auth setup instructions
+- Update any provider name references
+
+### 8.7 Rename provider key (optional)
+
+The provider is currently keyed as `gemini:` in all config files. Consider renaming to `antigravity:` for clarity. This is a breaking change for any consumers passing `provider: "gemini"` in API requests — assess impact before doing it.
+
+---
+
 ## Milestone Summary
 
 | Phase | Deliverable | Dependencies |
@@ -222,8 +300,10 @@ The MVP wires `project_id`, `session_id`, `caller_cn`, `caller_sub` into audit e
 | Phase 5 | Integration guides (general, ndara, prd-manager) | Phase 4 |
 | Phase 6 | Testing & reliability (reconnect, failure, scenario, matrix) | Phase 1-3 |
 | Phase 7 | Observability (metrics, tracing, reflection, introspection) | MVP |
+| Phase 8 | Antigravity CLI migration (replace Gemini CLI before June 18, 2026) | 8.1 must land first |
 
 Phases 1, 2, 4, and 7 can be worked in parallel.
 Phase 3 depends on Phase 2 (security audit informs what to watch/reload).
 Phase 5 should follow Phase 4 (SDK API stable before writing guides).
 Phase 6 should follow Phases 1–3 (test against completed feature set).
+Phase 8 is time-boxed: 8.1 (auth strategy) must be resolved first; 8.2–8.7 can then proceed in parallel.
