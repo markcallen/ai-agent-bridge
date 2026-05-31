@@ -99,20 +99,23 @@ It also verifies config-driven provider fallback by requesting a deliberately un
 
 ### Ubuntu Package Install
 
-Install from the hosted apt repository on supported Ubuntu releases:
+Supported releases: Ubuntu **24.04 (noble)** and **25.04 (plucky)** on `amd64`.
+
+**Quick install:**
 
 ```bash
 curl -fsSL https://markcallen.github.io/ai-agent-bridge/install.sh | sudo bash
 sudo systemctl enable --now ai-agent-bridge
 ```
 
-Manual apt setup is also supported:
+**Manual apt setup (noble example):**
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc \
   | sudo gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt noble main" \
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] \
+  https://markcallen.github.io/ai-agent-bridge/apt noble main" \
   | sudo tee /etc/apt/sources.list.d/ai-agent-bridge.list >/dev/null
 sudo apt-get update
 sudo apt-get install -y ai-agent-bridge
@@ -409,6 +412,41 @@ scripts/                       Development helper scripts
 - [docs/grpc-api.md](docs/grpc-api.md) — Full gRPC API reference
 - [docs/go-websocket-integration.md](docs/go-websocket-integration.md) — Go HTTP WebSocket integration guide
 - [packages/bridge-client-node/README.md](packages/bridge-client-node/README.md) — Node.js client deep dive
+
+---
+
+## Publishing a Release
+
+Releases are triggered via **Actions → Publish → Run workflow** with a `patch`, `minor`, or `major` input. The workflow bumps the version, creates a Git tag, builds the container image, builds and signs `.deb` packages, and publishes the apt repository to GitHub Pages.
+
+### Required GitHub repository secrets
+
+| Secret | Description |
+|--------|-------------|
+| `APT_REPO_GPG_PRIVATE_KEY_B64` | Base64-encoded GPG private key used to sign the apt repository |
+| `APT_REPO_GPG_PASSPHRASE` | Passphrase for the GPG key (omit if the key has no passphrase) |
+| `AWS_SMOKE_ROLE_ARN` | (optional) IAM role ARN for the EC2 smoke test; skipped if not set |
+| `SMOKE_AWS_REGION` | (optional) AWS region for the EC2 smoke test |
+
+#### Generating the apt signing key
+
+```bash
+# Generate a dedicated signing key (no passphrase)
+gpg --batch --gen-key <<'EOF'
+Key-Type: RSA
+Key-Length: 4096
+Name-Real: AI Agent Bridge APT Signing
+Name-Email: apt-signing@markcallen.com
+Expire-Date: 0
+%no-protection
+%commit
+EOF
+
+# Export and base64-encode the private key
+gpg --export-secret-keys --armor apt-signing@markcallen.com | base64 -w 0
+```
+
+Add the base64 output as `APT_REPO_GPG_PRIVATE_KEY_B64` in **Settings → Secrets and variables → Actions**. The public key is exported automatically into the apt repository at publish time as `ai-agent-bridge-archive-keyring.asc`.
 
 ---
 

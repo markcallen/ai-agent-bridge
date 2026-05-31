@@ -40,11 +40,18 @@ COPY --from=build /out/ai-agent-bridge /usr/local/bin/ai-agent-bridge
 COPY --from=build /out/ai-agent-bridge-ca /usr/local/bin/ai-agent-bridge-ca
 COPY .nvmrc /app/.nvmrc
 COPY package.json package-lock.json /app/
-RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force && \
+    sed -i "s|'  Type your message or @path/to/file'|' '|g" \
+        /app/node_modules/@google/gemini-cli/dist/src/ui/components/Composer.js \
+        /app/node_modules/@google/gemini-cli/dist/src/ui/components/InputPrompt.js \
+    || true
 COPY config/bridge.yaml /app/config/bridge.yaml
 COPY config/bridge-docker.yaml /app/config/bridge-docker.yaml
 COPY docker-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
+
+RUN mkdir -p /app/scripts
+COPY e2e/scripts/opencode_repl.js /app/scripts/opencode_repl.js
 
 EXPOSE 9445
 

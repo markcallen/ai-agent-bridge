@@ -38,7 +38,7 @@ var scenarios = []providerScenario{
 	},
 	{
 		name:          "opencode",
-		requiredEnv:   "OPENAI_API_KEY",
+		requiredEnv:   "OPENCODE_ENABLED",
 		promptRe:      regexp.MustCompile(`❯`),
 		startTimeout:  90 * time.Second,
 		turnTimeout:   240 * time.Second,
@@ -78,7 +78,7 @@ func main() {
 	key := flag.String("key", "", "client key path")
 	jwtKey := flag.String("jwt-key", "", "JWT signing key path")
 	jwtIssuer := flag.String("jwt-issuer", "e2e", "JWT issuer")
-	repo := flag.String("repo", "/tmp/cache-cleaner", "repo path")
+	repo := flag.String("repo", "/tmp/ai-agent-bridge", "repo path")
 	timeout := flag.Duration("timeout", 15*time.Minute, "overall timeout")
 	only := flag.String("only", "all", "test subset: all, claude, opencode, gemini")
 	flag.Parse()
