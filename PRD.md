@@ -250,6 +250,40 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
 - The release workflow includes smoke coverage that validates apt installation in containers and on an EC2 host.
 - `README.md` and `docs/` describe package installation, runtime prerequisites, and service behavior accurately.
 
+## 7.7 ai-desktops Agent-Host Deployment Target
+
+The bridge must support a first-class deployment profile for the **ai-desktops** platform: Ubuntu 24.04 machines where the daemon runs as a system service and AI agents operate against repositories mounted under `/workspace`.
+
+### Deployment Profile Requirements
+
+- The package must ship a provider runtime installer (`install-provider-runtime`) that:
+  - Verifies or installs Node.js at the required major version.
+  - Installs pinned provider CLIs (Claude Code, Codex, OpenCode, Gemini) into `/opt/ai-agent-bridge` using `npm ci` with a staging directory pattern so a failed install never destroys a working runtime.
+  - Reports installed CLI versions for operator verification.
+- The package must ship an ai-desktops example config (`bridge-ai-desktops.yaml`) with correct provider stanzas for all four supported providers and `/workspace` included in `allowed_paths`.
+- The package must ship a systemd drop-in example (`ai-desktops.conf`) that:
+  - Injects provider API keys from `/etc/ai-agent-bridge/agents.env` at service startup.
+  - Grants agent subprocesses write access to `/workspace`, `/var/lib/ai-agent-bridge`, `/tmp`, and `/var/tmp`.
+- Provider API keys must be stored in `/etc/ai-agent-bridge/agents.env` with `root:root 0600` permissions and never written to disk by the bridge itself.
+- The Node.js runtime validation must only run when at least one configured provider actually invokes Node.js (native binary providers such as OpenCode must not trigger Node validation).
+
+### Supported Providers on ai-desktops
+
+| Provider | Invocation | Required Credential |
+|---|---|---|
+| Claude Code | `/usr/bin/node ... @anthropic-ai/claude-code/cli.js` | `ANTHROPIC_API_KEY` |
+| Codex | `/usr/bin/node ... @openai/codex/bin/codex.js` | `OPENAI_API_KEY` |
+| OpenCode | `/opt/ai-agent-bridge/node_modules/.bin/opencode` (native binary) | `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` |
+| Gemini CLI | `/usr/bin/node ... @google/gemini-cli/dist/index.js` | `GOOGLE_API_KEY` |
+
+### Acceptance Criteria
+
+- `install-provider-runtime` installs all four provider CLIs and reports their versions on a clean Ubuntu 24.04 host with Node.js 24.
+- A failed `npm ci` during runtime install does not remove a previously working `/opt/ai-agent-bridge/node_modules`.
+- An apt profile smoke test verifies: package install, fixture provider registration, session start, `/workspace` access, echo round-trip, daemon restart, and health check — all without real API keys.
+- The bridge daemon starts with an OpenCode (native binary) provider configured and does not trigger Node.js runtime validation.
+- `docs/ai-desktops.md` provides a complete operator provisioning guide covering architecture, install, config, credentials, upgrade, and troubleshooting.
+
 ---
 
 ## 8. gRPC API Contract (v1)
