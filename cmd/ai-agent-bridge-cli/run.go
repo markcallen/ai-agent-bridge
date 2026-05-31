@@ -21,7 +21,6 @@ import (
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
 
 // detachKey is ctrl-] (0x1d), used to detach from a session without stopping it.
@@ -69,19 +68,15 @@ Use 'ai-agent-bridge-cli session attach <id>' to reattach later.`,
 }
 
 func runSession(dir, providerName, project string, timeout time.Duration) error {
-	// Ensure a server is running (spawns a background process if needed).
-	target, err := ensureServer()
-	if err != nil {
+	// Ensure a server is running (spawns a local-mode background process if needed).
+	if err := ensureServer(); err != nil {
 		return err
 	}
 
-	// Connect as client.
-	client, err := bridgeclient.New(
-		bridgeclient.WithTarget(target),
-		bridgeclient.WithTimeout(timeout),
-	)
+	// Connect using auto-detected mode (local or secure).
+	client, err := connectClient("", timeout)
 	if err != nil {
-		return fmt.Errorf("connect to server: %w", err)
+		return err
 	}
 	defer func() { _ = client.Close() }()
 	client.SetProject(project)
@@ -219,21 +214,21 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	return nil
 }
 
-// ensureServer returns a gRPC dial target for a running server. If no server
-// is running, it spawns "ai-agent-bridge-cli server start" as a background
-// process and waits for it to become healthy. The server runs independently
-// so any client can exit without killing sessions.
-func ensureServer() (string, error) {
-	// Check for existing server.
-	target := localserver.DiscoverTarget("")
+// ensureServer ensures a bridge server is running. If none is found, it spawns
+// "ai-agent-bridge-cli server start" as a background process in local mode and
+// waits for it to become healthy. For secure mode, the user must start the
+// server explicitly with --listen.
+func ensureServer() error {
+	// Check for existing server (local or secure).
+	target, _ := localserver.DiscoverTarget("")
 	if target != "" {
-		return target, nil
+		return nil
 	}
 
-	// Find our own binary to spawn the server.
+	// Find our own binary to spawn the server (local mode only).
 	self, err := os.Executable()
 	if err != nil {
-		return "", fmt.Errorf("find executable: %w", err)
+		return fmt.Errorf("find executable: %w", err)
 	}
 
 	cmd := exec.Command(self, "server", "start")
@@ -242,7 +237,7 @@ func ensureServer() (string, error) {
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("start server process: %w", err)
+		return fmt.Errorf("start server process: %w", err)
 	}
 	// Detach — don't wait for the child.
 	go func() { _ = cmd.Wait() }()
@@ -250,12 +245,12 @@ func ensureServer() (string, error) {
 	// Poll until the server is healthy.
 	for i := 0; i < 50; i++ {
 		time.Sleep(100 * time.Millisecond)
-		target = localserver.DiscoverTarget("")
+		target, _ = localserver.DiscoverTarget("")
 		if target != "" {
-			return target, nil
+			return nil
 		}
 	}
-	return "", fmt.Errorf("server did not start within 5s")
+	return fmt.Errorf("server did not start within 5s")
 }
 
 func currentTTYSize() (uint32, uint32) {

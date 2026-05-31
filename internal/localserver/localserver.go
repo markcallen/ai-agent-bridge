@@ -1,10 +1,11 @@
 // Package localserver provides an embeddable gRPC bridge server for local
-// (single-machine) use. It runs without TLS or JWT auth on a unix-domain
-// socket and auto-detects installed AI agent CLIs.
+// and remote use. In local mode it runs without TLS on a unix-domain socket.
+// In secure mode (--listen flag) it binds to a TCP address with mTLS + JWT.
 package localserver
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
 	"log/slog"
@@ -21,9 +22,11 @@ import (
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/auth"
 	"github.com/markcallen/ai-agent-bridge/internal/bridge"
+	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/internal/provider"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -67,6 +70,38 @@ type Server struct {
 	stopped    bool
 }
 
+// ServerMode represents how the server is running.
+type ServerMode string
+
+const (
+	// ModeLocal is the default mode: unix socket, no auth.
+	ModeLocal ServerMode = "local"
+	// ModeSecure uses TCP + mTLS + JWT for remote access.
+	ModeSecure ServerMode = "secure"
+)
+
+// ModePath returns the path to the server mode file.
+func ModePath() string {
+	return filepath.Join(StateDir(), "server.mode")
+}
+
+// DiscoverMode reads the server.mode file to determine how to connect.
+// Returns ModeLocal if the file is missing or unreadable.
+func DiscoverMode(stateDir string) ServerMode {
+	if stateDir == "" {
+		stateDir = StateDir()
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "server.mode"))
+	if err != nil {
+		return ModeLocal
+	}
+	mode := ServerMode(strings.TrimSpace(string(data)))
+	if mode == ModeSecure {
+		return ModeSecure
+	}
+	return ModeLocal
+}
+
 // Config controls local server behaviour.
 type Config struct {
 	// StateDir overrides the default ~/.ai-agent-bridge directory.
@@ -76,10 +111,19 @@ type Config struct {
 	// AllowedPaths restricts which repo paths sessions may use.
 	// Empty means allow all.
 	AllowedPaths []string
+
+	// ListenAddr, when set, enables secure mode: the server binds to this
+	// TCP address with mTLS + JWT instead of a unix socket. Example:
+	// "10.0.0.1:9445" or "0.0.0.0:9445".
+	ListenAddr string
+	// ServerSANs are additional DNS names or IP addresses for the server
+	// certificate. The host from ListenAddr is added automatically.
+	ServerSANs []string
 }
 
-// Start launches a local bridge gRPC server. It listens on a unix socket
-// (or TCP localhost on Windows) and writes a PID file for discovery.
+// Start launches a local bridge gRPC server. In local mode (default) it
+// listens on a unix socket (or TCP localhost on Windows) without auth.
+// In secure mode (ListenAddr set) it binds to TCP with mTLS + JWT.
 func Start(cfg Config) (*Server, error) {
 	stateDir := cfg.StateDir
 	if stateDir == "" {
@@ -141,11 +185,43 @@ func Start(cfg Config) (*Server, error) {
 	// Server instance ID
 	instanceID := generateInstanceID()
 
-	// gRPC server with anonymous passthrough auth (local mode).
-	grpcOpts := []grpc.ServerOption{
-		grpc.ChainUnaryInterceptor(auth.UnaryPassthroughInterceptor()),
-		grpc.ChainStreamInterceptor(auth.StreamPassthroughInterceptor()),
+	// Determine server mode and build gRPC options accordingly.
+	mode := ModeLocal
+	var grpcOpts []grpc.ServerOption
+
+	if cfg.ListenAddr != "" {
+		// Secure mode: TCP + mTLS + JWT.
+		// TODO(windows): Secure mode (mTLS+JWT) is not yet supported on Windows.
+		// Windows support requires named-pipe ACLs or equivalent transport security.
+		if runtime.GOOS == "windows" {
+			sup.Close()
+			return nil, fmt.Errorf("secure mode (--listen) is not yet supported on Windows")
+		}
+
+		mode = ModeSecure
+
+		// Auto-generate PKI material if not present.
+		sans := buildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
+		mat, err := EnsurePKI(stateDir, sans, logger)
+		if err != nil {
+			sup.Close()
+			return nil, fmt.Errorf("ensure PKI: %w", err)
+		}
+
+		secureOpts, err := buildSecureGRPCOpts(mat, logger)
+		if err != nil {
+			sup.Close()
+			return nil, fmt.Errorf("build secure gRPC options: %w", err)
+		}
+		grpcOpts = secureOpts
+	} else {
+		// Local mode: unix socket, anonymous passthrough auth.
+		grpcOpts = []grpc.ServerOption{
+			grpc.ChainUnaryInterceptor(auth.UnaryPassthroughInterceptor()),
+			grpc.ChainStreamInterceptor(auth.StreamPassthroughInterceptor()),
+		}
 	}
+
 	grpcServer := grpc.NewServer(grpcOpts...)
 
 	bridgeServer := server.New(sup, registry, logger, server.RateLimitConfig{
@@ -158,11 +234,23 @@ func Start(cfg Config) (*Server, error) {
 	}, instanceID, nil)
 	bridgev1.RegisterBridgeServiceServer(grpcServer, bridgeServer)
 
-	// Listen on unix socket (TCP fallback on Windows).
-	ln, listenAddr, err := listen(stateDir)
-	if err != nil {
-		sup.Close()
-		return nil, fmt.Errorf("listen: %w", err)
+	// Listen: TCP for secure mode, unix socket for local mode.
+	var ln net.Listener
+	var listenAddr string
+	var err error
+	if mode == ModeSecure {
+		ln, err = net.Listen("tcp", cfg.ListenAddr)
+		if err != nil {
+			sup.Close()
+			return nil, fmt.Errorf("listen tcp %s: %w", cfg.ListenAddr, err)
+		}
+		listenAddr = ln.Addr().String()
+	} else {
+		ln, listenAddr, err = listen(stateDir)
+		if err != nil {
+			sup.Close()
+			return nil, fmt.Errorf("listen: %w", err)
+		}
 	}
 
 	// Write PID file.
@@ -173,7 +261,7 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("write pid file: %w", err)
 	}
 
-	// Write address file (useful for TCP fallback).
+	// Write address file.
 	addrFile := filepath.Join(stateDir, "server.addr")
 	if err := os.WriteFile(addrFile, []byte(listenAddr), 0o644); err != nil {
 		_ = ln.Close()
@@ -181,7 +269,15 @@ func Start(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("write addr file: %w", err)
 	}
 
-	logger.Info("local server starting", "addr", listenAddr, "pid", os.Getpid())
+	// Write mode file so discovery knows how to connect.
+	modeFile := filepath.Join(stateDir, "server.mode")
+	if err := os.WriteFile(modeFile, []byte(string(mode)), 0o644); err != nil {
+		_ = ln.Close()
+		sup.Close()
+		return nil, fmt.Errorf("write mode file: %w", err)
+	}
+
+	logger.Info("server starting", "mode", mode, "addr", listenAddr, "pid", os.Getpid())
 
 	s := &Server{
 		grpcServer: grpcServer,
@@ -198,6 +294,77 @@ func Start(cfg Config) (*Server, error) {
 	}()
 
 	return s, nil
+}
+
+// buildSecureGRPCOpts returns gRPC server options for mTLS + JWT mode.
+func buildSecureGRPCOpts(mat *PKIMaterial, logger *slog.Logger) ([]grpc.ServerOption, error) {
+	// TLS credentials with client cert verification.
+	tlsCfg, err := auth.ServerTLSConfig(auth.TLSConfig{
+		CABundlePath: mat.CABundlePath,
+		CertPath:     mat.ServerCertPath,
+		KeyPath:      mat.ServerKeyPath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("server TLS config: %w", err)
+	}
+
+	// JWT verifier using the local signing key.
+	pubKey, err := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
+	if err != nil {
+		return nil, fmt.Errorf("load JWT public key: %w", err)
+	}
+	verifier := &auth.JWTVerifier{
+		Keys:     map[string]ed25519.PublicKey{"local": pubKey},
+		Audience: "bridge",
+		MaxTTL:   10 * time.Minute,
+	}
+
+	return []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsCfg)),
+		grpc.ChainUnaryInterceptor(
+			auth.UnaryJWTInterceptor(verifier, logger),
+			auth.UnaryAuditInterceptor(logger),
+		),
+		grpc.ChainStreamInterceptor(
+			auth.StreamJWTInterceptor(verifier, logger),
+			auth.StreamAuditInterceptor(logger),
+		),
+	}, nil
+}
+
+// buildServerSANs extracts the host from listenAddr and merges it with
+// any additional SANs. Deduplicates entries.
+func buildServerSANs(listenAddr string, extra []string) []string {
+	seen := make(map[string]bool)
+	var sans []string
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s != "" && !seen[s] {
+			seen[s] = true
+			sans = append(sans, s)
+		}
+	}
+
+	// Extract host from listenAddr (e.g. "10.0.0.1:9445" → "10.0.0.1").
+	host, _, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		// Might be just a host without port.
+		host = listenAddr
+	}
+	// Don't add wildcard addresses as SANs.
+	if host != "" && host != "0.0.0.0" && host != "::" {
+		add(host)
+	}
+	// Always include localhost and the CN "server" so TLS ServerName
+	// verification works (Go ignores CN when SANs are present).
+	add("server")
+	add("127.0.0.1")
+	add("localhost")
+
+	for _, s := range extra {
+		add(s)
+	}
+	return sans
 }
 
 // Addr returns the listener address (unix socket path or TCP address).
@@ -231,6 +398,7 @@ func (s *Server) Stop() {
 	// Clean up state files.
 	_ = os.Remove(filepath.Join(s.stateDir, "server.pid"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.addr"))
+	_ = os.Remove(filepath.Join(s.stateDir, "server.mode"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.sock"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.lock"))
 }
@@ -305,32 +473,34 @@ func IsServerRunning(stateDir string) bool {
 	if target == "" {
 		return false
 	}
-	return probeHealth(target)
+	mode := DiscoverMode(stateDir)
+	return probeHealth(target, mode, stateDir)
 }
 
-// DiscoverTarget returns the gRPC dial target for an existing local server,
-// or empty string if none is found/reachable.
-func DiscoverTarget(stateDir string) string {
+// DiscoverTarget returns the gRPC dial target and mode for an existing
+// local server. Returns empty target if none is found/reachable.
+func DiscoverTarget(stateDir string) (target string, mode ServerMode) {
 	if stateDir == "" {
 		stateDir = StateDir()
 	}
-	target := discoverTarget(stateDir)
+	target = discoverTarget(stateDir)
 	if target == "" {
-		return ""
+		return "", ModeLocal
 	}
-	if !probeHealth(target) {
-		return ""
+	mode = DiscoverMode(stateDir)
+	if !probeHealth(target, mode, stateDir) {
+		return "", ModeLocal
 	}
-	return target
+	return target, mode
 }
 
 func discoverTarget(stateDir string) string {
-	// Try unix socket first.
+	// Try unix socket first (local mode).
 	sockPath := filepath.Join(stateDir, "server.sock")
 	if _, err := os.Stat(sockPath); err == nil {
 		return "unix://" + sockPath
 	}
-	// Fall back to TCP address file.
+	// Fall back to TCP address file (secure mode or Windows).
 	addrData, err := os.ReadFile(filepath.Join(stateDir, "server.addr"))
 	if err != nil {
 		return ""
@@ -346,8 +516,26 @@ func discoverTarget(stateDir string) string {
 	return addr
 }
 
-func probeHealth(target string) bool {
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func probeHealth(target string, mode ServerMode, stateDir string) bool {
+	var dialOpts []grpc.DialOption
+
+	if mode == ModeSecure {
+		mat := LoadPKIMaterial(stateDir)
+		tlsCfg, err := auth.ClientTLSConfig(auth.TLSConfig{
+			CABundlePath: mat.CABundlePath,
+			CertPath:     mat.LocalClientCert,
+			KeyPath:      mat.LocalClientKey,
+			ServerName:   "server",
+		})
+		if err != nil {
+			return false
+		}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	conn, err := grpc.NewClient(target, dialOpts...)
 	if err != nil {
 		return false
 	}

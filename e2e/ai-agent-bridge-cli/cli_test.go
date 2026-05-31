@@ -73,7 +73,7 @@ func TestServerStartStop(t *testing.T) {
 	defer srv.Stop()
 
 	// Verify server is discoverable.
-	target := localserver.DiscoverTarget(stateDir)
+	target, _ := localserver.DiscoverTarget(stateDir)
 	require.NotEmpty(t, target, "should discover running server")
 
 	// Health check via SDK.
@@ -203,7 +203,7 @@ func TestAutoServerDiscovery(t *testing.T) {
 	defer srv.Stop()
 
 	// The second "instance" should discover the existing server.
-	target := localserver.DiscoverTarget(stateDir)
+	target, _ := localserver.DiscoverTarget(stateDir)
 	require.NotEmpty(t, target, "second instance should discover existing server")
 	assert.Equal(t, srv.Target(), target, "should discover the same server")
 
@@ -303,7 +303,7 @@ func TestServerDoesNotDoubleStart(t *testing.T) {
 	assert.True(t, localserver.IsServerRunning(stateDir))
 
 	// Discovery should find the existing server.
-	target := localserver.DiscoverTarget(stateDir)
+	target, _ := localserver.DiscoverTarget(stateDir)
 	require.NotEmpty(t, target)
 	assert.Equal(t, srv1.Target(), target)
 }
@@ -589,4 +589,208 @@ func TestSessionAttachAndInput(t *testing.T) {
 		Force:     true,
 	})
 	require.NoError(t, err)
+}
+
+// --- Secure mode tests ---
+
+// secureClient creates a bridgeclient connected to a secure-mode server
+// using the auto-generated local-client credentials.
+func secureClient(t *testing.T, target, stateDir string) *bridgeclient.Client {
+	t.Helper()
+	mat := localserver.LoadPKIMaterial(stateDir)
+	client, err := bridgeclient.New(
+		bridgeclient.WithTarget(target),
+		bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
+			CABundlePath: mat.CABundlePath,
+			CertPath:     mat.LocalClientCert,
+			KeyPath:      mat.LocalClientKey,
+			ServerName:   "server",
+		}),
+		bridgeclient.WithJWT(bridgeclient.JWTConfig{
+			PrivateKeyPath: mat.JWTSigningKey,
+			Issuer:         "local",
+			Audience:       "bridge",
+		}),
+	)
+	require.NoError(t, err, "secure client should connect")
+	return client
+}
+
+// TestSecureModeStartStop verifies that the server starts and stops
+// cleanly in secure (mTLS+JWT) mode.
+func TestSecureModeStartStop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err, "secure server should start")
+	defer srv.Stop()
+
+	// Verify mode file says "secure".
+	mode := localserver.DiscoverMode(stateDir)
+	assert.Equal(t, localserver.ModeSecure, mode)
+
+	// Verify server is discoverable.
+	target, discoveredMode := localserver.DiscoverTarget(stateDir)
+	require.NotEmpty(t, target, "should discover running secure server")
+	assert.Equal(t, localserver.ModeSecure, discoveredMode)
+
+	// Health check via mTLS client.
+	client := secureClient(t, target, stateDir)
+	defer func() { _ = client.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := client.Health(ctx)
+	require.NoError(t, err, "health check should succeed with mTLS")
+	assert.NotEmpty(t, resp.ServerInstanceId)
+
+	// Stop server.
+	srv.Stop()
+
+	// Verify server is no longer discoverable.
+	assert.False(t, localserver.IsServerRunning(stateDir))
+}
+
+// TestSecureModeSessionLifecycle tests creating, listing, and stopping a
+// session on a secure-mode server.
+func TestSecureModeSessionLifecycle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+	repoDir := t.TempDir()
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	target, _ := localserver.DiscoverTarget(stateDir)
+	client := secureClient(t, target, stateDir)
+	defer func() { _ = client.Close() }()
+	client.SetProject("test")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Start a session.
+	sessionID := uuid.NewString()
+	startResp, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId:   "test",
+		SessionId:   sessionID,
+		RepoPath:    repoDir,
+		Provider:    "echo",
+		InitialCols: 80,
+		InitialRows: 24,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, sessionID, startResp.SessionId)
+
+	// Wait for session to start.
+	var info *bridgev1.GetSessionResponse
+	for i := 0; i < 20; i++ {
+		info, err = client.GetSession(ctx, &bridgev1.GetSessionRequest{
+			SessionId: sessionID,
+		})
+		if err == nil && info.Status != bridgev1.SessionStatus_SESSION_STATUS_STARTING {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.NoError(t, err)
+
+	// List sessions.
+	listResp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
+		ProjectId: "test",
+	})
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(listResp.Sessions), 1)
+
+	// Stop session.
+	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{
+		SessionId: sessionID,
+		Force:     true,
+	})
+	require.NoError(t, err)
+}
+
+// TestSecureModeRejectsInsecureClient verifies that an insecure client
+// cannot connect to a secure server.
+func TestSecureModeRejectsInsecureClient(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	target, _ := localserver.DiscoverTarget(stateDir)
+	require.NotEmpty(t, target)
+
+	// Try connecting without TLS — should fail.
+	insecureClient, err := bridgeclient.New(bridgeclient.WithTarget(target))
+	require.NoError(t, err, "dial should succeed (lazy connection)")
+	defer func() { _ = insecureClient.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err = insecureClient.Health(ctx)
+	assert.Error(t, err, "insecure client should not be able to call secure server")
+}
+
+// TestSecureModeCleanup verifies that secure-mode state files (including
+// server.mode) are cleaned up on stop.
+func TestSecureModeCleanup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+	})
+	require.NoError(t, err)
+
+	// Mode file should exist.
+	_, err = os.Stat(filepath.Join(stateDir, "server.mode"))
+	assert.NoError(t, err, "mode file should exist while running")
+
+	srv.Stop()
+
+	// Mode file should be cleaned up.
+	_, err = os.Stat(filepath.Join(stateDir, "server.mode"))
+	assert.True(t, os.IsNotExist(err), "mode file should be removed after stop")
 }

@@ -16,8 +16,6 @@ import (
 	"golang.org/x/term"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
 
 func newSessionCmd() *cobra.Command {
@@ -43,15 +41,10 @@ func newSessionListCmd() *cobra.Command {
 		Short:   "List active sessions",
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target := localserver.DiscoverTarget("")
-			if target == "" {
+			client, err := connectClient("", 5*time.Second)
+			if err != nil {
 				fmt.Println("No ai-agent-bridge server running.")
 				return nil
-			}
-
-			client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-			if err != nil {
-				return fmt.Errorf("connect: %w", err)
 			}
 			defer func() { _ = client.Close() }()
 			client.SetProject(project)
@@ -92,11 +85,7 @@ func newSessionAttachCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
-			target := localserver.DiscoverTarget("")
-			if target == "" {
-				return fmt.Errorf("no ai-agent-bridge server running")
-			}
-			return attachSession(target, sessionID)
+			return attachSession(sessionID)
 		},
 	}
 	return cmd
@@ -111,14 +100,10 @@ func newSessionStopCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
-			target := localserver.DiscoverTarget("")
-			if target == "" {
-				return fmt.Errorf("no ai-agent-bridge server running")
-			}
 
-			client, err := bridgeclient.New(bridgeclient.WithTarget(target))
+			client, err := connectClient("", 10*time.Second)
 			if err != nil {
-				return fmt.Errorf("connect: %w", err)
+				return err
 			}
 			defer func() { _ = client.Close() }()
 
@@ -140,13 +125,10 @@ func newSessionStopCmd() *cobra.Command {
 	return cmd
 }
 
-func attachSession(target, sessionID string) error {
-	client, err := bridgeclient.New(
-		bridgeclient.WithTarget(target),
-		bridgeclient.WithTimeout(30*time.Minute),
-	)
+func attachSession(sessionID string) error {
+	client, err := connectClient("", 30*time.Minute)
 	if err != nil {
-		return fmt.Errorf("connect: %w", err)
+		return err
 	}
 	defer func() { _ = client.Close() }()
 
