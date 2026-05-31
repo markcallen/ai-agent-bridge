@@ -1,0 +1,105 @@
+#!/bin/sh
+# install-provider-runtime — Idempotent provider CLI runtime installer.
+#
+# Usage:
+#   install-provider-runtime              Install or upgrade the provider runtime.
+#   install-provider-runtime --verify     Check installed versions; no changes.
+#
+# This script:
+#   1. Verifies (or installs) Node.js REQUIRED_NODE_MAJOR on the system PATH.
+#   2. Copies the packaged runtime manifest from MANIFEST_DIR to INSTALL_DIR.
+#   3. Runs npm ci --omit=dev --no-audit --no-fund to install pinned provider CLIs.
+#   4. Verifies each installed CLI binary is present and reports its version.
+#   5. Ensures INSTALL_DIR is owned root:root and not writable by group/other.
+#
+# The script is safe to re-run; a failed install does not remove a previously
+# working runtime at INSTALL_DIR.
+#
+# MANIFEST_DIR and INSTALL_DIR may be overridden for testing:
+#   MANIFEST_DIR=/custom/src INSTALL_DIR=/custom/dst install-provider-runtime
+
+set -eu
+
+MANIFEST_DIR="${MANIFEST_DIR:-/usr/share/ai-agent-bridge/provider-runtime}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/ai-agent-bridge}"
+REQUIRED_NODE_MAJOR=24
+
+VERIFY_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --verify) VERIFY_ONLY=1 ;;
+    *) echo "install-provider-runtime: unknown argument: $arg" >&2; exit 1 ;;
+  esac
+done
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+say() { printf '==> %s\n' "$*"; }
+
+# ── Node.js version check ──────────────────────────────────────────────────
+
+node_major() {
+  node --version 2>/dev/null | sed 's/v//;s/\..*//'
+}
+
+if ! command -v node >/dev/null 2>&1; then
+  if [ "$VERIFY_ONLY" -eq 1 ]; then
+    die "node not found on PATH; install Node.js ${REQUIRED_NODE_MAJOR} first"
+  fi
+  say "Installing Node.js ${REQUIRED_NODE_MAJOR} via NodeSource..."
+  curl -fsSL "https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x" | sh -
+  apt-get install -y nodejs
+fi
+
+actual_major=$(node_major)
+if [ "$actual_major" != "$REQUIRED_NODE_MAJOR" ]; then
+  die "Node.js major version is ${actual_major}, required ${REQUIRED_NODE_MAJOR}; upgrade Node.js before running this script"
+fi
+
+say "Node.js $(node --version)"
+
+# ── Runtime manifest installation ─────────────────────────────────────────
+
+if [ "$VERIFY_ONLY" -eq 0 ]; then
+  if [ ! -d "$MANIFEST_DIR" ]; then
+    die "runtime manifest directory not found: ${MANIFEST_DIR}; is ai-agent-bridge installed?"
+  fi
+
+  say "Copying runtime manifest to ${INSTALL_DIR}..."
+  mkdir -p "$INSTALL_DIR"
+  cp -- "$MANIFEST_DIR/.nvmrc"           "$INSTALL_DIR/.nvmrc"
+  cp -- "$MANIFEST_DIR/package.json"     "$INSTALL_DIR/package.json"
+  cp -- "$MANIFEST_DIR/package-lock.json" "$INSTALL_DIR/package-lock.json"
+
+  say "Installing provider CLIs (this may take several minutes)..."
+  # Run in a subshell; the INSTALL_DIR remains usable if npm ci fails.
+  (
+    cd "$INSTALL_DIR"
+    npm ci --omit=dev --no-audit --no-fund
+  )
+
+  say "Fixing ownership of ${INSTALL_DIR}..."
+  chown -R root:root "$INSTALL_DIR"
+  chmod -R go-w "$INSTALL_DIR"
+fi
+
+# ── Version verification ───────────────────────────────────────────────────
+
+say "Verifying installed provider CLIs:"
+
+fail=0
+for cli in claude codex opencode gemini; do
+  bin="${INSTALL_DIR}/node_modules/.bin/${cli}"
+  if [ -x "$bin" ]; then
+    ver=$("$bin" --version 2>&1 || true)
+    printf '  %-12s %s\n' "$cli" "$ver"
+  else
+    printf '  %-12s NOT FOUND at %s\n' "$cli" "$bin" >&2
+    fail=1
+  fi
+done
+
+if [ "$fail" -eq 1 ]; then
+  die "one or more provider CLIs failed verification; check that npm ci completed successfully"
+fi
+
+say "Provider runtime ready at ${INSTALL_DIR}"
