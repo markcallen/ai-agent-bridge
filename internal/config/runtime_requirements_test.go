@@ -23,13 +23,40 @@ func TestRequiresNodeRuntime(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "provider configured",
+			name: "node binary",
 			cfg: &Config{
 				Providers: map[string]ProviderConfig{
 					"codex": {Binary: "node"},
 				},
 			},
 			want: true,
+		},
+		{
+			name: "absolute node path with js arg",
+			cfg: &Config{
+				Providers: map[string]ProviderConfig{
+					"gemini": {Binary: "/usr/bin/node", Args: []string{"/opt/ai-agent-bridge/node_modules/@google/gemini-cli/dist/index.js"}},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "non-node native binary",
+			cfg: &Config{
+				Providers: map[string]ProviderConfig{
+					"fixture": {Binary: "/bin/cat"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "native cli via bin shim",
+			cfg: &Config{
+				Providers: map[string]ProviderConfig{
+					"opencode": {Binary: "/opt/ai-agent-bridge/node_modules/.bin/opencode"},
+				},
+			},
+			want: false,
 		},
 	}
 

@@ -62,13 +62,13 @@ runtime:
 # Run /usr/lib/ai-agent-bridge/install-provider-runtime to install the CLIs
 # before enabling any provider here.
 
-providers: {}
+providers:
 
 # Uncomment to enable Codex (requires OPENAI_API_KEY in agents.env):
 #
 #   codex:
 #     binary: "/usr/bin/node"
-#     args: ["./node_modules/@openai/codex/bin/codex.js"]
+#     args: ["/opt/ai-agent-bridge/node_modules/@openai/codex/bin/codex.js"]
 #     startup_timeout: "60s"
 #     startup_probe: "output"
 #     required_env: ["OPENAI_API_KEY"]
@@ -78,17 +78,18 @@ providers: {}
 #
 #   claude:
 #     binary: "/usr/bin/node"
-#     args: ["./node_modules/@anthropic-ai/claude-code/cli.js"]
+#     args: ["/opt/ai-agent-bridge/node_modules/@anthropic-ai/claude-code/cli.js"]
 #     startup_timeout: "60s"
 #     startup_probe: "output"
 #     required_env: ["ANTHROPIC_API_KEY"]
 #     prompt_pattern: '(?m)(❯|>\s*$)'
 
 # Uncomment to enable OpenCode (requires OPENAI_API_KEY or ANTHROPIC_API_KEY):
+# OpenCode ships as a native binary installed via npm — no Node.js invocation needed.
 #
 #   opencode:
-#     binary: "/usr/bin/node"
-#     args: ["./node_modules/opencode-ai/dist/cli.js"]
+#     binary: "/opt/ai-agent-bridge/node_modules/.bin/opencode"
+#     args: []
 #     startup_timeout: "45s"
 #     startup_probe: "output"
 
@@ -96,7 +97,7 @@ providers: {}
 #
 #   gemini:
 #     binary: "/usr/bin/node"
-#     args: ["./node_modules/@google/gemini-cli/bundle/gemini.js"]
+#     args: ["/opt/ai-agent-bridge/node_modules/@google/gemini-cli/dist/index.js"]
 #     startup_timeout: "60s"
 #     startup_probe: "output"
 #     required_env: ["GOOGLE_API_KEY"]

@@ -46,6 +46,10 @@ if ! command -v node >/dev/null 2>&1; then
     die "node not found on PATH; install Node.js ${REQUIRED_NODE_MAJOR} first"
   fi
   say "Installing Node.js ${REQUIRED_NODE_MAJOR} via NodeSource..."
+  # curl is not always present on minimal Ubuntu installs; install it first.
+  if ! command -v curl >/dev/null 2>&1; then
+    apt-get install -y curl
+  fi
   curl -fsSL "https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x" | sh -
   apt-get install -y nodejs
 fi
@@ -71,11 +75,20 @@ if [ "$VERIFY_ONLY" -eq 0 ]; then
   cp -- "$MANIFEST_DIR/package-lock.json" "$INSTALL_DIR/package-lock.json"
 
   say "Installing provider CLIs (this may take several minutes)..."
-  # Run in a subshell; the INSTALL_DIR remains usable if npm ci fails.
+  # Install into a staging directory so that a failed npm ci does not
+  # destroy an existing working runtime at INSTALL_DIR.
+  STAGE_DIR=$(mktemp -d)
+  cp -- "$MANIFEST_DIR/.nvmrc"            "$STAGE_DIR/.nvmrc"
+  cp -- "$MANIFEST_DIR/package.json"      "$STAGE_DIR/package.json"
+  cp -- "$MANIFEST_DIR/package-lock.json" "$STAGE_DIR/package-lock.json"
   (
-    cd "$INSTALL_DIR"
+    cd "$STAGE_DIR"
     npm ci --omit=dev --no-audit --no-fund
   )
+  # Swap node_modules only after a successful install.
+  rm -rf "$INSTALL_DIR/node_modules"
+  mv "$STAGE_DIR/node_modules" "$INSTALL_DIR/node_modules"
+  rm -rf "$STAGE_DIR"
 
   say "Fixing ownership of ${INSTALL_DIR}..."
   chown -R root:root "$INSTALL_DIR"

@@ -84,6 +84,23 @@ func ValidateNodeRuntime(projectRoot string) error {
 	return nil
 }
 
+// RequiresNodeRuntime reports whether cfg has at least one provider that
+// invokes Node.js, either by using "node"/"nodejs" as the binary or by
+// using an absolute node path with a .js script as the first argument.
+// Providers that use non-Node binaries (e.g. native CLIs, /bin/cat) do
+// not require the Node runtime and do not need .nvmrc validation.
 func RequiresNodeRuntime(cfg *Config) bool {
-	return cfg != nil && len(cfg.Providers) > 0
+	if cfg == nil {
+		return false
+	}
+	for _, p := range cfg.Providers {
+		base := filepath.Base(p.Binary)
+		if base == "node" || base == "nodejs" {
+			return true
+		}
+		if len(p.Args) > 0 && strings.HasSuffix(p.Args[0], ".js") {
+			return true
+		}
+	}
+	return false
 }
