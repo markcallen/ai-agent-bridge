@@ -52,6 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 	logger := newLogger(cfg, redactor)
+	slog.SetDefault(logger)
 
 	// Set up provider registry
 	registry := bridge.NewRegistry()

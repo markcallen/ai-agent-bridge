@@ -74,7 +74,7 @@ allowed_paths:
   - "/tmp"
 
 logging:
-  level: "debug"
+  level: "info"
   format: "json"
   redact_patterns:
     - "(?i)(api[_-]?key|token|secret|password)\\s*[:=]\\s*\\S+"

@@ -36,6 +36,8 @@ function callOpenAI(messages) {
           const parsed = JSON.parse(data);
           if (parsed.error) {
             reject(new Error(parsed.error.message));
+          } else if (!parsed.choices || !parsed.choices[0] || !parsed.choices[0].message) {
+            reject(new Error(`unexpected API response shape: ${data}`));
           } else {
             resolve(parsed.choices[0].message.content);
           }
@@ -51,6 +53,11 @@ function callOpenAI(messages) {
 }
 
 async function main() {
+  if (!API_KEY) {
+    process.stderr.write('fatal: OPENAI_API_KEY is not set\n');
+    process.exit(1);
+  }
+
   process.stdout.write('❯\n');
 
   const rl = readline.createInterface({

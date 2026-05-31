@@ -116,6 +116,10 @@ func main() {
 			fmt.Printf("SKIP %s: missing %s\n", scenario.name, scenario.requiredEnv)
 			continue
 		}
+		if scenario.name == "opencode" && strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
+			fmt.Printf("SKIP %s: missing OPENAI_API_KEY\n", scenario.name)
+			continue
+		}
 		if err := runScenario(*timeout, client, *repo, scenario); err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", scenario.name, err))
 			fmt.Printf("FAIL %s: %v\n", scenario.name, err)
