@@ -72,6 +72,27 @@ state.theme = state.theme || "dark";
 state.hasCompletedOnboarding = true;
 state.lastOnboardingVersion = pkg.version;
 
+// Pre-trust the e2e repo path so the trust dialog is suppressed
+state.projects = state.projects || {};
+const trustedPaths = ["/tmp/ai-agent-bridge"];
+for (const p of trustedPaths) {
+  state.projects[p] = state.projects[p] || {};
+  state.projects[p].hasTrustDialogAccepted = true;
+  state.projects[p].projectOnboardingSeenCount = 1;
+}
+
+// Pre-approve the ANTHROPIC_API_KEY so the "use this API key?" dialog is suppressed.
+// Claude stores the last 20 chars of the key as the approval token.
+const apiKey = process.env.ANTHROPIC_API_KEY || "";
+if (apiKey) {
+  const keyToken = apiKey.slice(-20);
+  state.customApiKeyResponses = state.customApiKeyResponses || {};
+  const approved = state.customApiKeyResponses.approved || [];
+  if (!approved.includes(keyToken)) approved.push(keyToken);
+  state.customApiKeyResponses.approved = approved;
+  state.customApiKeyResponses.rejected = (state.customApiKeyResponses.rejected || []).filter(k => k !== keyToken);
+}
+
 fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n");
 EOF'
 
@@ -99,6 +120,11 @@ settings.security = settings.security || {};
 settings.security.auth = settings.security.auth || {};
 settings.security.auth.selectedType = "gemini-api-key";
 
+// Disable auto-update notifications so Gemini does not try to update during e2e tests
+settings.general = settings.general || {};
+settings.general.enableAutoUpdateNotification = false;
+settings.general.autoUpdate = false;
+
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 
 let trustedFolders = {};
@@ -108,7 +134,7 @@ try {
   trustedFolders = {};
 }
 
-trustedFolders["/repos"] = "TRUST_FOLDER";
+trustedFolders["/tmp/ai-agent-bridge"] = "TRUST_FOLDER";
 
 fs.writeFileSync(trustedFoldersPath, JSON.stringify(trustedFolders, null, 2) + "\n");
 

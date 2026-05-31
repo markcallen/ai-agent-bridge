@@ -92,3 +92,9 @@ type OutputChunk struct {
 type StreamJSONProvider interface {
 	IsStreamJSON() bool
 }
+
+// StripANSIProvider is implemented by providers that should have ANSI escape
+// codes stripped from their PTY output before forwarding to clients.
+type StripANSIProvider interface {
+	IsStripANSI() bool
+}

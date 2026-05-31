@@ -52,6 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 	logger := newLogger(cfg, redactor)
+	slog.SetDefault(logger)
 
 	// Set up provider registry
 	registry := bridge.NewRegistry()
@@ -66,6 +67,7 @@ func main() {
 			PromptPattern:  pcfg.PromptPattern,
 			RequiredEnv:    pcfg.RequiredEnv,
 			StreamJSON:     pcfg.StreamJSON,
+			StripANSI:      pcfg.StripANSI,
 		})
 		if err := registry.Register(p); err != nil {
 			logger.Error("register provider", "provider", name, "error", err)

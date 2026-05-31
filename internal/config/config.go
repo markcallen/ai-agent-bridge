@@ -82,6 +82,7 @@ type ProviderConfig struct {
 	RequiredEnv     []string `yaml:"required_env"`
 	PTY             *bool    `yaml:"pty"` // deprecated: PTY is the default; remove this field
 	StreamJSON      bool     `yaml:"stream_json"`
+	StripANSI       bool     `yaml:"strip_ansi"`
 	// PromptPattern is a regex matched against PTY output lines. When it
 	// matches the first time, AGENT_READY is emitted; on subsequent matches
 	// after output, RESPONSE_COMPLETE is emitted.
