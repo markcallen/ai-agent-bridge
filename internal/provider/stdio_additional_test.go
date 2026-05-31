@@ -65,7 +65,7 @@ func TestResolveBinaryPathAndFilterEnv(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	path, err := resolveBinaryPath(bin)
+	path, err := resolveBinaryPath(bin, "")
 	if err != nil {
 		t.Fatalf("resolveBinaryPath: %v", err)
 	}

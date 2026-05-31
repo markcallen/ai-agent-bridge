@@ -19,9 +19,19 @@ type Config struct {
 	Input        InputConfig               `yaml:"input"`
 	RateLimits   RateLimitsConfig          `yaml:"rate_limits"`
 	Persistence  PersistenceConfig         `yaml:"persistence"`
+	Runtime      RuntimeConfig             `yaml:"runtime"`
 	Providers    map[string]ProviderConfig `yaml:"providers"`
 	AllowedPaths []string                  `yaml:"allowed_paths"`
 	Logging      LoggingConfig             `yaml:"logging"`
+}
+
+// RuntimeConfig controls how the bridge locates provider CLIs and the Node.js
+// runtime. When ProviderRoot is set, Node version validation reads
+// {provider_root}/.nvmrc and relative provider binary/arg paths are resolved
+// relative to {provider_root} instead of the daemon working directory. When
+// empty, existing CWD-relative behaviour is preserved.
+type RuntimeConfig struct {
+	ProviderRoot string `yaml:"provider_root"`
 }
 
 type ServerConfig struct {
