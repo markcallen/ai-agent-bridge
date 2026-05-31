@@ -208,7 +208,7 @@ func Start(cfg Config) (*Server, error) {
 			return nil, fmt.Errorf("ensure PKI: %w", err)
 		}
 
-		secureOpts, err := buildSecureGRPCOpts(mat, logger)
+		secureOpts, err := buildSecureGRPCOpts(mat, stateDir, logger)
 		if err != nil {
 			sup.Close()
 			return nil, fmt.Errorf("build secure gRPC options: %w", err)
@@ -297,7 +297,7 @@ func Start(cfg Config) (*Server, error) {
 }
 
 // buildSecureGRPCOpts returns gRPC server options for mTLS + JWT mode.
-func buildSecureGRPCOpts(mat *PKIMaterial, logger *slog.Logger) ([]grpc.ServerOption, error) {
+func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger) ([]grpc.ServerOption, error) {
 	// TLS credentials with client cert verification.
 	tlsCfg, err := auth.ServerTLSConfig(auth.TLSConfig{
 		CABundlePath: mat.CABundlePath,
@@ -308,13 +308,34 @@ func buildSecureGRPCOpts(mat *PKIMaterial, logger *slog.Logger) ([]grpc.ServerOp
 		return nil, fmt.Errorf("server TLS config: %w", err)
 	}
 
-	// JWT verifier using the local signing key.
-	pubKey, err := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
+	// JWT verifier: load the local key plus any per-client keys.
+	keys := make(map[string]ed25519.PublicKey)
+
+	localPub, err := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
 	if err != nil {
 		return nil, fmt.Errorf("load JWT public key: %w", err)
 	}
+	keys["local"] = localPub
+
+	// Load per-client JWT public keys from certs/jwt-clients/*.pub.
+	clientKeysDir := filepath.Join(CertsDir(stateDir), "jwt-clients")
+	entries, _ := os.ReadDir(clientKeysDir)
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".pub" {
+			continue
+		}
+		issuer := strings.TrimSuffix(e.Name(), ".pub")
+		pub, err := pki.LoadEd25519PublicKey(filepath.Join(clientKeysDir, e.Name()))
+		if err != nil {
+			logger.Warn("skip client JWT key", "file", e.Name(), "error", err)
+			continue
+		}
+		keys[issuer] = pub
+		logger.Info("loaded client JWT key", "issuer", issuer)
+	}
+
 	verifier := &auth.JWTVerifier{
-		Keys:     map[string]ed25519.PublicKey{"local": pubKey},
+		Keys:     keys,
 		Audience: "bridge",
 		MaxTTL:   10 * time.Minute,
 	}
@@ -391,7 +412,22 @@ func (s *Server) Stop() {
 	s.stopped = true
 
 	s.logger.Info("stopping local server")
-	s.grpcServer.GracefulStop()
+
+	// Bounded graceful shutdown: try graceful first, then force-stop after
+	// 5 seconds. GracefulStop can block indefinitely if long-lived streams
+	// (e.g. AttachSession) are active.
+	done := make(chan struct{})
+	go func() {
+		s.grpcServer.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		s.logger.Warn("graceful shutdown timed out, forcing stop")
+		s.grpcServer.Stop()
+	}
+
 	s.supervisor.Close()
 	_ = s.listener.Close()
 
@@ -495,12 +531,28 @@ func DiscoverTarget(stateDir string) (target string, mode ServerMode) {
 }
 
 func discoverTarget(stateDir string) string {
-	// Try unix socket first (local mode).
+	// Check the mode file first to avoid a stale unix socket from a
+	// previous crashed local-mode server masking a running secure server.
+	mode := DiscoverMode(stateDir)
+
+	if mode == ModeSecure {
+		// Secure mode uses TCP — read the addr file directly.
+		addrData, err := os.ReadFile(filepath.Join(stateDir, "server.addr"))
+		if err != nil {
+			return ""
+		}
+		addr := strings.TrimSpace(string(addrData))
+		if addr != "" {
+			return addr
+		}
+	}
+
+	// Local mode: try unix socket first.
 	sockPath := filepath.Join(stateDir, "server.sock")
 	if _, err := os.Stat(sockPath); err == nil {
 		return "unix://" + sockPath
 	}
-	// Fall back to TCP address file (secure mode or Windows).
+	// Fall back to TCP address file (Windows local mode).
 	addrData, err := os.ReadFile(filepath.Join(stateDir, "server.addr"))
 	if err != nil {
 		return ""

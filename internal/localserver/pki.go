@@ -5,9 +5,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 )
+
+// safeNameRe matches a simple filename component: alphanumeric, hyphens, underscores, dots.
+var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // PKIMaterial holds resolved paths to all PKI files needed for secure mode.
 type PKIMaterial struct {
@@ -126,6 +130,11 @@ func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger) (*PKIM
 // The cert is written to stateDir/certs/clients/<clientName>/.
 // Returns paths to the cert and key files.
 func IssueClientCert(stateDir, clientName string, logger *slog.Logger) (certPath, keyPath string, err error) {
+	// Validate client name to prevent path traversal (e.g. "../shared").
+	if !safeNameRe.MatchString(clientName) {
+		return "", "", fmt.Errorf("invalid client name %q: must be alphanumeric with hyphens, underscores, or dots", clientName)
+	}
+
 	mat := LoadPKIMaterial(stateDir)
 
 	// Load existing CA.
@@ -140,6 +149,27 @@ func IssueClientCert(stateDir, clientName string, logger *slog.Logger) (certPath
 		return "", "", fmt.Errorf("issue client cert: %w", err)
 	}
 
-	logger.Info("issued client cert", "name", clientName, "cert", certPath)
+	// Generate a per-client JWT keypair so compromising one client doesn't
+	// compromise JWT auth for all clients.
+	jwtPubPath, jwtKeyPath, err := pki.GenerateJWTKeypair(outDir, "jwt-signing")
+	if err != nil {
+		return "", "", fmt.Errorf("generate client JWT keypair: %w", err)
+	}
+
+	// Register the client's public key with the server so the verifier
+	// accepts tokens signed by this client.
+	serverJWTDir := filepath.Join(CertsDir(stateDir), "jwt-clients")
+	if err := os.MkdirAll(serverJWTDir, 0o700); err != nil {
+		return "", "", fmt.Errorf("create jwt-clients dir: %w", err)
+	}
+	pubData, err := os.ReadFile(jwtPubPath)
+	if err != nil {
+		return "", "", fmt.Errorf("read client JWT public key: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(serverJWTDir, clientName+".pub"), pubData, 0o644); err != nil {
+		return "", "", fmt.Errorf("write client JWT public key: %w", err)
+	}
+
+	logger.Info("issued client credentials", "name", clientName, "cert", certPath, "jwt_key", jwtKeyPath)
 	return certPath, keyPath, nil
 }

@@ -144,6 +144,41 @@ func TestIssueClientCert(t *testing.T) {
 	})
 	assert.NoError(t, err, "issued client cert should verify against CA")
 	assert.Equal(t, "remote-dev", clientCert.Subject.CommonName)
+
+	// Verify per-client JWT keypair was created.
+	clientJWTKey := filepath.Join(expectedDir, "jwt-signing.key")
+	clientJWTPub := filepath.Join(expectedDir, "jwt-signing.pub")
+	_, err = os.Stat(clientJWTKey)
+	assert.NoError(t, err, "per-client JWT key should exist")
+	_, err = os.Stat(clientJWTPub)
+	assert.NoError(t, err, "per-client JWT pub should exist")
+
+	// Verify server-side copy of the public key.
+	serverPubCopy := filepath.Join(CertsDir(stateDir), "jwt-clients", "remote-dev.pub")
+	_, err = os.Stat(serverPubCopy)
+	assert.NoError(t, err, "server-side JWT pub copy should exist")
+}
+
+func TestIssueClientCert_RejectsPathTraversal(t *testing.T) {
+	stateDir := t.TempDir()
+	logger := testLogger()
+
+	// Generate PKI first.
+	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger)
+	require.NoError(t, err)
+
+	badNames := []string{"../escape", "foo/bar", ".hidden", "", "a b c"}
+	for _, name := range badNames {
+		_, _, err := IssueClientCert(stateDir, name, logger)
+		assert.Error(t, err, "should reject client name %q", name)
+	}
+
+	// Valid names should work.
+	goodNames := []string{"laptop2", "dev-machine", "server.local", "test_01"}
+	for _, name := range goodNames {
+		_, _, err := IssueClientCert(stateDir, name, logger)
+		assert.NoError(t, err, "should accept client name %q", name)
+	}
 }
 
 func TestLoadPKIMaterial(t *testing.T) {

@@ -68,6 +68,13 @@ Use 'ai-agent-bridge-cli session attach <id>' to reattach later.`,
 }
 
 func runSession(dir, providerName, project string, timeout time.Duration) error {
+	// Validate terminal before starting a session to avoid orphaning a
+	// provider process when stdin is not interactive.
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return fmt.Errorf("stdin is not a terminal")
+	}
+
 	// Ensure a server is running (spawns a local-mode background process if needed).
 	if err := ensureServer(); err != nil {
 		return err
@@ -98,10 +105,6 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	}
 
 	// Put terminal in raw mode.
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return fmt.Errorf("stdin is not a terminal")
-	}
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		return fmt.Errorf("set raw terminal: %w", err)

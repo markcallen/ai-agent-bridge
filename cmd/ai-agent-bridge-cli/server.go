@@ -195,21 +195,16 @@ func newServerIssueClientCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "issue-client",
 		Short: "Issue a client certificate for a remote machine",
-		Long: `Generate a client certificate signed by the server's CA. The remote
-machine needs the following files to connect:
+		Long: `Generate a client certificate and JWT keypair for a remote machine.
+Each client gets its own signing key so credentials can be rotated or
+revoked independently. The remote machine needs these files:
 
   1. CA bundle      (ca-bundle.crt)   — to verify the server
   2. Client cert    (<name>.crt)      — to authenticate to the server
   3. Client key     (<name>.key)      — private key for the cert
-  4. JWT signing key (jwt-signing.key) — to mint auth tokens
+  4. JWT signing key (jwt-signing.key) — per-client key to mint tokens
 
-Copy these files to the remote machine and use them with the Go SDK:
-
-  bridgeclient.New(
-    bridgeclient.WithTarget("10.0.0.1:9445"),
-    bridgeclient.WithMTLS(bridgeclient.MTLSConfig{...}),
-    bridgeclient.WithJWT(bridgeclient.JWTConfig{...}),
-  )`,
+Copy these files to the remote machine and use them with the Go SDK.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clientName == "" {
 				return fmt.Errorf("--name is required")
@@ -224,14 +219,19 @@ Copy these files to the remote machine and use them with the Go SDK:
 			}
 
 			mat := localserver.LoadPKIMaterial(stateDir)
+			clientDir := filepath.Join(localserver.CertsDir(stateDir), "clients", clientName)
+			clientJWTKey := filepath.Join(clientDir, "jwt-signing.key")
 
-			fmt.Println("Client certificate issued successfully.")
+			fmt.Println("Client credentials issued successfully.")
 			fmt.Println()
 			fmt.Println("Copy these files to the remote machine:")
 			fmt.Printf("  CA bundle:       %s\n", mat.CABundlePath)
 			fmt.Printf("  Client cert:     %s\n", certPath)
 			fmt.Printf("  Client key:      %s\n", keyPath)
-			fmt.Printf("  JWT signing key: %s\n", mat.JWTSigningKey)
+			fmt.Printf("  JWT signing key: %s\n", clientJWTKey)
+			fmt.Println()
+			fmt.Println("The server will accept tokens from this client on next restart.")
+			fmt.Println("If the server is already running, restart it to load the new key.")
 			fmt.Println()
 			fmt.Println("Example Go SDK usage:")
 			fmt.Println()
@@ -245,7 +245,7 @@ Copy these files to the remote machine and use them with the Go SDK:
 			fmt.Printf("    }),\n")
 			fmt.Printf("    bridgeclient.WithJWT(bridgeclient.JWTConfig{\n")
 			fmt.Printf("      PrivateKeyPath: \"jwt-signing.key\",\n")
-			fmt.Printf("      Issuer:         \"local\",\n")
+			fmt.Printf("      Issuer:         \"%s\",\n", clientName)
 			fmt.Printf("      Audience:       \"bridge\",\n")
 			fmt.Printf("    }),\n")
 			fmt.Printf("  )\n")
