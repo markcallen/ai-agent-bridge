@@ -274,9 +274,25 @@ func listen(stateDir string) (net.Listener, string, error) {
 		_ = lockFile.Close()
 		return nil, "", err
 	}
-	// Keep lockFile open for the lifetime of the listener; it will be
-	// released when the process exits or Stop() cleans up.
-	return ln, sockPath, nil
+	// Wrap the listener so it holds a reference to the lockfile. The flock
+	// is released when Close() is called (via Server.Stop or process exit).
+	return &lockedListener{Listener: ln, lockFile: lockFile}, sockPath, nil
+}
+
+// lockedListener wraps a net.Listener and holds a reference to a lockfile.
+// Closing the listener also closes the lockfile, releasing the flock.
+type lockedListener struct {
+	net.Listener
+	lockFile *os.File
+}
+
+func (l *lockedListener) Close() error {
+	listenerErr := l.Listener.Close()
+	lockErr := l.lockFile.Close()
+	if listenerErr != nil {
+		return listenerErr
+	}
+	return lockErr
 }
 
 // IsServerRunning checks if a local server is already running by probing

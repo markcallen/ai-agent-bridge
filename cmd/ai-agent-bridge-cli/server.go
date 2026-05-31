@@ -134,11 +134,24 @@ func newServerStopCmd() *cobra.Command {
 				fmt.Printf("Sent SIGTERM to server (pid %d)\n", pid)
 			}
 
-			// Clean up stale files after a brief wait.
-			time.Sleep(500 * time.Millisecond)
-			_ = os.Remove(localserver.PIDPath())
-			_ = os.Remove(localserver.SocketPath())
-			_ = os.Remove(localserver.AddrPath())
+			// Wait until the server is actually down before cleaning up
+			// state files. This prevents removing files while a slow
+			// shutdown is still in progress.
+			for i := 0; i < 30; i++ {
+				time.Sleep(200 * time.Millisecond)
+				if !localserver.IsServerRunning("") {
+					break
+				}
+			}
+
+			// Only remove state files if the server is no longer responding.
+			if !localserver.IsServerRunning("") {
+				_ = os.Remove(localserver.PIDPath())
+				_ = os.Remove(localserver.SocketPath())
+				_ = os.Remove(localserver.AddrPath())
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: server still responding after SIGTERM; state files not removed\n")
+			}
 
 			return nil
 		},
