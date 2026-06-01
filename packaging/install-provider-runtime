@@ -75,9 +75,12 @@ if [ "$VERIFY_ONLY" -eq 0 ]; then
   cp -- "$MANIFEST_DIR/package-lock.json" "$INSTALL_DIR/package-lock.json"
 
   say "Installing provider CLIs (this may take several minutes)..."
-  # Install into a staging directory so that a failed npm ci does not
-  # destroy an existing working runtime at INSTALL_DIR.
-  STAGE_DIR=$(mktemp -d)
+  # Stage inside INSTALL_DIR's parent so that mv is always on the same
+  # filesystem (avoids cross-device link errors and data loss when /tmp is
+  # on a different mount from /opt).  If npm ci fails, the existing
+  # node_modules is preserved via a rename-to-backup / rename-on-success
+  # pattern so the host is never left without working provider CLIs.
+  STAGE_DIR=$(mktemp -d -p "$INSTALL_DIR/..")
   cp -- "$MANIFEST_DIR/.nvmrc"            "$STAGE_DIR/.nvmrc"
   cp -- "$MANIFEST_DIR/package.json"      "$STAGE_DIR/package.json"
   cp -- "$MANIFEST_DIR/package-lock.json" "$STAGE_DIR/package-lock.json"
@@ -85,10 +88,15 @@ if [ "$VERIFY_ONLY" -eq 0 ]; then
     cd "$STAGE_DIR"
     npm ci --omit=dev --no-audit --no-fund
   )
-  # Swap node_modules only after a successful install.
-  rm -rf "$INSTALL_DIR/node_modules"
+  # Atomically swap node_modules using rename.  Keep the old modules as a
+  # backup directory; remove it only after the new one is in place so that
+  # a power failure mid-swap still leaves the host with usable CLIs.
+  OLD_DIR="${INSTALL_DIR}/node_modules.old.$$"
+  if [ -d "$INSTALL_DIR/node_modules" ]; then
+    mv "$INSTALL_DIR/node_modules" "$OLD_DIR"
+  fi
   mv "$STAGE_DIR/node_modules" "$INSTALL_DIR/node_modules"
-  rm -rf "$STAGE_DIR"
+  rm -rf "$OLD_DIR" "$STAGE_DIR"
 
   say "Fixing ownership of ${INSTALL_DIR}..."
   chown -R root:root "$INSTALL_DIR"

@@ -98,9 +98,6 @@ func RequiresNodeRuntime(cfg *Config) bool {
 		if base == "node" || base == "nodejs" {
 			return true
 		}
-		if len(p.Args) > 0 && strings.HasSuffix(p.Args[0], ".js") {
-			return true
-		}
 	}
 	return false
 }

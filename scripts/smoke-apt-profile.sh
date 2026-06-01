@@ -138,6 +138,7 @@ CONTAINER="apt-smoke-profile-$SUITE"
 docker run -d \
   --name "$CONTAINER" \
   --add-host=host.docker.internal:host-gateway \
+  -e SUITE="$SUITE" \
   -v "$REPO_DIR:/opt/aptrepo:ro" \
   -v "$HEALTHCHECK_BIN:/usr/local/bin/plain-healthcheck:ro" \
   -v "$PROFILE_SMOKE_BIN:/usr/local/bin/profile-smoke:ro" \
@@ -153,7 +154,7 @@ docker run -d \
     install -d /etc/apt/keyrings
     gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg \
       /opt/aptrepo/ai-agent-bridge-archive-keyring.asc
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] file:/opt/aptrepo noble main" \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] file:/opt/aptrepo ${SUITE} main" \
       > /etc/apt/sources.list.d/ai-agent-bridge.list
     apt-get update -q
     apt-get install -y -q ai-agent-bridge
