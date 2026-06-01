@@ -88,6 +88,7 @@ func main() {
 	}
 
 	// Attach and collect output in a goroutine.
+	clientID := uuid.NewString()
 	outputCh := make(chan string, 32)
 	errCh := make(chan error, 1)
 	attachCtx, attachCancel := context.WithDeadline(context.Background(), deadline)
@@ -95,6 +96,7 @@ func main() {
 
 	stream, err := client.AttachSession(attachCtx, &bridgev1.AttachSessionRequest{
 		SessionId: sessionID,
+		ClientId:  clientID,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "PROFILE SMOKE FAILED: attach: %v\n", err)
@@ -121,6 +123,7 @@ func main() {
 	probe := "bridge-smoke-echo-test"
 	_, err = client.WriteInput(ctx, &bridgev1.WriteInputRequest{
 		SessionId: sessionID,
+		ClientId:  clientID,
 		Data:      []byte(probe + "\n"),
 	})
 	if err != nil {
