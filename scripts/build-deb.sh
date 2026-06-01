@@ -54,9 +54,11 @@ install -m 0644 "$ROOT_DIR/packaging/bridge.yaml" \
 install -m 0644 "$ROOT_DIR/packaging/ai-agent-bridge.service" \
   "$PKG_ROOT/lib/systemd/system/ai-agent-bridge.service"
 
-# Provider runtime install helper
+# Provider runtime install helper and doctor script
 install -m 0755 "$ROOT_DIR/packaging/install-provider-runtime" \
   "$PKG_ROOT/usr/lib/ai-agent-bridge/install-provider-runtime"
+install -m 0755 "$ROOT_DIR/scripts/ai-desktops-doctor" \
+  "$PKG_ROOT/usr/lib/ai-agent-bridge/ai-desktops-doctor"
 
 # Provider runtime manifest (used by install-provider-runtime)
 install -m 0644 "$ROOT_DIR/.nvmrc"            "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/.nvmrc"

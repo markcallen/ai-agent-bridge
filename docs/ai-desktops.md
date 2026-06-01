@@ -57,6 +57,7 @@ The base package installs a provider-neutral daemon. It starts and passes a heal
 /etc/ai-agent-bridge/bridge.yaml           ← default (no providers)
 /lib/systemd/system/ai-agent-bridge.service
 /usr/lib/ai-agent-bridge/install-provider-runtime
+/usr/lib/ai-agent-bridge/ai-desktops-doctor
 /usr/share/ai-agent-bridge/provider-runtime/.nvmrc
 /usr/share/ai-agent-bridge/provider-runtime/package.json
 /usr/share/ai-agent-bridge/provider-runtime/package-lock.json
@@ -274,6 +275,52 @@ sudo systemctl status ai-agent-bridge
 ```
 
 The `install-provider-runtime` step re-copies the updated manifest and reinstalls pinned provider CLIs into a staging directory. Existing workspaces and session persistence are unaffected.
+
+---
+
+## Doctor Check
+
+Run the included readiness check to confirm the host is correctly configured as an agent-host before or after provisioning:
+
+```bash
+sudo /usr/lib/ai-agent-bridge/ai-desktops-doctor
+```
+
+The script checks ten items and prints `[OK]`, `[FAIL]`, or `[WARN]` for each:
+
+| Check | What it verifies |
+|---|---|
+| Package version | `ai-agent-bridge` apt package is installed |
+| Service state | `ai-agent-bridge.service` is active |
+| Port 9445 | Daemon is listening on `127.0.0.1:9445` |
+| Node.js | Node.js v24.x.x is on `PATH` |
+| Provider runtime | `/opt/ai-agent-bridge/node_modules/` is present |
+| Configured providers | One or more providers are enabled in `bridge.yaml` |
+| Credentials | Required env variables are present in `agents.env` (names only, not values) |
+| `/workspace` policy | Bridge `allowed_paths` includes `/workspace` |
+| systemd drop-in | Drop-in is installed and grants `ReadWritePaths=/workspace` |
+| Bridge health | Bridge responds on `127.0.0.1:9445` |
+
+The script exits `0` if all checks pass and `1` if any `[FAIL]` item is found. `[WARN]` items are informational and do not cause a non-zero exit.
+
+```
+ai-desktops bridge doctor
+=========================
+
+[OK]   Package version: ai-agent-bridge 0.4.0
+[OK]   Service state: active
+[OK]   Port 9445: bound to 127.0.0.1
+[OK]   Node.js: v24.2.0
+[OK]   Provider runtime: /opt/ai-agent-bridge (node_modules present)
+[OK]   Configured providers: claude
+       ANTHROPIC_API_KEY: set
+[OK]   Credentials: all required variables present
+[OK]   /workspace: listed in bridge allowed_paths
+[OK]   systemd drop-in: /etc/systemd/system/ai-agent-bridge.service.d/ai-desktops.conf (ReadWritePaths includes /workspace)
+[OK]   Bridge health: healthy (127.0.0.1:9445)
+
+Result: 10 OK, 0 FAIL
+```
 
 ---
 
