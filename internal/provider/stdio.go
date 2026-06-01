@@ -251,6 +251,18 @@ func (p *StdioProvider) Health(ctx context.Context) error {
 	return nil
 }
 
+// absRoot returns root as an absolute path. If root is already absolute it is
+// returned unchanged. If root is relative it is made absolute relative to the
+// process working directory. This ensures that binary and arg paths joined
+// against root do not accidentally resolve relative to cmd.Dir (the session
+// repo path) when the process working directory differs.
+func absRoot(root string) (string, error) {
+	if filepath.IsAbs(root) {
+		return root, nil
+	}
+	return filepath.Abs(root)
+}
+
 // resolveBinaryPath resolves a provider binary to an absolute path. When root
 // is non-empty and binary is a relative path containing a slash, binary is
 // resolved relative to root instead of the process working directory.
@@ -260,7 +272,11 @@ func resolveBinaryPath(binary, root string) (string, error) {
 			return binary, nil
 		}
 		if root != "" {
-			return filepath.Join(root, binary), nil
+			absR, err := absRoot(root)
+			if err != nil {
+				return "", fmt.Errorf("absolutize provider root: %w", err)
+			}
+			return filepath.Join(absR, binary), nil
 		}
 		return filepath.Abs(binary)
 	}
@@ -268,8 +284,10 @@ func resolveBinaryPath(binary, root string) (string, error) {
 }
 
 // resolveCommandArgs converts standalone relative path arguments to absolute
-// paths. When root is non-empty, relative paths are resolved against root
-// instead of the process working directory.
+// paths. Only bare path arguments (e.g. "./foo" or "../foo") are rewritten;
+// command names resolved via PATH and embedded flag values (e.g.
+// "--config=./foo") are left unchanged. When root is non-empty, relative paths
+// are resolved against root instead of the process working directory.
 func resolveCommandArgs(args []string, root string) ([]string, error) {
 	if len(args) == 0 {
 		return nil, nil
@@ -283,7 +301,11 @@ func resolveCommandArgs(args []string, root string) ([]string, error) {
 		var abs string
 		var err error
 		if root != "" {
-			abs = filepath.Join(root, arg)
+			absR, err := absRoot(root)
+			if err != nil {
+				return nil, fmt.Errorf("absolutize provider root: %w", err)
+			}
+			abs = filepath.Join(absR, arg)
 		} else {
 			abs, err = filepath.Abs(arg)
 			if err != nil {
