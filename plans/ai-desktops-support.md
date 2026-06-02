@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress. Phases 1 and 2 (minus runtime manifest packaging) and all documentation (§7) are complete and merged via PR #93. Phase 3 (ai-desktops-side provisioning and doctor check) is next.
+In progress. Phases 1, 2, and documentation (§7) are complete and Phase 3 provisioning/doctor items are implemented, all in PR #93 (open). Phase 3 operational steps (bake AMI, live validation) are pending.
 
 ## Context
 

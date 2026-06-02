@@ -23,6 +23,7 @@ set -eu
 MANIFEST_DIR="${MANIFEST_DIR:-/usr/share/ai-agent-bridge/provider-runtime}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/ai-agent-bridge}"
 REQUIRED_NODE_MAJOR=24
+export DEBIAN_FRONTEND=noninteractive
 
 VERIFY_ONLY=0
 for arg in "$@"; do
@@ -34,6 +35,12 @@ done
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 say() { printf '==> %s\n' "$*"; }
+
+# ── Root check ────────────────────────────────────────────────────────────────
+
+if [ "$(id -u)" -ne 0 ]; then
+  die "install-provider-runtime must be run as root (use sudo)"
+fi
 
 # ── Node.js version check ──────────────────────────────────────────────────
 
@@ -48,10 +55,14 @@ if ! command -v node >/dev/null 2>&1; then
   say "Installing Node.js ${REQUIRED_NODE_MAJOR} via NodeSource..."
   # curl is not always present on minimal Ubuntu installs; install it first.
   if ! command -v curl >/dev/null 2>&1; then
-    apt-get install -y curl
+    apt-get update -q
+    apt-get install -y -q curl
   fi
+  # The NodeSource setup script adds a new apt source; run apt-get update
+  # afterwards so nodejs is fetched from the correct repository.
   curl -fsSL "https://deb.nodesource.com/setup_${REQUIRED_NODE_MAJOR}.x" | sh -
-  apt-get install -y nodejs
+  apt-get update -q
+  apt-get install -y -q nodejs
 fi
 
 actual_major=$(node_major)

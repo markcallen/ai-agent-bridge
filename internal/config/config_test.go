@@ -285,6 +285,7 @@ func TestLoadRuntimeProviderRoot(t *testing.T) {
 		name     string
 		content  string
 		wantRoot string
+		wantErr  bool
 	}{
 		{
 			name: "provider_root set",
@@ -316,6 +317,22 @@ sessions:
 `,
 			wantRoot: "",
 		},
+		{
+			name: "provider_root relative path rejected",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+runtime:
+  provider_root: "relative/path"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -326,6 +343,12 @@ sessions:
 				t.Fatalf("WriteFile: %v", err)
 			}
 			cfg, err := Load(path)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Load: %v", err)
 			}

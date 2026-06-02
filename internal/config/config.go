@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -239,6 +240,9 @@ func validate(cfg *Config) error {
 	}
 	if cfg.RateLimits.SendInputPerSessionRPS <= 0 || cfg.RateLimits.SendInputPerSessionBurst <= 0 {
 		return fmt.Errorf("config: rate_limits.send_input_per_session_rps/send_input_per_session_burst must be > 0")
+	}
+	if cfg.Runtime.ProviderRoot != "" && !filepath.IsAbs(cfg.Runtime.ProviderRoot) {
+		return fmt.Errorf("config: runtime.provider_root must be an absolute path, got %q", cfg.Runtime.ProviderRoot)
 	}
 	if _, err := time.ParseDuration(cfg.Auth.JWTMaxTTL); err != nil {
 		return fmt.Errorf("config: auth.jwt_max_ttl: %w", err)

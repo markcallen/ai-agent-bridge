@@ -2,7 +2,6 @@ package config
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -113,16 +112,16 @@ func TestValidateNodeRuntimeWithExplicitRoot(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
+	oldLookPathNode := lookPathNode
+	oldRunCommand := runCommand
+	t.Cleanup(func() {
+		lookPathNode = oldLookPathNode
+		runCommand = oldRunCommand
+	})
 	lookPathNode = func(file string) (string, error) { return "/usr/bin/node", nil }
 	runCommand = func(name string, args ...string) ([]byte, error) {
 		return []byte("v24.1.0\n"), nil
 	}
-	t.Cleanup(func() {
-		lookPathNode = exec.LookPath
-		runCommand = func(name string, args ...string) ([]byte, error) {
-			return exec.Command(name, args...).Output()
-		}
-	})
 
 	// Validates successfully when the explicit root contains .nvmrc.
 	if err := ValidateNodeRuntime(root); err != nil {

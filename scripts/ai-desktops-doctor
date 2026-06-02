@@ -60,17 +60,20 @@ fi
 
 # ── 3. Localhost port 9445 ────────────────────────────────────────────────────
 
+# Check that 9445 is bound specifically on 127.0.0.1 (or ::1 for IPv6 loopback).
+# Matching on the local-address column prevents a false-positive when the
+# daemon is unexpectedly listening on 0.0.0.0 instead of loopback.
 _port_bound=0
-if ss -tlnp 2>/dev/null | grep -qE ':9445[ \t]'; then
+if ss -tlnp 2>/dev/null | grep -qE '(127\.0\.0\.1|::1):9445[ \t]'; then
   _port_bound=1
-elif netstat -tlnp 2>/dev/null | grep -qE ':9445[ \t]'; then
+elif netstat -tlnp 2>/dev/null | grep -qE '(127\.0\.0\.1|::1):9445[ \t]'; then
   _port_bound=1
 fi
 
 if [ "$_port_bound" -eq 1 ]; then
   _ok "Port 9445: bound to 127.0.0.1"
 else
-  _fail "Port 9445: not bound (is the bridge daemon running?)"
+  _fail "Port 9445: not bound on 127.0.0.1 (is the bridge daemon running?)"
 fi
 
 # ── 4. Node.js version ────────────────────────────────────────────────────────
@@ -125,18 +128,37 @@ fi
 
 if [ -f "$CONFIG_FILE" ]; then
   # Collect required_env variable names from uncommented provider blocks.
+  # Supports both the inline form:
+  #   required_env: ["VAR1", "VAR2"]
+  # and the block-list form:
+  #   required_env:
+  #     - VAR1
+  #     - VAR2
   _required_vars=$(awk '
     /^providers:/ { in_p=1; next }
     in_p && /^[^ \t]/ { in_p=0 }
-    in_p && /required_env:/ && !/^ *#/ {
-      # Handle: required_env: ["VAR1", "VAR2"]
+    in_p && /^ *#/ { next }
+    in_p && /required_env:/ {
+      in_req=1
       line=$0
       gsub(/.*required_env:[ \t]*\[/, "", line)
       gsub(/\].*/, "", line)
       gsub(/[" \t]/, "", line)
       n=split(line, vars, ",")
       for (i=1; i<=n; i++) if (vars[i] != "") print vars[i]
+      # If the line contained "[...]" we are done; otherwise block-list follows.
+      if ($0 ~ /\[/) in_req=0
+      next
     }
+    in_p && in_req && /^ *- / {
+      # Block-list item: "    - VARNAME"
+      item=$0
+      gsub(/^ *- */, "", item)
+      gsub(/[" \t]/, "", item)
+      if (item != "") print item
+      next
+    }
+    in_p && in_req && !/^ *- / { in_req=0 }
   ' "$CONFIG_FILE" | sort -u)
 
   if [ -n "$_required_vars" ]; then
