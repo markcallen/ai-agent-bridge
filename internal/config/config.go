@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,9 +20,19 @@ type Config struct {
 	Input        InputConfig               `yaml:"input"`
 	RateLimits   RateLimitsConfig          `yaml:"rate_limits"`
 	Persistence  PersistenceConfig         `yaml:"persistence"`
+	Runtime      RuntimeConfig             `yaml:"runtime"`
 	Providers    map[string]ProviderConfig `yaml:"providers"`
 	AllowedPaths []string                  `yaml:"allowed_paths"`
 	Logging      LoggingConfig             `yaml:"logging"`
+}
+
+// RuntimeConfig controls how the bridge locates provider CLIs and the Node.js
+// runtime. When ProviderRoot is set, Node version validation reads
+// {provider_root}/.nvmrc and relative provider binary/arg paths are resolved
+// relative to {provider_root} instead of the daemon working directory. When
+// empty, existing CWD-relative behaviour is preserved.
+type RuntimeConfig struct {
+	ProviderRoot string `yaml:"provider_root"`
 }
 
 type ServerConfig struct {
@@ -229,6 +240,9 @@ func validate(cfg *Config) error {
 	}
 	if cfg.RateLimits.SendInputPerSessionRPS <= 0 || cfg.RateLimits.SendInputPerSessionBurst <= 0 {
 		return fmt.Errorf("config: rate_limits.send_input_per_session_rps/send_input_per_session_burst must be > 0")
+	}
+	if cfg.Runtime.ProviderRoot != "" && !filepath.IsAbs(cfg.Runtime.ProviderRoot) {
+		return fmt.Errorf("config: runtime.provider_root must be an absolute path, got %q", cfg.Runtime.ProviderRoot)
 	}
 	if _, err := time.ParseDuration(cfg.Auth.JWTMaxTTL); err != nil {
 		return fmt.Errorf("config: auth.jwt_max_ttl: %w", err)

@@ -194,6 +194,34 @@ logging:
 | `db_path` | `""` (disabled) | Path to the bbolt database file used to persist session metadata **and PTY output chunks** across daemon restarts. When set, `GetSession` and `ListSessions` surface completed sessions from previous daemon lifetimes. If a persisted non-terminal session still has a live PID at startup, the daemon recovers it into a `RUNNING` state, preserves replay from persisted chunks, and keeps `StopSession` available. Because the current PTY design does not re-open the original live transport, post-restart `AttachSession` is replay-only and `WriteInput`/`ResizeSession` return `UNAVAILABLE` for recovered sessions. |
 | `chunk_storage_bytes` | `0` (unlimited) | Soft upper bound on total PTY chunk bytes stored per session. Reserved for future enforcement; currently has no effect. |
 
+#### `runtime`
+
+Controls how the bridge locates provider CLIs and the Node.js runtime. These settings are optional; omitting the `runtime` block preserves previous behaviour (paths resolved relative to the daemon working directory).
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `provider_root` | `""` (daemon CWD) | Absolute path to the directory that contains `.nvmrc` and provider `node_modules`. When set: (1) Node.js version validation reads `{provider_root}/.nvmrc` instead of the daemon working directory; (2) a relative `binary` path (one that contains a `/`) resolves against `provider_root`; (3) bare standalone relative path arguments (e.g. `./node_modules/foo/bin/cli.js`) resolve against `provider_root`. Plain command names looked up via `PATH` (e.g. `node`) and embedded flag values (e.g. `--config=./foo`) are not affected. Use this when the daemon runs as a systemd service with a different `WorkingDirectory` than where provider CLIs are installed. |
+
+Example (`ai-desktops` deployment):
+
+```yaml
+runtime:
+  provider_root: "/opt/ai-agent-bridge"
+
+providers:
+  codex:
+    binary: "/usr/bin/node"
+    args: ["./node_modules/@openai/codex/bin/codex.js"]
+    startup_timeout: "60s"
+    startup_probe:   "output"
+    required_env:    ["OPENAI_API_KEY"]
+    prompt_pattern:  '(?m)(>\s*$|›)'
+```
+
+In this example, `./node_modules/@openai/codex/bin/codex.js` resolves to
+`/opt/ai-agent-bridge/node_modules/@openai/codex/bin/codex.js` regardless of
+where the daemon process is launched from.
+
 #### `providers`
 | Field | Description |
 |-------|-------------|

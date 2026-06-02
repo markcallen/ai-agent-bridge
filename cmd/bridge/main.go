@@ -37,7 +37,11 @@ func main() {
 		os.Exit(1)
 	}
 	if config.RequiresNodeRuntime(cfg) {
-		if err := config.ValidateNodeRuntime("."); err != nil {
+		runtimeRoot := cfg.Runtime.ProviderRoot
+		if runtimeRoot == "" {
+			runtimeRoot = "."
+		}
+		if err := config.ValidateNodeRuntime(runtimeRoot); err != nil {
 			bootstrapLogger.Error("node runtime validation failed", "error", err)
 			os.Exit(1)
 		}
@@ -68,6 +72,7 @@ func main() {
 			RequiredEnv:    pcfg.RequiredEnv,
 			StreamJSON:     pcfg.StreamJSON,
 			StripANSI:      pcfg.StripANSI,
+			ProviderRoot:   cfg.Runtime.ProviderRoot,
 		})
 		if err := registry.Register(p); err != nil {
 			logger.Error("register provider", "provider", name, "error", err)

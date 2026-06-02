@@ -407,6 +407,8 @@ scripts/                       Development helper scripts
 ## Documentation
 
 - [docs/service.md](docs/service.md) — Architecture, configuration reference, security
+- [docs/install-ubuntu.md](docs/install-ubuntu.md) — apt repository installation and package details
+- [docs/ai-desktops.md](docs/ai-desktops.md) — ai-desktops agent-host provisioning guide
 - [docs/go-sdk.md](docs/go-sdk.md) — Go SDK reference
 - [docs/node-sdk.md](docs/node-sdk.md) — Node.js SDK and React hook reference
 - [docs/grpc-api.md](docs/grpc-api.md) — Full gRPC API reference

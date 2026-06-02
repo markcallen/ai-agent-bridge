@@ -29,6 +29,10 @@ type StdioConfig struct {
 	RequiredEnv    []string
 	StreamJSON     bool // if true, the provider uses stream-JSON mode (no PTY)
 	StripANSI      bool // if true, ANSI escape codes are stripped from PTY output
+	// ProviderRoot is an optional absolute path used as the base for resolving
+	// relative Binary and DefaultArgs paths. When empty, relative paths are
+	// resolved against the daemon working directory (legacy behaviour).
+	ProviderRoot string
 }
 
 // StdioProvider defines how to launch and validate one interactive CLI.
@@ -71,11 +75,11 @@ func (p *StdioProvider) IsStreamJSON() bool { return p.cfg.StreamJSON }
 func (p *StdioProvider) IsStripANSI() bool { return p.cfg.StripANSI }
 
 func (p *StdioProvider) BuildCommand(ctx context.Context, cfg bridge.SessionConfig) (*exec.Cmd, error) {
-	binPath, err := resolveBinaryPath(p.cfg.Binary)
+	binPath, err := resolveBinaryPath(p.cfg.Binary, p.cfg.ProviderRoot)
 	if err != nil {
 		return nil, fmt.Errorf("%w: resolve binary %q: %v", bridge.ErrProviderUnavailable, p.cfg.Binary, err)
 	}
-	args, err := resolveCommandArgs(p.cfg.DefaultArgs)
+	args, err := resolveCommandArgs(p.cfg.DefaultArgs, p.cfg.ProviderRoot)
 	if err != nil {
 		return nil, fmt.Errorf("%w: resolve args for %q: %v", bridge.ErrProviderUnavailable, p.cfg.ProviderID, err)
 	}
@@ -120,11 +124,11 @@ func (p *StdioProvider) validateStartupPrompt(ctx context.Context) error {
 	probeCtx, cancel := context.WithTimeout(ctx, p.cfg.StartupTimeout)
 	defer cancel()
 
-	binPath, err := resolveBinaryPath(p.cfg.Binary)
+	binPath, err := resolveBinaryPath(p.cfg.Binary, p.cfg.ProviderRoot)
 	if err != nil {
 		return err
 	}
-	args, err := resolveCommandArgs(p.cfg.DefaultArgs)
+	args, err := resolveCommandArgs(p.cfg.DefaultArgs, p.cfg.ProviderRoot)
 	if err != nil {
 		return err
 	}
@@ -171,11 +175,11 @@ func (p *StdioProvider) validateStartupOutput(ctx context.Context) error {
 	probeCtx, cancel := context.WithTimeout(ctx, p.cfg.StartupTimeout)
 	defer cancel()
 
-	binPath, err := resolveBinaryPath(p.cfg.Binary)
+	binPath, err := resolveBinaryPath(p.cfg.Binary, p.cfg.ProviderRoot)
 	if err != nil {
 		return err
 	}
-	args, err := resolveCommandArgs(p.cfg.DefaultArgs)
+	args, err := resolveCommandArgs(p.cfg.DefaultArgs, p.cfg.ProviderRoot)
 	if err != nil {
 		return err
 	}
@@ -219,7 +223,7 @@ func (p *StdioProvider) validateStartupOutput(ctx context.Context) error {
 }
 
 func (p *StdioProvider) Version(ctx context.Context) (string, error) {
-	path, err := resolveBinaryPath(p.cfg.Binary)
+	path, err := resolveBinaryPath(p.cfg.Binary, p.cfg.ProviderRoot)
 	if err != nil {
 		return "", fmt.Errorf("binary %q not found: %w", p.cfg.Binary, err)
 	}
@@ -233,7 +237,7 @@ func (p *StdioProvider) Version(ctx context.Context) (string, error) {
 }
 
 func (p *StdioProvider) Health(ctx context.Context) error {
-	path, err := resolveBinaryPath(p.cfg.Binary)
+	path, err := resolveBinaryPath(p.cfg.Binary, p.cfg.ProviderRoot)
 	if err != nil {
 		return fmt.Errorf("binary %q not found: %w", p.cfg.Binary, err)
 	}
@@ -247,17 +251,44 @@ func (p *StdioProvider) Health(ctx context.Context) error {
 	return nil
 }
 
-func resolveBinaryPath(binary string) (string, error) {
+// absRoot returns root as an absolute path. If root is already absolute it is
+// returned unchanged. If root is relative it is made absolute relative to the
+// process working directory. This ensures that binary and arg paths joined
+// against root do not accidentally resolve relative to cmd.Dir (the session
+// repo path) when the process working directory differs.
+func absRoot(root string) (string, error) {
+	if filepath.IsAbs(root) {
+		return root, nil
+	}
+	return filepath.Abs(root)
+}
+
+// resolveBinaryPath resolves a provider binary to an absolute path. When root
+// is non-empty and binary is a relative path containing a slash, binary is
+// resolved relative to root instead of the process working directory.
+func resolveBinaryPath(binary, root string) (string, error) {
 	if strings.Contains(binary, "/") {
 		if filepath.IsAbs(binary) {
 			return binary, nil
+		}
+		if root != "" {
+			absR, err := absRoot(root)
+			if err != nil {
+				return "", fmt.Errorf("absolutize provider root: %w", err)
+			}
+			return filepath.Join(absR, binary), nil
 		}
 		return filepath.Abs(binary)
 	}
 	return exec.LookPath(binary)
 }
 
-func resolveCommandArgs(args []string) ([]string, error) {
+// resolveCommandArgs converts standalone relative path arguments to absolute
+// paths. Only bare path arguments (e.g. "./foo" or "../foo") are rewritten;
+// command names resolved via PATH and embedded flag values (e.g.
+// "--config=./foo") are left unchanged. When root is non-empty, relative paths
+// are resolved against root instead of the process working directory.
+func resolveCommandArgs(args []string, root string) ([]string, error) {
 	if len(args) == 0 {
 		return nil, nil
 	}
@@ -267,9 +298,19 @@ func resolveCommandArgs(args []string) ([]string, error) {
 		if !isStandaloneRelativePathArg(arg) {
 			continue
 		}
-		abs, err := filepath.Abs(arg)
-		if err != nil {
-			return nil, err
+		var abs string
+		var err error
+		if root != "" {
+			absR, err := absRoot(root)
+			if err != nil {
+				return nil, fmt.Errorf("absolutize provider root: %w", err)
+			}
+			abs = filepath.Join(absR, arg)
+		} else {
+			abs, err = filepath.Abs(arg)
+			if err != nil {
+				return nil, err
+			}
 		}
 		resolved[i] = abs
 	}

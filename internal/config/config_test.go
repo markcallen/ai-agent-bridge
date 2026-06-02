@@ -279,3 +279,82 @@ sessions:
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestLoadRuntimeProviderRoot(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantRoot string
+		wantErr  bool
+	}{
+		{
+			name: "provider_root set",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+runtime:
+  provider_root: "/opt/ai-agent-bridge"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantRoot: "/opt/ai-agent-bridge",
+		},
+		{
+			name: "provider_root absent",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantRoot: "",
+		},
+		{
+			name: "provider_root relative path rejected",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+runtime:
+  provider_root: "relative/path"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "bridge.yaml")
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			cfg, err := Load(path)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Runtime.ProviderRoot != tc.wantRoot {
+				t.Fatalf("ProviderRoot=%q want %q", cfg.Runtime.ProviderRoot, tc.wantRoot)
+			}
+		})
+	}
+}
