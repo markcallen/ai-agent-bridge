@@ -7,15 +7,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+COMPOSE_FILE="$ROOT_DIR/e2e/bridgectl/docker-compose.yml"
+
+cleanup() {
+  docker compose -f "$COMPOSE_FILE" down -v 2>/dev/null
+}
+trap cleanup EXIT INT TERM
+
 echo "=== Building and running bridgectl e2e tests in Docker ==="
 
 set +e
-docker compose -f "$ROOT_DIR/e2e/bridgectl/docker-compose.yml" up \
+docker compose -f "$COMPOSE_FILE" up \
     --build \
     --abort-on-container-exit \
     --exit-code-from cli-e2e
 rc=$?
-docker compose -f "$ROOT_DIR/e2e/bridgectl/docker-compose.yml" down -v
 set -e
 
 if [ $rc -eq 0 ]; then

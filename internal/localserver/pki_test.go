@@ -182,13 +182,14 @@ func TestIssueClientCert_RejectsPathTraversal(t *testing.T) {
 }
 
 func TestLoadPKIMaterial(t *testing.T) {
-	stateDir := "/tmp/test-state"
+	stateDir := filepath.Join(os.TempDir(), "test-state")
 	mat := LoadPKIMaterial(stateDir)
 
-	assert.Equal(t, "/tmp/test-state/certs/ca.crt", mat.CACertPath)
-	assert.Equal(t, "/tmp/test-state/certs/server.crt", mat.ServerCertPath)
-	assert.Equal(t, "/tmp/test-state/certs/local-client.crt", mat.LocalClientCert)
-	assert.Equal(t, "/tmp/test-state/certs/jwt-signing.key", mat.JWTSigningKey)
+	certs := filepath.Join(stateDir, "certs")
+	assert.Equal(t, filepath.Join(certs, "ca.crt"), mat.CACertPath)
+	assert.Equal(t, filepath.Join(certs, "server.crt"), mat.ServerCertPath)
+	assert.Equal(t, filepath.Join(certs, "local-client.crt"), mat.LocalClientCert)
+	assert.Equal(t, filepath.Join(certs, "jwt-signing.key"), mat.JWTSigningKey)
 }
 
 func TestBuildServerSANs(t *testing.T) {

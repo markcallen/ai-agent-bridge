@@ -31,7 +31,6 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	defer func() { _ = os.RemoveAll(dir) }()
 
 	bin := filepath.Join(dir, "bridgectl")
 	if runtime.GOOS == "windows" {
@@ -46,7 +45,9 @@ func TestMain(m *testing.M) {
 	}
 	cliBinary = bin
 
-	os.Exit(m.Run())
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // testStateDir returns a per-test temp state dir (isolated from ~/.ai-agent-bridge).
@@ -569,19 +570,17 @@ func TestSessionAttachAndInput(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Wait for output.
+	// Wait for output — require it to arrive.
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Log("timeout waiting for echo output (may be expected on some platforms)")
 	}
 
 	mu.Lock()
 	got := received.String()
 	mu.Unlock()
-	if got != "" {
-		assert.Contains(t, got, "HELLO_FROM_E2E")
-	}
+	require.NotEmpty(t, got, "echo provider should return output")
+	assert.Contains(t, got, "HELLO_FROM_E2E")
 
 	// Stop.
 	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{
