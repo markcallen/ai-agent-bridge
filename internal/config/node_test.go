@@ -105,3 +105,32 @@ func TestValidateNodeRuntime(t *testing.T) {
 		t.Fatalf("ValidateNodeRuntime: %v", err)
 	}
 }
+
+func TestValidateNodeRuntimeWithExplicitRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".nvmrc"), []byte("24\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	oldLookPathNode := lookPathNode
+	oldRunCommand := runCommand
+	t.Cleanup(func() {
+		lookPathNode = oldLookPathNode
+		runCommand = oldRunCommand
+	})
+	lookPathNode = func(file string) (string, error) { return "/usr/bin/node", nil }
+	runCommand = func(name string, args ...string) ([]byte, error) {
+		return []byte("v24.1.0\n"), nil
+	}
+
+	// Validates successfully when the explicit root contains .nvmrc.
+	if err := ValidateNodeRuntime(root); err != nil {
+		t.Fatalf("ValidateNodeRuntime with root: %v", err)
+	}
+
+	// Fails when .nvmrc is absent from the given root.
+	emptyRoot := t.TempDir()
+	if err := ValidateNodeRuntime(emptyRoot); err == nil {
+		t.Fatal("expected error for missing .nvmrc")
+	}
+}

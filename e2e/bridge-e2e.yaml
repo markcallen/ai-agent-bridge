@@ -38,13 +38,15 @@ providers:
     startup_timeout: "120s"
     startup_probe: "prompt"
     required_env: ["ANTHROPIC_API_KEY"]
+    validate_startup: false
     prompt_pattern: "(?m)(❯|>\\s*$)"
   opencode:
-    binary: "./node_modules/.bin/opencode"
-    args: []
+    binary: "node"
+    args: ["/app/scripts/opencode_repl.js"]
     startup_timeout: "30s"
-    startup_probe: "output"
+    startup_probe: "prompt"
     required_env: ["OPENAI_API_KEY"]
+    validate_startup: false
     prompt_pattern: "❯"
   codex:
     binary: "./node_modules/.bin/codex"
@@ -52,6 +54,7 @@ providers:
     startup_timeout: "60s"
     startup_probe: "output"
     required_env: ["OPENAI_API_KEY"]
+    validate_startup: false
     prompt_pattern: "(?m)(>\\s*$|›)"
   gemini:
     binary: "./node_modules/.bin/gemini"
@@ -59,7 +62,9 @@ providers:
     startup_timeout: "60s"
     startup_probe: "output"
     required_env: ["GEMINI_API_KEY"]
+    validate_startup: false
     prompt_pattern: ">"
+    strip_ansi: true
   echo:
     binary: "cat"
     args: []

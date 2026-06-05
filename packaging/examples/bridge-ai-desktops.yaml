@@ -1,0 +1,116 @@
+# bridge-ai-desktops.yaml — ai-desktops agent-host configuration profile.
+#
+# Copy this file to /etc/ai-agent-bridge/bridge.yaml on an ai-desktops host,
+# uncomment the providers you want to enable, and supply credentials via
+# /etc/ai-agent-bridge/agents.env (root:root 0600).
+#
+# This profile:
+#   - binds to 127.0.0.1:9445 (localhost only)
+#   - enables persistence under /var/lib/ai-agent-bridge
+#   - permits /workspace for repository access
+#   - resolves provider CLIs from /opt/ai-agent-bridge (the provider runtime root)
+#   - keeps TLS and JWT disabled (localhost-only — add mTLS+JWT for remote access)
+#
+# SECURITY: do not expose this service over the network without configuring
+# tls.ca_bundle, tls.cert, tls.key, and auth.jwt_public_keys.
+
+server:
+  listen: "127.0.0.1:9445"
+
+tls:
+  ca_bundle: ""
+  cert: ""
+  key: ""
+
+auth:
+  jwt_public_keys: []
+  jwt_audience: "bridge"
+  jwt_max_ttl: "5m"
+
+feature_flags:
+  provider_fallbacks: true
+
+sessions:
+  max_per_project: 5
+  max_global: 20
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  event_buffer_size: 10000
+  max_subscribers_per_session: 10
+  subscriber_ttl: "30m"
+
+input:
+  max_size_bytes: 65536
+
+rate_limits:
+  global_rps: 50
+  global_burst: 100
+  start_session_per_client_rps: 1
+  start_session_per_client_burst: 3
+  send_input_per_session_rps: 5
+  send_input_per_session_burst: 20
+
+persistence:
+  db_path: "/var/lib/ai-agent-bridge/sessions.db"
+
+runtime:
+  provider_root: "/opt/ai-agent-bridge"
+
+# Enable one or more providers below. Credentials are read from the environment
+# (injected via /etc/ai-agent-bridge/agents.env at service startup).
+#
+# Run /usr/lib/ai-agent-bridge/install-provider-runtime to install the CLIs
+# before enabling any provider here.
+
+providers:
+
+# Uncomment to enable Codex (requires OPENAI_API_KEY in agents.env):
+#
+#   codex:
+#     binary: "/usr/bin/node"
+#     args: ["/opt/ai-agent-bridge/node_modules/@openai/codex/bin/codex.js"]
+#     startup_timeout: "60s"
+#     startup_probe: "output"
+#     required_env: ["OPENAI_API_KEY"]
+#     prompt_pattern: '(?m)(>\s*$|›)'
+
+# Uncomment to enable Claude Code (requires ANTHROPIC_API_KEY in agents.env):
+#
+#   claude:
+#     binary: "/usr/bin/node"
+#     args: ["/opt/ai-agent-bridge/node_modules/@anthropic-ai/claude-code/cli.js"]
+#     startup_timeout: "60s"
+#     startup_probe: "output"
+#     required_env: ["ANTHROPIC_API_KEY"]
+#     prompt_pattern: '(?m)(❯|>\s*$)'
+
+# Uncomment to enable OpenCode (requires OPENAI_API_KEY or ANTHROPIC_API_KEY):
+# OpenCode ships as a native binary installed via npm — no Node.js invocation needed.
+#
+#   opencode:
+#     binary: "/opt/ai-agent-bridge/node_modules/.bin/opencode"
+#     args: []
+#     startup_timeout: "45s"
+#     startup_probe: "output"
+
+# Uncomment to enable Gemini CLI (requires GOOGLE_API_KEY in agents.env):
+#
+#   gemini:
+#     binary: "/usr/bin/node"
+#     args: ["/opt/ai-agent-bridge/node_modules/@google/gemini-cli/dist/index.js"]
+#     startup_timeout: "60s"
+#     startup_probe: "output"
+#     required_env: ["GOOGLE_API_KEY"]
+
+allowed_paths:
+  - "/home"
+  - "/srv"
+  - "/tmp"
+  - "/var/tmp"
+  - "/workspace"
+
+logging:
+  level: "info"
+  format: "json"
+  redact_patterns:
+    - '(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*\S+'

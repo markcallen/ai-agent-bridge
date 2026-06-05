@@ -6,9 +6,12 @@ services:
     environment:
       BRIDGE_CONFIG: /app/config/bridge-e2e.yaml
       BRIDGE_CLIENT_CN: e2e-client
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     volumes:
       - certs:/app/certs
-      - repos:/tmp/cache-cleaner
+      - repos:/tmp/ai-agent-bridge
       - ./bridge-e2e.yaml:/app/config/bridge-e2e.yaml:ro
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
@@ -23,12 +26,15 @@ services:
       dockerfile: e2e/Dockerfile.client
     environment:
       E2E_ONLY: ${E2E_ONLY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     depends_on:
       bridge:
         condition: service_healthy
     volumes:
       - certs:/certs:ro
-      - repos:/tmp/cache-cleaner
+      - repos:/tmp/ai-agent-bridge
 
 volumes:
   certs:

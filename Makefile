@@ -36,7 +36,7 @@ E2E_ONLY ?=
 
 test-e2e:
 	@set +e; \
-	E2E_ONLY=$(E2E_ONLY) docker compose -f e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-client; \
+	E2E_ONLY=$(E2E_ONLY) ./scripts/with_env_secrets.sh docker compose -f e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-client; \
 	rc=$$?; \
 	docker compose -f e2e/docker-compose.yml down -v; \
 	exit $$rc

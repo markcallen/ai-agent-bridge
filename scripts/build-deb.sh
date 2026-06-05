@@ -39,16 +39,43 @@ GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/bridgectl" ./cmd/bridgectl
 mkdir -p \
   "$PKG_ROOT/DEBIAN" \
   "$PKG_ROOT/usr/bin" \
+  "$PKG_ROOT/usr/lib/ai-agent-bridge" \
+  "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime" \
+  "$PKG_ROOT/usr/share/doc/ai-agent-bridge/examples" \
   "$PKG_ROOT/etc/ai-agent-bridge" \
   "$PKG_ROOT/lib/systemd/system"
 
-install -m 0755 "$ROOT_DIR/bin/ai-agent-bridge" "$PKG_ROOT/usr/bin/ai-agent-bridge"
+# Binaries
+install -m 0755 "$ROOT_DIR/bin/ai-agent-bridge"    "$PKG_ROOT/usr/bin/ai-agent-bridge"
 install -m 0755 "$ROOT_DIR/bin/ai-agent-bridge-ca" "$PKG_ROOT/usr/bin/ai-agent-bridge-ca"
 install -m 0755 "$ROOT_DIR/bin/bridgectl" "$PKG_ROOT/usr/bin/bridgectl"
-install -m 0644 "$ROOT_DIR/packaging/bridge.yaml" "$PKG_ROOT/etc/ai-agent-bridge/bridge.yaml"
-install -m 0644 "$ROOT_DIR/packaging/ai-agent-bridge.service" "$PKG_ROOT/lib/systemd/system/ai-agent-bridge.service"
+
+# Default daemon config and systemd unit
+install -m 0644 "$ROOT_DIR/packaging/bridge.yaml" \
+  "$PKG_ROOT/etc/ai-agent-bridge/bridge.yaml"
+install -m 0644 "$ROOT_DIR/packaging/ai-agent-bridge.service" \
+  "$PKG_ROOT/lib/systemd/system/ai-agent-bridge.service"
+
+# Provider runtime install helper and doctor script
+install -m 0755 "$ROOT_DIR/packaging/install-provider-runtime" \
+  "$PKG_ROOT/usr/lib/ai-agent-bridge/install-provider-runtime"
+install -m 0755 "$ROOT_DIR/scripts/ai-desktops-doctor" \
+  "$PKG_ROOT/usr/lib/ai-agent-bridge/ai-desktops-doctor"
+
+# Provider runtime manifest (used by install-provider-runtime)
+install -m 0644 "$ROOT_DIR/.nvmrc"            "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/.nvmrc"
+install -m 0644 "$ROOT_DIR/package.json"      "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/package.json"
+install -m 0644 "$ROOT_DIR/package-lock.json" "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/package-lock.json"
+
+# Example configs and systemd drop-in
+install -m 0644 "$ROOT_DIR/packaging/examples/bridge-ai-desktops.yaml" \
+  "$PKG_ROOT/usr/share/doc/ai-agent-bridge/examples/bridge-ai-desktops.yaml"
+install -m 0644 "$ROOT_DIR/packaging/systemd/ai-desktops.conf" \
+  "$PKG_ROOT/usr/share/doc/ai-agent-bridge/examples/ai-desktops.conf"
+
+# Debian maintainer scripts
 install -m 0755 "$ROOT_DIR/packaging/debian/postinst" "$PKG_ROOT/DEBIAN/postinst"
-install -m 0755 "$ROOT_DIR/packaging/debian/prerm" "$PKG_ROOT/DEBIAN/prerm"
+install -m 0755 "$ROOT_DIR/packaging/debian/prerm"    "$PKG_ROOT/DEBIAN/prerm"
 
 cat >"$PKG_ROOT/DEBIAN/control" <<EOF
 Package: $PACKAGE_NAME

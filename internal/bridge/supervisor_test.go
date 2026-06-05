@@ -802,6 +802,75 @@ func TestSupervisorFallbackProvider(t *testing.T) {
 	})
 }
 
+// stripANSITestProvider wraps testProvider and implements StripANSIProvider.
+type stripANSITestProvider struct {
+	testProvider
+}
+
+func (p *stripANSITestProvider) IsStripANSI() bool { return true }
+
+func TestReadLoopStripsANSIEscapeCodes(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&stripANSITestProvider{testProvider: testProvider{id: "ansi-fake"}}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute)
+	defer sup.Close()
+
+	if _, err := sup.Start(context.Background(), SessionConfig{
+		ProjectID:   "proj-ansi",
+		SessionID:   "ansi-1",
+		RepoPath:    t.TempDir(),
+		Options:     map[string]string{"provider": "ansi-fake"},
+		InitialCols: 80,
+		InitialRows: 24,
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	state, err := sup.Attach("ansi-1", "client-ansi", 0)
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+
+	// Write ANSI-wrapped text; /bin/cat echoes it back through the PTY.
+	ansiInput := "\x1b[32mBRIDGE_ANSI_OK\x1b[0m\n"
+	if _, err := sup.WriteInput("ansi-1", "client-ansi", []byte(ansiInput)); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+
+	// Collect chunks until we see the marker or time out.
+	deadline := time.After(3 * time.Second)
+	var received []byte
+outer:
+	for {
+		select {
+		case chunk, ok := <-state.Live:
+			if !ok {
+				break outer
+			}
+			received = append(received, chunk.Payload...)
+			if bytes.Contains(received, []byte("BRIDGE_ANSI_OK")) {
+				break outer
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for echo from ansi-fake provider")
+		}
+	}
+
+	if !bytes.Contains(received, []byte("BRIDGE_ANSI_OK")) {
+		t.Fatalf("marker not found in output: %q", string(received))
+	}
+	// Ensure no raw escape bytes survived stripping.
+	if bytes.Contains(received, []byte("\x1b[")) {
+		t.Fatalf("ANSI escape codes not stripped from output: %q", string(received))
+	}
+
+	_ = sup.Stop("ansi-1", true)
+	waitForStopped(t, sup, "ansi-1")
+}
+
 func waitForStopped(t *testing.T, supervisor *Supervisor, sessionID string) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)

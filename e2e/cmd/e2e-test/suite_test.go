@@ -27,7 +27,7 @@ var (
 	suiteKey     = flag.String("bridge.key", "", "client key path")
 	suiteJWTKey  = flag.String("bridge.jwt-key", "", "JWT signing key path")
 	suiteIssuer  = flag.String("bridge.jwt-issuer", "e2e", "JWT issuer")
-	suiteRepo    = flag.String("bridge.repo", "/tmp/cache-cleaner", "repo path")
+	suiteRepo    = flag.String("bridge.repo", "/tmp/ai-agent-bridge", "repo path")
 	suiteTimeout = flag.Duration("bridge.timeout", 15*time.Minute, "per-scenario timeout")
 )
 
@@ -80,6 +80,65 @@ func (s *BridgeSuite) TestOpencode() {
 
 func (s *BridgeSuite) TestGemini() {
 	s.runProviderScenario(scenarios[2])
+}
+
+// TestEcho validates bridge session lifecycle using the no-auth echo provider (cat).
+// It runs unconditionally and proves the bridge is reachable and sessions work.
+func (s *BridgeSuite) TestEcho() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	sessionID := uuid.NewString()
+	_, err := s.client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId:   "e2e",
+		SessionId:   sessionID,
+		RepoPath:    *suiteRepo,
+		Provider:    "echo",
+		InitialCols: 120,
+		InitialRows: 40,
+	})
+	s.Require().NoError(err, "start echo session")
+
+	stream, err := s.client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
+		SessionId: sessionID,
+		ClientId:  uuid.NewString(),
+	})
+	s.Require().NoError(err, "attach echo session")
+
+	var log transcript
+	done := make(chan error, 1)
+	go func() {
+		done <- stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {
+			if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT {
+				log.append(ev.Payload)
+			}
+			if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR {
+				return errors.New(ev.Error)
+			}
+			return nil
+		})
+	}()
+
+	marker := "ECHO_BRIDGE_OK"
+	_, err = s.client.WriteInput(ctx, &bridgev1.WriteInputRequest{
+		SessionId: sessionID,
+		ClientId:  stream.ClientID(),
+		Data:      []byte(marker + "\n"),
+	})
+	s.Require().NoError(err, "write echo input")
+
+	err = waitForLiteral(&log, marker, 10*time.Second)
+	s.Require().NoError(err, "echo marker not received")
+
+	_, _ = s.client.StopSession(context.Background(), &bridgev1.StopSessionRequest{
+		SessionId: sessionID,
+		Force:     true,
+	})
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
 }
 
 func (s *BridgeSuite) runProviderScenario(scenario providerScenario) {

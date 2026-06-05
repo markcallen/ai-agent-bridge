@@ -99,24 +99,63 @@ It also verifies config-driven provider fallback by requesting a deliberately un
 
 ### Ubuntu Package Install
 
-Install from the hosted apt repository on supported Ubuntu releases:
+Supported releases: Ubuntu **24.04 (noble)** and **25.04 (plucky)** on `amd64`.
+
+**Quick install:**
 
 ```bash
 curl -fsSL https://markcallen.github.io/ai-agent-bridge/install.sh | sudo bash
 sudo systemctl enable --now ai-agent-bridge
 ```
 
-Manual apt setup is also supported:
+**Manual apt setup (noble example):**
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc \
   | sudo gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt noble main" \
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] \
+  https://markcallen.github.io/ai-agent-bridge/apt noble main" \
   | sudo tee /etc/apt/sources.list.d/ai-agent-bridge.list >/dev/null
 sudo apt-get update
 sudo apt-get install -y ai-agent-bridge
 sudo systemctl enable --now ai-agent-bridge
+```
+
+**Supported Ubuntu suites:** `noble` (24.04 LTS) and `plucky` (25.04). Replace `noble` above with `plucky` if you are on Ubuntu 25.04. The repository does not publish a `stable` or `jammy` suite — using any other suite name will result in a "does not have a Release file" error from apt.
+
+**Ansible:** use `ansible_distribution_release` for the suite and `dpkg --print-architecture` for the arch. Do not use `ansible_architecture` — it returns the kernel arch (`x86_64`) rather than the Debian package arch (`amd64`), which causes apt to look for a non-existent `binary-x86_64/Packages` path.
+
+```yaml
+- name: Get Debian architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: dpkg_arch
+  changed_when: false
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download ai-agent-bridge signing key
+  ansible.builtin.get_url:
+    url: https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc
+    dest: /tmp/ai-agent-bridge-keyring.asc
+    mode: '0644'
+
+- name: Dearmor signing key
+  ansible.builtin.command: >
+    gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg /tmp/ai-agent-bridge-keyring.asc
+  args:
+    creates: /etc/apt/keyrings/ai-agent-bridge.gpg
+
+- name: Add ai-agent-bridge apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt {{ ansible_distribution_release }} main"
+    state: present
+    filename: ai-agent-bridge
+  notify: Update apt cache
 ```
 
 The packaged service installs a minimal config at `/etc/ai-agent-bridge/bridge.yaml` and listens on `127.0.0.1:9445` by default. It does not bundle provider CLIs or API keys. For production use you must install the provider CLIs separately, add provider configuration, and decide how the service account should access the target repositories.
@@ -368,11 +407,48 @@ scripts/                       Development helper scripts
 ## Documentation
 
 - [docs/service.md](docs/service.md) — Architecture, configuration reference, security
+- [docs/install-ubuntu.md](docs/install-ubuntu.md) — apt repository installation and package details
+- [docs/ai-desktops.md](docs/ai-desktops.md) — ai-desktops agent-host provisioning guide
 - [docs/go-sdk.md](docs/go-sdk.md) — Go SDK reference
 - [docs/node-sdk.md](docs/node-sdk.md) — Node.js SDK and React hook reference
 - [docs/grpc-api.md](docs/grpc-api.md) — Full gRPC API reference
 - [docs/go-websocket-integration.md](docs/go-websocket-integration.md) — Go HTTP WebSocket integration guide
 - [packages/bridge-client-node/README.md](packages/bridge-client-node/README.md) — Node.js client deep dive
+
+---
+
+## Publishing a Release
+
+Releases are triggered via **Actions → Publish → Run workflow** with a `patch`, `minor`, or `major` input. The workflow bumps the version, creates a Git tag, builds the container image, builds and signs `.deb` packages, and publishes the apt repository to GitHub Pages.
+
+### Required GitHub repository secrets
+
+| Secret | Description |
+|--------|-------------|
+| `APT_REPO_GPG_PRIVATE_KEY_B64` | Base64-encoded GPG private key used to sign the apt repository |
+| `APT_REPO_GPG_PASSPHRASE` | Passphrase for the GPG key (omit if the key has no passphrase) |
+| `AWS_SMOKE_ROLE_ARN` | (optional) IAM role ARN for the EC2 smoke test; skipped if not set |
+| `SMOKE_AWS_REGION` | (optional) AWS region for the EC2 smoke test |
+
+#### Generating the apt signing key
+
+```bash
+# Generate a dedicated signing key (no passphrase)
+gpg --batch --gen-key <<'EOF'
+Key-Type: RSA
+Key-Length: 4096
+Name-Real: AI Agent Bridge APT Signing
+Name-Email: apt-signing@markcallen.com
+Expire-Date: 0
+%no-protection
+%commit
+EOF
+
+# Export and base64-encode the private key
+gpg --export-secret-keys --armor apt-signing@markcallen.com | base64 -w 0
+```
+
+Add the base64 output as `APT_REPO_GPG_PRIVATE_KEY_B64` in **Settings → Secrets and variables → Actions**. The public key is exported automatically into the apt repository at publish time as `ai-agent-bridge-archive-keyring.asc`.
 
 ---
 
