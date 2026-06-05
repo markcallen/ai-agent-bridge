@@ -25,6 +25,21 @@ builds:
       - amd64
       - arm64
 
+  - id: bridgectl
+    binary: bridgectl
+    main: ./cmd/bridgectl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
 dockers:
   - id: bridge-amd64
     goos: linux

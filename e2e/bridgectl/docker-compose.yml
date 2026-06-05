@@ -1,0 +1,7 @@
+services:
+  cli-e2e:
+    build:
+      context: ../..
+      dockerfile: e2e/bridgectl/Dockerfile
+    environment:
+      - CGO_ENABLED=1
