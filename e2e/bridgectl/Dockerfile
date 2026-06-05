@@ -10,7 +10,7 @@ RUN go mod download
 COPY . .
 
 # Pre-build the binary to warm the Go build cache (TestMain rebuilds it).
-RUN go build -o /usr/local/bin/ai-agent-bridge-cli ./cmd/ai-agent-bridge-cli
+RUN go build -o /usr/local/bin/bridgectl ./cmd/bridgectl
 
 # Run the e2e test suite.
-CMD ["go", "test", "-v", "-count=1", "-race", "-timeout", "120s", "./e2e/ai-agent-bridge-cli/"]
+CMD ["go", "test", "-v", "-count=1", "-race", "-timeout", "120s", "./e2e/bridgectl/"]

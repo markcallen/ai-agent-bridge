@@ -3,7 +3,7 @@
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/ai-agent-bridge
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
-BRIDGE_CLI := $(BIN_DIR)/ai-agent-bridge-cli
+BRIDGE_CLI := $(BIN_DIR)/bridgectl
 CONFIG ?= config/bridge.yaml
 DEV_CONFIG ?= config/bridge-dev.yaml
 CHAT_TARGET ?= bridge.local:9445
@@ -15,11 +15,11 @@ build: proto
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BRIDGE) ./cmd/bridge
 	go build -o $(BRIDGE_CA) ./cmd/bridge-ca
-	go build -o $(BRIDGE_CLI) ./cmd/ai-agent-bridge-cli
+	go build -o $(BRIDGE_CLI) ./cmd/bridgectl
 
 build-cli:
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BRIDGE_CLI) ./cmd/ai-agent-bridge-cli
+	go build -o $(BRIDGE_CLI) ./cmd/bridgectl
 
 proto:
 	protoc \
@@ -189,7 +189,7 @@ chat-web-docker-start:
 	docker compose up --build chat-web
 
 test-cli-e2e:
-	go test -v -count=1 -race -timeout 120s ./e2e/ai-agent-bridge-cli/
+	go test -v -count=1 -race -timeout 120s ./e2e/bridgectl/
 
 test-cli-e2e-docker:
 	./scripts/test-cli-e2e-docker.sh

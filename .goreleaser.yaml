@@ -25,9 +25,9 @@ builds:
       - amd64
       - arm64
 
-  - id: ai-agent-bridge-cli
-    binary: ai-agent-bridge-cli
-    main: ./cmd/ai-agent-bridge-cli
+  - id: bridgectl
+    binary: bridgectl
+    main: ./cmd/bridgectl
     env:
       - CGO_ENABLED=0
     goos:

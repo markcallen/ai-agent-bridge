@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run the ai-agent-bridge-cli e2e tests inside a Linux Docker container.
+# Run the bridgectl e2e tests inside a Linux Docker container.
 # Usage: ./scripts/test-cli-e2e-docker.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "=== Building and running ai-agent-bridge-cli e2e tests in Docker ==="
+echo "=== Building and running bridgectl e2e tests in Docker ==="
 
 set +e
-docker compose -f "$ROOT_DIR/e2e/ai-agent-bridge-cli/docker-compose.yml" up \
+docker compose -f "$ROOT_DIR/e2e/bridgectl/docker-compose.yml" up \
     --build \
     --abort-on-container-exit \
     --exit-code-from cli-e2e
 rc=$?
-docker compose -f "$ROOT_DIR/e2e/ai-agent-bridge-cli/docker-compose.yml" down -v
+docker compose -f "$ROOT_DIR/e2e/bridgectl/docker-compose.yml" down -v
 set -e
 
 if [ $rc -eq 0 ]; then

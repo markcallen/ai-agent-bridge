@@ -21,28 +21,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// cliBinary holds the path to the compiled ai-agent-bridge-cli binary.
+// cliBinary holds the path to the compiled bridgectl binary.
 // It is built once per test run via TestMain.
 var cliBinary string
 
 func TestMain(m *testing.M) {
-	// Build the ai-agent-bridge-cli binary into a temp dir.
+	// Build the bridgectl binary into a temp dir.
 	dir, err := os.MkdirTemp("", "cli-e2e-*")
 	if err != nil {
 		panic(err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	bin := filepath.Join(dir, "ai-agent-bridge-cli")
+	bin := filepath.Join(dir, "bridgectl")
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
 
-	cmd := exec.Command("go", "build", "-o", bin, "../../cmd/ai-agent-bridge-cli")
+	cmd := exec.Command("go", "build", "-o", bin, "../../cmd/bridgectl")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		panic("failed to build ai-agent-bridge-cli binary: " + err.Error())
+		panic("failed to build bridgectl binary: " + err.Error())
 	}
 	cliBinary = bin
 
@@ -308,7 +308,7 @@ func TestServerDoesNotDoubleStart(t *testing.T) {
 	assert.Equal(t, srv1.Target(), target)
 }
 
-// TestCLIVersion tests that `ai-agent-bridge-cli --version` works.
+// TestCLIVersion tests that `bridgectl --version` works.
 func TestCLIVersion(t *testing.T) {
 	cmd := exec.Command(cliBinary, "--version")
 	var out bytes.Buffer
@@ -316,10 +316,10 @@ func TestCLIVersion(t *testing.T) {
 	cmd.Stderr = &out
 	err := cmd.Run()
 	require.NoError(t, err, "--version should succeed")
-	assert.Contains(t, out.String(), "ai-agent-bridge-cli version")
+	assert.Contains(t, out.String(), "bridgectl version")
 }
 
-// TestCLIHelp tests that `ai-agent-bridge-cli --help` exits cleanly.
+// TestCLIHelp tests that `bridgectl --help` exits cleanly.
 func TestCLIHelp(t *testing.T) {
 	cmd := exec.Command(cliBinary, "--help")
 	var out bytes.Buffer
@@ -327,7 +327,7 @@ func TestCLIHelp(t *testing.T) {
 	cmd.Stderr = &out
 	err := cmd.Run()
 	require.NoError(t, err, "--help should succeed")
-	assert.Contains(t, out.String(), "ai-agent-bridge-cli starts a local bridge server")
+	assert.Contains(t, out.String(), "bridgectl starts a local bridge server")
 }
 
 // TestCLISessionListNoServer tests that `session list` handles no server gracefully.

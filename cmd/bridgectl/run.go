@@ -42,7 +42,7 @@ session with the specified provider, and attach your terminal.
 If another instance is already running, the existing server is reused.
 
 Press ctrl-] to detach from the session without stopping it.
-Use 'ai-agent-bridge-cli session attach <id>' to reattach later.`,
+Use 'bridgectl session attach <id>' to reattach later.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "."
@@ -210,7 +210,7 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 
 	if detached.Load() {
 		fmt.Fprintf(os.Stderr, "\r\nDetached from session %s\r\n", sessionID)
-		fmt.Fprintf(os.Stderr, "Reattach with: ai-agent-bridge-cli session attach %s\r\n", sessionID)
+		fmt.Fprintf(os.Stderr, "Reattach with: bridgectl session attach %s\r\n", sessionID)
 	} else if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\nsession ended: %v\r\n", err)
 	}
@@ -218,7 +218,7 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 }
 
 // ensureServer ensures a bridge server is running. If none is found, it spawns
-// "ai-agent-bridge-cli server start" as a background process in local mode and
+// "bridgectl server start" as a background process in local mode and
 // waits for it to become healthy. For secure mode, the user must start the
 // server explicitly with --listen.
 func ensureServer() error {

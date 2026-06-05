@@ -11,9 +11,9 @@ var version = "dev"
 
 func main() {
 	root := &cobra.Command{
-		Use:   "ai-agent-bridge-cli",
+		Use:   "bridgectl",
 		Short: "AI Agent Bridge — run AI agents locally",
-		Long: `ai-agent-bridge-cli starts a local bridge server and spawns AI agent sessions
+		Long: `bridgectl starts a local bridge server and spawns AI agent sessions
 in your terminal. The server auto-starts on first use and is shared
 across terminal windows.`,
 		SilenceUsage:  true,

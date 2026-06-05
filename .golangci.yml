@@ -17,4 +17,5 @@ linters:
     - unused
   exclusions:
     paths:
+      - gen
       - node_modules
