@@ -1,13 +1,12 @@
-# bridge-ai-desktops.yaml — ai-desktops agent-host configuration profile.
+# bridge-example.yaml — example ai-agent-bridge configuration profile.
 #
-# Copy this file to /etc/ai-agent-bridge/bridge.yaml on an ai-desktops host,
-# uncomment the providers you want to enable, and supply credentials via
+# Copy this file to /etc/ai-agent-bridge/bridge.yaml, uncomment the providers
+# you want to enable, and supply credentials via
 # /etc/ai-agent-bridge/agents.env (root:root 0600).
 #
 # This profile:
 #   - binds to 127.0.0.1:9445 (localhost only)
 #   - enables persistence under /var/lib/ai-agent-bridge
-#   - permits /workspace for repository access
 #   - resolves provider CLIs from /opt/ai-agent-bridge (the provider runtime root)
 #   - keeps TLS and JWT disabled (localhost-only — add mTLS+JWT for remote access)
 #
@@ -107,7 +106,6 @@ allowed_paths:
   - "/srv"
   - "/tmp"
   - "/var/tmp"
-  - "/workspace"
 
 logging:
   level: "info"
