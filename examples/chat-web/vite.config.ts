@@ -15,6 +15,7 @@ const serverTarget = process.env.VITE_SERVER_TARGET ?? "http://localhost:3000";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
+    dedupe: ["react", "react-dom"],
     alias: [
       { find: "@ai-agent-bridge/client-node/react", replacement: pkg("react/index.ts") },
       { find: "@ai-agent-bridge/client-node",       replacement: pkg("src/index.ts") },
