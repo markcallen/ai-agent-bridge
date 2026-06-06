@@ -36,16 +36,16 @@ rate_limits:
 
 providers:
   claude:
-    binary: "node"
-    args: ["./node_modules/@anthropic-ai/claude-code/cli.js", "--verbose"]
+    binary: "./node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+    args: ["--verbose"]
     startup_timeout: "60s"
     startup_probe: "prompt"
     required_env: ["ANTHROPIC_API_KEY"]
     fallbacks: ["codex"]
     prompt_pattern: "(?m)(❯|>\\s*$)"
   opencode:
-    binary: "node"
-    args: ["./node_modules/opencode-ai/bin/opencode"]
+    binary: "./node_modules/opencode-ai/bin/opencode.exe"
+    args: []
     startup_timeout: "45s"
     startup_probe: "output"
     required_env: ["OPENAI_API_KEY"]
@@ -60,7 +60,7 @@ providers:
     prompt_pattern: "(?m)(>\\s*$|›)"
   gemini:
     binary: "node"
-    args: ["./node_modules/@google/gemini-cli/dist/index.js"]
+    args: ["./node_modules/@google/gemini-cli/bundle/gemini.js"]
     startup_timeout: "60s"
     startup_probe: "output"
     required_env: ["GEMINI_API_KEY"]
