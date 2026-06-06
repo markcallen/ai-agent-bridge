@@ -35,7 +35,7 @@ run_test "system addr file exists and is non-empty" test_addr_file_exists
 test_server_status_running() {
   output=$(bridgectl server status 2>&1)
   echo "$output"
-  echo "$output" | grep -q "running"
+  echo "$output" | grep -q "Server: running"
 }
 
 run_test "server status: shows running" test_server_status_running

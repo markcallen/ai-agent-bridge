@@ -279,16 +279,25 @@ const systemAddrFile = "/run/ai-agent-bridge/server.addr"
 func writeSystemAddrFile(addr string, logger *slog.Logger) {
 	// Replace wildcard bind address with loopback so remote clients can connect.
 	if host, port, err := net.SplitHostPort(addr); err == nil {
-		if host == "0.0.0.0" || host == "::" {
+		switch host {
+		case "0.0.0.0":
 			addr = "127.0.0.1:" + port
+		case "::":
+			addr = "[::1]:" + port
 		}
 	}
 	if err := os.MkdirAll("/run/ai-agent-bridge", 0o755); err != nil {
 		logger.Warn("create system addr dir", "error", err)
 		return
 	}
-	if err := os.WriteFile(systemAddrFile, []byte(addr), 0o644); err != nil {
+	tmp := systemAddrFile + ".tmp"
+	if err := os.WriteFile(tmp, []byte(addr), 0o644); err != nil {
 		logger.Warn("write system addr file", "path", systemAddrFile, "error", err)
+		return
+	}
+	if err := os.Rename(tmp, systemAddrFile); err != nil {
+		logger.Warn("publish system addr file", "path", systemAddrFile, "error", err)
+		_ = os.Remove(tmp)
 	}
 }
 

@@ -552,19 +552,24 @@ func discoverTarget(stateDir string) string {
 		}
 	}
 
-	// Local mode: try unix socket first.
+	// Local mode: try unix socket first, but only if the server is healthy.
 	sockPath := filepath.Join(stateDir, "server.sock")
 	if _, err := os.Stat(sockPath); err == nil {
-		return "unix://" + sockPath
+		target := "unix://" + sockPath
+		if probeHealth(target, mode, stateDir) {
+			return target
+		}
 	}
-	// Fall back to TCP address file (Windows local mode).
+	// Fall back to TCP address file (Windows local mode), probing for health.
 	addrData, err := os.ReadFile(filepath.Join(stateDir, "server.addr"))
 	if err == nil {
 		if addr := strings.TrimSpace(string(addrData)); addr != "" {
 			if strings.HasPrefix(addr, "/") {
-				return "unix://" + addr
+				addr = "unix://" + addr
 			}
-			return addr
+			if probeHealth(addr, mode, stateDir) {
+				return addr
+			}
 		}
 	}
 
