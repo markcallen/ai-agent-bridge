@@ -147,13 +147,15 @@ The daemon is a production-grade service designed to run headlessly on a server 
 | Property | Behaviour |
 |---|---|
 | Binary | `cmd/bridge` |
-| Startup validation | Calls `config.ValidateProviderEnv()` and `p.ValidateStartup()` — validates required API keys are present before accepting connections |
-| Credential source | `/etc/ai-agent-bridge/agents.env` injected at service startup (e.g. via systemd drop-in) |
+| Startup validation | Per-provider: providers with all required credentials become available; providers with missing credentials register as unavailable (daemon does not exit) |
+| Credential source | `/etc/ai-agent-bridge/agents.env` injected at service startup (e.g. via systemd drop-in), or inherited environment |
 | Transport security | Required — mTLS + JWT enforced; no plain connections |
 | Intended operator | DevOps / platform engineer provisioning a persistent agent host |
 | Typical use | Production deployments, ai-desktops hosts, headless CI/CD agents, integration target for control-plane services |
 
-**Key assumption**: all required API keys are provisioned before the daemon starts. If a configured provider is missing its credentials, the daemon refuses to start rather than failing later at session time.
+**Provider availability at startup**: the daemon performs per-provider validation at startup. A provider with all required credentials present is registered as available. A provider missing credentials (or whose startup probe fails) is registered as unavailable with a reason — the daemon continues serving and reports the unavailable provider through the `Health` RPC. Credentials can be added to the environment and the daemon restarted to make a previously unavailable provider available.
+
+**Mixed-credential deployments**: a single daemon instance may have some providers fully credentialed and others not yet provisioned. This supports gradual rollout (e.g. start with Claude only, add Codex later) and mixed local/remote use cases where the same host runs both natively configured CLIs and daemon-managed sessions. The `Health` endpoint always reflects the current per-provider state.
 
 **What the daemon manages**: everything the local server manages, plus zero-trust PKI, rate limiting, audit logging, systemd lifecycle, and the expectation of continuous uptime.
 
@@ -164,12 +166,25 @@ The daemon is a production-grade service designed to run headlessly on a server 
                ─────────────────────────         ─────────────────────────
 Operator       Developer                         DevOps / platform team
 Setup          Native CLI auth already done      API keys in agents.env
-Key check      At session launch (by the CLI)    At daemon startup
+Key check      At session launch (by the CLI)    Per-provider at startup; missing
+                                                 keys → unavailable, not fatal
 Transport      Plain gRPC (localhost default)    mTLS + JWT (required)
 Auth           None (localhost only)             Per-project CAs + short-lived JWTs
 Deployment     Foreground process / dev tool     systemd service
 External conn  Not intended                      Primary purpose
+Mixed creds    N/A                               Supported — partial key sets are
+                                                 valid; only credentialed providers
+                                                 accept sessions
 ```
+
+#### Mixed-Mode on a Single Host
+
+Both binaries may run on the same machine. A common pattern is:
+
+- The **local server** (`bridgectl`) serves developer sessions using the developer's own native CLI credentials, bound to localhost.
+- The **daemon** serves production sessions on a different port using credentials provisioned in `agents.env`, secured with mTLS + JWT.
+
+There is no coordination between the two processes; they are independent and manage separate session sets.
 
 ---
 
@@ -467,8 +482,19 @@ Response:
   providers: repeated ProviderHealth
     provider: string
     available: bool
-    error: string
+    error: string        // reason if unavailable: missing credential, binary not found, probe failure, etc.
 ```
+
+Provider availability reflects **both** binary presence **and** credential availability:
+
+| Condition | `available` | `error` |
+|---|---|---|
+| Binary found, all required env vars set | `true` | `""` |
+| Binary found, required env var missing | `false` | `"required env var ANTHROPIC_API_KEY not set"` |
+| Binary not found or not executable | `false` | `"binary not found: claude"` |
+| Startup probe timed out or failed | `false` | `"startup probe failed: ..."` |
+
+The daemon `status` field reflects overall daemon health, not aggregate provider health. A daemon with zero available providers still returns `"serving"` — callers must inspect per-provider entries to determine which providers can accept sessions.
 
 ---
 
