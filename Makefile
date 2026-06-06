@@ -195,7 +195,7 @@ test-cli-e2e-docker:
 	./scripts/test-cli-e2e-docker.sh
 
 test-system-daemon-e2e:
-	docker compose -f e2e/system-daemon/docker-compose.yml up --build --abort-on-container-exit --exit-code-from bridgectl-test; \
+	./scripts/with_env_secrets.sh docker compose -f e2e/system-daemon/docker-compose.yml up --build --abort-on-container-exit --exit-code-from bridgectl-test; \
 	status=$$?; \
 	docker compose -f e2e/system-daemon/docker-compose.yml down -v; \
 	exit $$status

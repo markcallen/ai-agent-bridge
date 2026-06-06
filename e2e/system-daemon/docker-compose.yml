@@ -3,7 +3,8 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    command: ["/app/ai-agent-bridge", "--config", "/etc/bridge-system.yaml"]
+    environment:
+      BRIDGE_CONFIG: /etc/bridge-system.yaml
     volumes:
       - ./bridge-system.yaml:/etc/bridge-system.yaml:ro
       - run-dir:/run/ai-agent-bridge
