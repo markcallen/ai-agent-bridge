@@ -280,6 +280,7 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 	client.SetProject(project)
 
 	sessionID := uuid.NewString()
+	clientID := uuid.NewString()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -296,15 +297,26 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 
 	stream, err := client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
 		SessionId: sessionID,
-		ClientId:  uuid.NewString(),
+		ClientId:  clientID,
 		AfterSeq:  0,
 	})
 	if err != nil {
 		return fmt.Errorf("attach session: %w", err)
 	}
 
-	// Forward stdin to session; close session when stdin reaches EOF.
+	// attached is closed when the server confirms the session is live and
+	// ready to route WriteInput calls (ms.attachedClient is set server-side
+	// before the ATTACHED event is sent).
+	attached := make(chan struct{})
+	var attachOnce sync.Once
+
+	// Forward stdin to session once attached; stop session on EOF.
 	go func() {
+		select {
+		case <-attached:
+		case <-ctx.Done():
+			return
+		}
 		buf := make([]byte, 4096)
 		for {
 			n, readErr := os.Stdin.Read(buf)
@@ -329,6 +341,10 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 	}()
 
 	err = stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {
+		if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED {
+			attachOnce.Do(func() { close(attached) })
+			return nil
+		}
 		switch ev.Type {
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
 			_, writeErr := os.Stdout.Write(ev.Payload)
