@@ -60,7 +60,9 @@ run_test "server status: shows Providers field" test_server_status_providers
 # bridgectl run --no-tty with echo provider round-trips input
 # ---------------------------------------------------------------------------
 test_echo_round_trip() {
-  output=$(echo "PING_FROM_E2E_TEST" | timeout 15 bridgectl run --provider echo --no-tty /tmp 2>&1)
+  # Keep stdin open for 2s after sending the message so the echo has time
+  # to travel back before bridgectl sees EOF and stops the session.
+  output=$( (printf "PING_FROM_E2E_TEST\n"; sleep 2) | timeout 15 bridgectl run --provider echo --no-tty /tmp 2>&1)
   echo "$output"
   echo "$output" | grep -q "PING_FROM_E2E_TEST"
 }
