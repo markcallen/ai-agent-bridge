@@ -405,7 +405,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: env.AWS_SMOKE_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.AWS_SMOKE_ROLE_ARN }}
           aws-region: ${{ secrets.SMOKE_AWS_REGION }}
