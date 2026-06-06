@@ -248,6 +248,11 @@ func (p *StdioProvider) Health(ctx context.Context) error {
 	if info.Mode()&0o111 == 0 {
 		return fmt.Errorf("binary %q is not executable", path)
 	}
+	for _, envName := range p.cfg.RequiredEnv {
+		if strings.TrimSpace(os.Getenv(envName)) == "" {
+			return fmt.Errorf("required env var %s not set", envName)
+		}
+	}
 	return nil
 }
 

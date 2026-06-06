@@ -46,10 +46,6 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if err := config.ValidateProviderEnv(cfg); err != nil {
-		bootstrapLogger.Error("provider environment validation failed", "error", err)
-		os.Exit(1)
-	}
 	redactor, err := redact.New(cfg.Logging.RedactPatterns)
 	if err != nil {
 		bootstrapLogger.Error("failed to compile redact patterns", "error", err)
@@ -105,8 +101,8 @@ func main() {
 			err = p.ValidateStartup(checkCtx)
 			cancel()
 			if err != nil {
-				logger.Error("provider startup validation failed", "provider", name, "error", err)
-				os.Exit(1)
+				logger.Warn("provider unavailable at startup", "provider", name, "error", err)
+				continue
 			}
 			logger.Info("provider startup validation passed", "provider", name)
 		}
