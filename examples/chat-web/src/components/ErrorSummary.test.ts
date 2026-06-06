@@ -15,13 +15,13 @@ describe("collectErrorMessages", () => {
       type: "health_response",
       status: "degraded",
       providers: [
-        { provider: "claude", available: false, error: "missing ANTHROPIC_AUTH_TOKEN" },
+        { provider: "claude", available: false, error: "missing CLAUDE_CODE_OAUTH_TOKEN" },
         { provider: "codex", available: true, error: "" },
       ],
     };
 
     expect(collectErrorMessages(null, health)).toEqual([
-      "claude: missing ANTHROPIC_AUTH_TOKEN",
+      "claude: missing CLAUDE_CODE_OAUTH_TOKEN",
     ]);
   });
 

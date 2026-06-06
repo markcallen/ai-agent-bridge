@@ -11,7 +11,7 @@ func NewClaudeProvider() *StdioProvider {
 		StartupTimeout: 60 * time.Second,
 		StopGrace:      10 * time.Second,
 		StartupProbe:   "prompt",
-		RequiredEnv:    []string{"ANTHROPIC_AUTH_TOKEN"},
+		RequiredEnv:    []string{"CLAUDE_CODE_OAUTH_TOKEN"},
 		PromptPattern:  `(?m)(❯|\>\s*$)`,
 	})
 }

@@ -30,7 +30,7 @@ type providerScenario struct {
 var scenarios = []providerScenario{
 	{
 		name:          "claude",
-		requiredEnv:   "ANTHROPIC_AUTH_TOKEN",
+		requiredEnv:   "CLAUDE_CODE_OAUTH_TOKEN",
 		promptRe:      regexp.MustCompile(`(?m)(❯|>\s*$)`),
 		startTimeout:  90 * time.Second,
 		turnTimeout:   180 * time.Second,

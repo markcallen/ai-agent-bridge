@@ -41,7 +41,7 @@ providers:
     startup_timeout: "60s"
     validate_startup: false
     startup_probe: "prompt"
-    required_env: ["ANTHROPIC_AUTH_TOKEN"]
+    required_env: ["CLAUDE_CODE_OAUTH_TOKEN"]
     fallbacks: ["codex"]
     prompt_pattern: "(?m)(❯|>\\s*$)"
   opencode:

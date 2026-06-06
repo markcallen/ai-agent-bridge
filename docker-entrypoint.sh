@@ -48,10 +48,10 @@ chown -R bridge:bridge "$RUNTIME_CERT_DIR"
 chmod 644 "$RUNTIME_CERT_DIR"/*.crt "$RUNTIME_CERT_DIR"/*.pub
 chmod 600 "$RUNTIME_CERT_DIR"/*.key
 
-if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   echo "==> Verifying Claude API-key auth..."
   CLAUDE_AUTH_STATUS="$(su -m -s /bin/bash bridge -c 'cd /app && export HOME=/home/bridge && ./node_modules/.bin/claude auth status' || true)"
-  if [[ "$CLAUDE_AUTH_STATUS" != *'"loggedIn": true'* ]] || [[ "$CLAUDE_AUTH_STATUS" != *'"apiKeySource": "ANTHROPIC_AUTH_TOKEN"'* ]]; then
+  if [[ "$CLAUDE_AUTH_STATUS" != *'"loggedIn": true'* ]] || [[ "$CLAUDE_AUTH_STATUS" != *'"apiKeySource": "CLAUDE_CODE_OAUTH_TOKEN"'* ]]; then
     echo "Claude auth verification failed"
     echo "$CLAUDE_AUTH_STATUS"
     exit 1
@@ -86,9 +86,9 @@ for (const p of trustedPaths) {
   state.projects[p].projectOnboardingSeenCount = 1;
 }
 
-// Pre-approve the ANTHROPIC_AUTH_TOKEN so the "use this API key?" dialog is suppressed.
+// Pre-approve the CLAUDE_CODE_OAUTH_TOKEN so the "use this API key?" dialog is suppressed.
 // Claude stores the last 20 chars of the key as the approval token.
-const apiKey = process.env.ANTHROPIC_AUTH_TOKEN || "";
+const apiKey = process.env.CLAUDE_CODE_OAUTH_TOKEN || "";
 if (apiKey) {
   const keyToken = apiKey.slice(-20);
   state.customApiKeyResponses = state.customApiKeyResponses || {};

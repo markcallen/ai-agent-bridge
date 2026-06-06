@@ -18,7 +18,7 @@ If you have not created the AWS secret yet:
 
 ```bash
 cat > /tmp/ai-agent-bridge.secrets.env <<'EOF'
-ANTHROPIC_AUTH_TOKEN=
+CLAUDE_CODE_OAUTH_TOKEN=
 OPENAI_API_KEY=
 GEMINI_API_KEY=
 EOF
@@ -140,7 +140,7 @@ All three examples talk to the same bridge API. The provider changes per session
 
 ## Notes
 
-- `claude` requires `ANTHROPIC_AUTH_TOKEN`.
+- `claude` requires `CLAUDE_CODE_OAUTH_TOKEN`.
 - `codex` requires `OPENAI_API_KEY`.
 - `gemini` requires `GEMINI_API_KEY`.
 - The bridge reports provider availability through health and provider-list APIs, so the web UI can show whether a provider is ready before you start a session.

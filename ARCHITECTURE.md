@@ -413,14 +413,14 @@ providers:
     binary: "node"
     args: ["./node_modules/@anthropic-ai/claude-code/cli.js", "--verbose"]
     startup_timeout: "30s"
-    required_env: ["ANTHROPIC_AUTH_TOKEN"]
+    required_env: ["CLAUDE_CODE_OAUTH_TOKEN"]
   claude-chat:
     binary: "node"
     args: ["./node_modules/@anthropic-ai/claude-code/cli.js",
            "--dangerously-skip-permissions", "--verbose",
            "--output-format", "stream-json", "--input-format", "stream-json"]
     startup_timeout: "30s"
-    required_env: ["ANTHROPIC_AUTH_TOKEN"]
+    required_env: ["CLAUDE_CODE_OAUTH_TOKEN"]
     stream_json: true               # Parse Claude Code NDJSON protocol
   opencode:
     binary: "opencode"
