@@ -19,7 +19,7 @@ services:
   bridgectl-test:
     build:
       context: ../..
-      dockerfile: e2e/system-daemon/Dockerfile.test
+      dockerfile: e2e/system-daemon/Dockerfile.bridgectl
     network_mode: "service:bridge"
     depends_on:
       bridge:
