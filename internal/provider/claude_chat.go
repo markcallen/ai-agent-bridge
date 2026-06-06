@@ -14,7 +14,7 @@ func NewClaudeChatProvider() *StdioProvider {
 		StartupTimeout: 60 * time.Second,
 		StopGrace:      10 * time.Second,
 		StartupProbe:   "none",
-		RequiredEnv:    []string{"ANTHROPIC_API_KEY"},
+		RequiredEnv:    []string{"ANTHROPIC_AUTH_TOKEN"},
 		StreamJSON:     true,
 	})
 }

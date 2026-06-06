@@ -650,7 +650,7 @@ func knownProviders() []providerDef {
 			StartupTimeout: 60 * time.Second,
 			StartupProbe:   "prompt",
 			PromptPattern:  `(?m)(❯|>\s*$)`,
-			RequiredEnv:    []string{"ANTHROPIC_API_KEY"},
+			RequiredEnv:    []string{"ANTHROPIC_AUTH_TOKEN"},
 		},
 		{
 			ID:             "codex",

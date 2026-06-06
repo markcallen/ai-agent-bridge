@@ -8,7 +8,7 @@ services:
       BRIDGE_CN: bridge.local
       BRIDGE_SANS: bridge.local,localhost,127.0.0.1
       BRIDGE_CLIENT_CN: dev-client
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
     ports:

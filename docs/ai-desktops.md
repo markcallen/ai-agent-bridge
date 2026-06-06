@@ -127,7 +127,7 @@ Add required API key variables for the providers you enabled:
 
 ```bash
 # For Claude Code:
-echo "ANTHROPIC_API_KEY=sk-ant-..." | sudo tee -a /etc/ai-agent-bridge/agents.env >/dev/null
+echo "ANTHROPIC_AUTH_TOKEN=sk-ant-..." | sudo tee -a /etc/ai-agent-bridge/agents.env >/dev/null
 
 # For Codex:
 echo "OPENAI_API_KEY=sk-..." | sudo tee -a /etc/ai-agent-bridge/agents.env >/dev/null
@@ -192,11 +192,11 @@ providers:
     args: ["/opt/ai-agent-bridge/node_modules/@anthropic-ai/claude-code/cli.js"]
     startup_timeout: "60s"
     startup_probe: "output"
-    required_env: ["ANTHROPIC_API_KEY"]
+    required_env: ["ANTHROPIC_AUTH_TOKEN"]
     prompt_pattern: '(?m)(❯|>\s*$)'
 ```
 
-Requires `ANTHROPIC_API_KEY` in `/etc/ai-agent-bridge/agents.env`.
+Requires `ANTHROPIC_AUTH_TOKEN` in `/etc/ai-agent-bridge/agents.env`.
 
 ### Codex
 
@@ -226,7 +226,7 @@ providers:
     startup_probe: "output"
 ```
 
-Requires `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` (depending on which model is configured in OpenCode).
+Requires `OPENAI_API_KEY` or `ANTHROPIC_AUTH_TOKEN` (depending on which model is configured in OpenCode).
 
 ### Gemini CLI
 
@@ -313,7 +313,7 @@ ai-desktops bridge doctor
 [OK]   Node.js: v24.2.0
 [OK]   Provider runtime: /opt/ai-agent-bridge (node_modules present)
 [OK]   Configured providers: claude
-       ANTHROPIC_API_KEY: set
+       ANTHROPIC_AUTH_TOKEN: set
 [OK]   Credentials: all required variables present
 [OK]   /workspace: listed in bridge allowed_paths
 [OK]   systemd drop-in: /etc/systemd/system/ai-agent-bridge.service.d/ai-desktops.conf (ReadWritePaths includes /workspace)

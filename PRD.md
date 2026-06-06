@@ -340,9 +340,9 @@ The bridge must support a first-class deployment profile for the **ai-desktops**
 
 | Provider | Invocation | Required Credential |
 |---|---|---|
-| Claude Code | `/usr/bin/node ... @anthropic-ai/claude-code/cli.js` | `ANTHROPIC_API_KEY` |
+| Claude Code | `/usr/bin/node ... @anthropic-ai/claude-code/cli.js` | `ANTHROPIC_AUTH_TOKEN` |
 | Codex | `/usr/bin/node ... @openai/codex/bin/codex.js` | `OPENAI_API_KEY` |
-| OpenCode | `/opt/ai-agent-bridge/node_modules/.bin/opencode` (native binary) | `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` |
+| OpenCode | `/opt/ai-agent-bridge/node_modules/.bin/opencode` (native binary) | `OPENAI_API_KEY` or `ANTHROPIC_AUTH_TOKEN` |
 | Gemini CLI | `/usr/bin/node ... @google/gemini-cli/dist/index.js` | `GOOGLE_API_KEY` |
 
 ### Acceptance Criteria
@@ -490,7 +490,7 @@ Provider availability reflects **both** binary presence **and** credential avail
 | Condition | `available` | `error` |
 |---|---|---|
 | Binary found, all required env vars set | `true` | `""` |
-| Binary found, required env var missing | `false` | `"required env var ANTHROPIC_API_KEY not set"` |
+| Binary found, required env var missing | `false` | `"required env var ANTHROPIC_AUTH_TOKEN not set"` |
 | Binary not found or not executable | `false` | `"binary not found: claude"` |
 | Startup probe timed out or failed | `false` | `"startup probe failed: ..."` |
 

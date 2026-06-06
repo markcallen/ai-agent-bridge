@@ -87,7 +87,7 @@ docker run \
   -p 9445:9445 \
   -v ./certs:/app/certs:ro \
   -v ~/repos:/repos \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e ANTHROPIC_AUTH_TOKEN=sk-ant-... \
   ghcr.io/markcallen/ai-agent-bridge
 ```
 
@@ -142,7 +142,7 @@ providers:
     args:            ["./node_modules/@anthropic-ai/claude-code/cli.js", "--verbose"]
     startup_timeout: "60s"
     startup_probe:   output
-    required_env:    ["ANTHROPIC_API_KEY"]
+    required_env:    ["ANTHROPIC_AUTH_TOKEN"]
     fallbacks:       ["codex"]
     prompt_pattern:  '(?m)(❯|>\s*$)'
 

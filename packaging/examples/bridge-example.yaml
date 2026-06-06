@@ -73,17 +73,17 @@ providers:
 #     required_env: ["OPENAI_API_KEY"]
 #     prompt_pattern: '(?m)(>\s*$|›)'
 
-# Uncomment to enable Claude Code (requires ANTHROPIC_API_KEY in agents.env):
+# Uncomment to enable Claude Code (requires ANTHROPIC_AUTH_TOKEN in agents.env):
 #
 #   claude:
 #     binary: "/usr/bin/node"
 #     args: ["/opt/ai-agent-bridge/node_modules/@anthropic-ai/claude-code/cli.js"]
 #     startup_timeout: "60s"
 #     startup_probe: "output"
-#     required_env: ["ANTHROPIC_API_KEY"]
+#     required_env: ["ANTHROPIC_AUTH_TOKEN"]
 #     prompt_pattern: '(?m)(❯|>\s*$)'
 
-# Uncomment to enable OpenCode (requires OPENAI_API_KEY or ANTHROPIC_API_KEY):
+# Uncomment to enable OpenCode (requires OPENAI_API_KEY or ANTHROPIC_AUTH_TOKEN):
 # OpenCode ships as a native binary installed via npm — no Node.js invocation needed.
 #
 #   opencode:

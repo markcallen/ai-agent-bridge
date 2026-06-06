@@ -52,7 +52,7 @@ Set up `env-secrets` once for this repo. `env-secrets` in this environment uses 
 cp .env.example .env
 $EDITOR .env
 cat > /tmp/ai-agent-bridge.secrets.env <<'EOF'
-ANTHROPIC_API_KEY=
+ANTHROPIC_AUTH_TOKEN=
 OPENAI_API_KEY=
 GEMINI_API_KEY=
 EOF
@@ -332,7 +332,7 @@ Full documentation index: [docs/README.md](docs/README.md)
 
 | Provider | Binary | Required env |
 |----------|--------|--------------|
-| `claude` | `./node_modules/.bin/claude` | `ANTHROPIC_API_KEY` |
+| `claude` | `./node_modules/.bin/claude` | `ANTHROPIC_AUTH_TOKEN` |
 | `opencode` | `./node_modules/.bin/opencode` | `OPENAI_API_KEY` |
 | `codex` | `./node_modules/.bin/codex` | `OPENAI_API_KEY` |
 | `gemini` | `./node_modules/.bin/gemini` | `GEMINI_API_KEY` |
