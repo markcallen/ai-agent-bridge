@@ -45,11 +45,11 @@ var scenarios = []providerScenario{
 		questionCheck: regexp.MustCompile(`\?`),
 	},
 	{
-		name:          "gemini",
-		requiredEnv:   "GEMINI_API_KEY",
-		promptRe:      regexp.MustCompile(`(?m)>\s*$`),
-		startTimeout:  120 * time.Second,
-		turnTimeout:   240 * time.Second,
+		name:          "codex",
+		requiredEnv:   "OPENAI_API_KEY",
+		promptRe:      regexp.MustCompile(`(?m)(>\s*$|›)`),
+		startTimeout:  90 * time.Second,
+		turnTimeout:   180 * time.Second,
 		questionCheck: regexp.MustCompile(`\?`),
 	},
 }
@@ -80,7 +80,7 @@ func main() {
 	jwtIssuer := flag.String("jwt-issuer", "e2e", "JWT issuer")
 	repo := flag.String("repo", "/tmp/ai-agent-bridge", "repo path")
 	timeout := flag.Duration("timeout", 15*time.Minute, "overall timeout")
-	only := flag.String("only", "all", "test subset: all, claude, opencode, gemini")
+	only := flag.String("only", "all", "test subset: all, claude, opencode, codex")
 	flag.Parse()
 
 	client, err := bridgeclient.New(
