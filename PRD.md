@@ -119,7 +119,61 @@ The bridge replaces direct in-process agent management with a networked, provide
                        └─────────────────────┘
 ```
 
-### 6.2 Deliverables
+### 6.2 Operational Modes
+
+The bridge ships two distinct runtime binaries with different assumptions, startup behaviours, and intended operators. Understanding this separation is fundamental to deploying and integrating the system correctly.
+
+#### Local Server (`bridgectl server start`)
+
+The local server is a developer-facing tool for managing AI agent sessions on a machine where the agent CLIs are already installed and configured through their **native interfaces** (e.g. `claude` authenticated via `claude auth login`, `codex` with `OPENAI_API_KEY` in the shell environment).
+
+| Property | Behaviour |
+|---|---|
+| Binary | `cmd/bridgectl` |
+| Startup validation | Binary existence and executability only — no API key checks |
+| Credential source | Inherits the operator's existing shell environment |
+| Transport security | Optional — defaults to plain gRPC on localhost |
+| Intended operator | Developer or local user who has already configured their AI agents natively |
+| Typical use | Local development, ad-hoc sessions, testing bridge plumbing without production infrastructure |
+
+**Key assumption**: the developer has already authenticated each provider CLI using that provider's own tooling. The bridge does not manage or validate credentials; it simply launches the CLIs that are already ready to run.
+
+**What the local server manages**: session lifecycle (start, stop, event streaming, reconnect), provider multiplexing, and the gRPC API surface — not credential provisioning.
+
+#### Daemon (`bridge` / `cmd/bridge`)
+
+The daemon is a production-grade service designed to run headlessly on a server or agent host. External systems (prd-manager-control-plane, ndara-ai-orchestrator, web clients) connect to it remotely over mTLS + JWT. It is expected to operate without user intervention after initial provisioning.
+
+| Property | Behaviour |
+|---|---|
+| Binary | `cmd/bridge` |
+| Startup validation | Calls `config.ValidateProviderEnv()` and `p.ValidateStartup()` — validates required API keys are present before accepting connections |
+| Credential source | `/etc/ai-agent-bridge/agents.env` injected at service startup (e.g. via systemd drop-in) |
+| Transport security | Required — mTLS + JWT enforced; no plain connections |
+| Intended operator | DevOps / platform engineer provisioning a persistent agent host |
+| Typical use | Production deployments, ai-desktops hosts, headless CI/CD agents, integration target for control-plane services |
+
+**Key assumption**: all required API keys are provisioned before the daemon starts. If a configured provider is missing its credentials, the daemon refuses to start rather than failing later at session time.
+
+**What the daemon manages**: everything the local server manages, plus zero-trust PKI, rate limiting, audit logging, systemd lifecycle, and the expectation of continuous uptime.
+
+#### Mode Comparison
+
+```
+               Local Server (bridgectl)          Daemon (bridge)
+               ─────────────────────────         ─────────────────────────
+Operator       Developer                         DevOps / platform team
+Setup          Native CLI auth already done      API keys in agents.env
+Key check      At session launch (by the CLI)    At daemon startup
+Transport      Plain gRPC (localhost default)    mTLS + JWT (required)
+Auth           None (localhost only)             Per-project CAs + short-lived JWTs
+Deployment     Foreground process / dev tool     systemd service
+External conn  Not intended                      Primary purpose
+```
+
+---
+
+### 6.3 Deliverables
 
 | Deliverable | Description |
 |---|---|
