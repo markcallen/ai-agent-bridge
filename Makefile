@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 build-deb up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker check-deps
+.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt run dev-run docker-run smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 build-deb up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker test-system-daemon-e2e check-deps
 
 BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/ai-agent-bridge
@@ -193,6 +193,12 @@ test-cli-e2e:
 
 test-cli-e2e-docker:
 	./scripts/test-cli-e2e-docker.sh
+
+test-system-daemon-e2e:
+	docker compose -f e2e/system-daemon/docker-compose.yml up --build --abort-on-container-exit --exit-code-from bridgectl-test; \
+	status=$$?; \
+	docker compose -f e2e/system-daemon/docker-compose.yml down -v; \
+	exit $$status
 
 check-deps:
 	./scripts/check-deps.sh

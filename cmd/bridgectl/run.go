@@ -31,6 +31,7 @@ func newRunCmd() *cobra.Command {
 		providerName string
 		project      string
 		timeout      time.Duration
+		noTTY        bool
 	)
 
 	cmd := &cobra.Command{
@@ -42,7 +43,10 @@ session with the specified provider, and attach your terminal.
 If another instance is already running, the existing server is reused.
 
 Press ctrl-] to detach from the session without stopping it.
-Use 'bridgectl session attach <id>' to reattach later.`,
+Use 'bridgectl session attach <id>' to reattach later.
+
+Use --no-tty to run without a terminal, reading from stdin and writing to
+stdout. Useful for scripting, piping input, and automated tests.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "."
@@ -56,6 +60,9 @@ Use 'bridgectl session attach <id>' to reattach later.`,
 			if _, err := os.Stat(absDir); err != nil {
 				return fmt.Errorf("directory %q: %w", absDir, err)
 			}
+			if noTTY {
+				return runSessionNoTTY(absDir, providerName, project, timeout)
+			}
 			return runSession(absDir, providerName, project, timeout)
 		},
 	}
@@ -63,6 +70,7 @@ Use 'bridgectl session attach <id>' to reattach later.`,
 	cmd.Flags().StringVarP(&providerName, "provider", "p", "claude", "AI provider (claude, codex, opencode, gemini, echo)")
 	cmd.Flags().StringVar(&project, "project", "local", "project ID")
 	cmd.Flags().DurationVarP(&timeout, "timeout", "t", 30*time.Minute, "session timeout")
+	cmd.Flags().BoolVar(&noTTY, "no-tty", false, "run without a terminal (for scripting and tests)")
 
 	return cmd
 }
@@ -254,6 +262,87 @@ func ensureServer() error {
 		}
 	}
 	return fmt.Errorf("server did not start within 5s")
+}
+
+// runSessionNoTTY runs a session without a terminal, forwarding raw stdin to
+// the provider and writing output to stdout. Used for scripting, piping, and
+// automated tests (e.g. the echo provider in CI).
+func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) error {
+	if err := ensureServer(); err != nil {
+		return err
+	}
+
+	client, err := connectClient("", timeout)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+	client.SetProject(project)
+
+	sessionID := uuid.NewString()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if _, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId:   project,
+		SessionId:   sessionID,
+		RepoPath:    dir,
+		Provider:    providerName,
+		InitialCols: 80,
+		InitialRows: 24,
+	}); err != nil {
+		return fmt.Errorf("start session: %w", err)
+	}
+
+	stream, err := client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
+		SessionId: sessionID,
+		ClientId:  uuid.NewString(),
+		AfterSeq:  0,
+	})
+	if err != nil {
+		return fmt.Errorf("attach session: %w", err)
+	}
+
+	// Forward stdin to session; close session when stdin reaches EOF.
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := os.Stdin.Read(buf)
+			if n > 0 {
+				_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
+					SessionId: sessionID,
+					ClientId:  stream.ClientID(),
+					Data:      buf[:n],
+				})
+			}
+			if readErr != nil {
+				stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				_, _ = client.StopSession(stopCtx, &bridgev1.StopSessionRequest{
+					SessionId: sessionID,
+					Force:     true,
+				})
+				stopCancel()
+				cancel()
+				return
+			}
+		}
+	}()
+
+	err = stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {
+		switch ev.Type {
+		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
+			_, writeErr := os.Stdout.Write(ev.Payload)
+			return writeErr
+		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
+			return errors.New(ev.Error)
+		default:
+			return nil
+		}
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("session ended: %w", err)
+	}
+	return nil
 }
 
 func currentTTYSize() (uint32, uint32) {
