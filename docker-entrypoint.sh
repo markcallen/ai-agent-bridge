@@ -14,6 +14,11 @@ chown bridge:bridge "$CERT_DIR"
 mkdir -p /home/bridge/.gemini /home/bridge/.config
 chown -R bridge:bridge /home/bridge
 
+# Mirror what systemd RuntimeDirectory=ai-agent-bridge does: create and own
+# the runtime dir so the bridge process can write the system addr file.
+mkdir -p /run/ai-agent-bridge
+chown bridge:bridge /run/ai-agent-bridge
+
 if [ ! -f "$CERT_DIR/ca.crt" ]; then
   echo "==> Initializing CA..."
   ai-agent-bridge-ca init --name ai-agent-bridge-ca --out "$CERT_DIR"

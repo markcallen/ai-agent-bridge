@@ -239,6 +239,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Publish the listen address so bridgectl can discover this daemon
+	// without needing to know the configured address in advance.
+	// The file lives under RuntimeDirectory (created by systemd); we
+	// remove it on clean shutdown so stale entries don't mislead clients.
+	writeSystemAddrFile(ln.Addr().String(), logger)
+	defer removeSystemAddrFile(logger)
+
 	// Graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -265,6 +272,39 @@ func generateServerID() string {
 	b[8] = (b[8] & 0x3f) | 0x80 // variant bits
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+const systemAddrFile = "/run/ai-agent-bridge/server.addr"
+
+func writeSystemAddrFile(addr string, logger *slog.Logger) {
+	// Replace wildcard bind address with loopback so remote clients can connect.
+	if host, port, err := net.SplitHostPort(addr); err == nil {
+		switch host {
+		case "0.0.0.0":
+			addr = "127.0.0.1:" + port
+		case "::":
+			addr = "[::1]:" + port
+		}
+	}
+	if err := os.MkdirAll("/run/ai-agent-bridge", 0o755); err != nil {
+		logger.Warn("create system addr dir", "error", err)
+		return
+	}
+	tmp := systemAddrFile + ".tmp"
+	if err := os.WriteFile(tmp, []byte(addr), 0o644); err != nil {
+		logger.Warn("write system addr file", "path", systemAddrFile, "error", err)
+		return
+	}
+	if err := os.Rename(tmp, systemAddrFile); err != nil {
+		logger.Warn("publish system addr file", "path", systemAddrFile, "error", err)
+		_ = os.Remove(tmp)
+	}
+}
+
+func removeSystemAddrFile(logger *slog.Logger) {
+	if err := os.Remove(systemAddrFile); err != nil && !os.IsNotExist(err) {
+		logger.Warn("remove system addr file", "path", systemAddrFile, "error", err)
+	}
 }
 
 func newLogger(cfg *config.Config, redactor *redact.Redactor) *slog.Logger {

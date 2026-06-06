@@ -530,6 +530,11 @@ func DiscoverTarget(stateDir string) (target string, mode ServerMode) {
 	return target, mode
 }
 
+// SystemAddrFile is the well-known path written by the system daemon
+// (cmd/bridge running under systemd). bridgectl checks this before
+// self-spawning so it reuses the system daemon when available.
+const SystemAddrFile = "/run/ai-agent-bridge/server.addr"
+
 func discoverTarget(stateDir string) string {
 	// Check the mode file first to avoid a stale unix socket from a
 	// previous crashed local-mode server masking a running secure server.
@@ -547,25 +552,39 @@ func discoverTarget(stateDir string) string {
 		}
 	}
 
-	// Local mode: try unix socket first.
+	// Local mode: try unix socket first, but only if the server is healthy.
 	sockPath := filepath.Join(stateDir, "server.sock")
 	if _, err := os.Stat(sockPath); err == nil {
-		return "unix://" + sockPath
+		target := "unix://" + sockPath
+		if probeHealth(target, mode, stateDir) {
+			return target
+		}
 	}
-	// Fall back to TCP address file (Windows local mode).
+	// Fall back to TCP address file (Windows local mode), probing for health.
 	addrData, err := os.ReadFile(filepath.Join(stateDir, "server.addr"))
-	if err != nil {
-		return ""
+	if err == nil {
+		if addr := strings.TrimSpace(string(addrData)); addr != "" {
+			if strings.HasPrefix(addr, "/") {
+				addr = "unix://" + addr
+			}
+			if probeHealth(addr, mode, stateDir) {
+				return addr
+			}
+		}
 	}
-	addr := strings.TrimSpace(string(addrData))
-	if addr == "" {
-		return ""
+
+	// Check for a system daemon (cmd/bridge under systemd) as a last resort.
+	// Only on Linux: the file is written by the system daemon to a path
+	// created by systemd's RuntimeDirectory directive.
+	if runtime.GOOS == "linux" {
+		if sysData, err := os.ReadFile(SystemAddrFile); err == nil {
+			if addr := strings.TrimSpace(string(sysData)); addr != "" {
+				return addr
+			}
+		}
 	}
-	// If it looks like a unix path, prefix it.
-	if strings.HasPrefix(addr, "/") {
-		return "unix://" + addr
-	}
-	return addr
+
+	return ""
 }
 
 func probeHealth(target string, mode ServerMode, stateDir string) bool {
