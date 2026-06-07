@@ -76,8 +76,8 @@ providers:
 # Uncomment to enable Claude Code (requires CLAUDE_CODE_OAUTH_TOKEN in agents.env):
 #
 #   claude:
-#     binary: "/usr/bin/node"
-#     args: ["/opt/ai-agent-bridge/node_modules/@anthropic-ai/claude-code/cli.js"]
+#     binary: "/opt/ai-agent-bridge/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+#     args: []
 #     startup_timeout: "60s"
 #     startup_probe: "output"
 #     required_env: ["CLAUDE_CODE_OAUTH_TOKEN"]

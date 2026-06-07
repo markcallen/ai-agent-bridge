@@ -240,7 +240,11 @@ func (p *StdioProvider) Version(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("binary %q not found: %w", p.cfg.Binary, err)
 	}
 	cmd := exec.CommandContext(ctx, path, "--version")
-	cmd.Env = filterEnv(os.Environ())
+	// Use a minimal environment for version probes. Passing auth tokens (e.g.
+	// CLAUDE_CODE_OAUTH_TOKEN) causes some provider binaries to make network
+	// round-trips to validate credentials before printing their version, which
+	// can exceed the startup timeout.
+	cmd.Env = versionProbeEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("version check: %w", err)
@@ -345,6 +349,26 @@ func isStandaloneRelativePathArg(arg string) bool {
 		return true
 	}
 	return strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../")
+}
+
+// versionProbeEnv returns a minimal environment for --version checks.
+// It deliberately excludes auth tokens and API keys so that provider binaries
+// that make network calls when credentials are present (e.g. token validation)
+// do not time out during the startup version probe.
+func versionProbeEnv() []string {
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
+	}
+	// Preserve NO_COLOR and similar display hints if set.
+	for _, key := range []string{"NO_COLOR", "TMPDIR", "TMP", "TEMP"} {
+		if v := os.Getenv(key); v != "" {
+			env = append(env, key+"="+v)
+		}
+	}
+	return env
 }
 
 // filterEnv returns a filtered environment excluding sensitive variables and

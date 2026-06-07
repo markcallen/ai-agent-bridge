@@ -108,6 +108,59 @@ func TestResolveBinaryPathAndFilterEnv(t *testing.T) {
 	}
 }
 
+func TestVersionProbeEnvExcludesAuthTokens(t *testing.T) {
+	// Auth tokens present in the process environment must not appear in the
+	// version probe environment, so that provider binaries which validate
+	// credentials on startup (triggering network round-trips) do not time out
+	// during the version check.
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-secret")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-secret")
+	t.Setenv("OPENAI_API_KEY", "sk-open-secret")
+
+	env := versionProbeEnv()
+
+	for _, item := range env {
+		for _, secret := range []string{"tok-secret", "sk-secret", "sk-open-secret"} {
+			if strings.Contains(item, secret) {
+				t.Errorf("auth token leaked into version probe env: %q", item)
+			}
+		}
+	}
+	if !hasEnvKey(env, "PATH") {
+		t.Error("PATH missing from version probe env")
+	}
+	if !hasEnvKey(env, "TERM") {
+		t.Error("TERM missing from version probe env")
+	}
+}
+
+func TestVersionUsesMinimalEnv(t *testing.T) {
+	// Build a script that prints its environment to stdout so we can verify
+	// that auth tokens are not passed to --version subprocesses.
+	tmp := t.TempDir()
+	script := filepath.Join(tmp, "fakebin")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nenv\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-must-not-leak")
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID: "fake",
+		Binary:     script,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := p.Version(ctx)
+	if err != nil {
+		t.Fatalf("Version: %v", err)
+	}
+	if strings.Contains(out, "tok-must-not-leak") {
+		t.Errorf("auth token leaked into version probe output: %q", out)
+	}
+}
+
 func TestValidateStartupOutputAndPrompt(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "probe.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'READY>\\n'\nsleep 1\n"), 0o755); err != nil {
