@@ -85,7 +85,7 @@ If you are provisioning a dedicated Ubuntu 24.04 machine where the bridge runs a
 The ai-desktops profile adds:
 
 - A provider runtime installer (`/usr/lib/ai-agent-bridge/install-provider-runtime`) that installs pinned Claude, Codex, OpenCode, and Gemini CLIs into `/opt/ai-agent-bridge`.
-- An example config (`/usr/share/doc/ai-agent-bridge/examples/bridge-ai-desktops.yaml`) with all four provider stanzas pre-written and the `/workspace` path policy enabled.
+- An example config (`/usr/share/doc/ai-agent-bridge/examples/bridge-example.yaml`) with all four provider stanzas pre-written and the `/workspace` path policy enabled.
 - A systemd drop-in (`/usr/share/doc/ai-agent-bridge/examples/ai-desktops.conf`) that injects credentials from `/etc/ai-agent-bridge/agents.env` and grants agent write access to `/workspace`.
 
 See [ai-desktops.md](ai-desktops.md) for the full provisioning guide.

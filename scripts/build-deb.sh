@@ -68,8 +68,8 @@ install -m 0644 "$ROOT_DIR/package.json"      "$PKG_ROOT/usr/share/ai-agent-brid
 install -m 0644 "$ROOT_DIR/package-lock.json" "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/package-lock.json"
 
 # Example configs and systemd drop-in
-install -m 0644 "$ROOT_DIR/packaging/examples/bridge-ai-desktops.yaml" \
-  "$PKG_ROOT/usr/share/doc/ai-agent-bridge/examples/bridge-ai-desktops.yaml"
+install -m 0644 "$ROOT_DIR/packaging/examples/bridge-example.yaml" \
+  "$PKG_ROOT/usr/share/doc/ai-agent-bridge/examples/bridge-example.yaml"
 install -m 0644 "$ROOT_DIR/packaging/systemd/ai-desktops.conf" \
   "$PKG_ROOT/usr/share/doc/ai-agent-bridge/examples/ai-desktops.conf"
 

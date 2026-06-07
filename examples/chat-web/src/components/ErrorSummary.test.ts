@@ -15,13 +15,13 @@ describe("collectErrorMessages", () => {
       type: "health_response",
       status: "degraded",
       providers: [
-        { provider: "claude", available: false, error: "missing ANTHROPIC_API_KEY" },
+        { provider: "claude", available: false, error: "required env var CLAUDE_CODE_OAUTH_TOKEN not set" },
         { provider: "codex", available: true, error: "" },
       ],
     };
 
     expect(collectErrorMessages(null, health)).toEqual([
-      "claude: missing ANTHROPIC_API_KEY",
+      "claude: required env var CLAUDE_CODE_OAUTH_TOKEN not set",
     ]);
   });
 

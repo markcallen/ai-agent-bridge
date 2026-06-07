@@ -33,6 +33,27 @@ func TestNewStdioProviderDefaultsAndHealth(t *testing.T) {
 	}
 }
 
+func TestHealthRequiredEnv(t *testing.T) {
+	const key = "BRIDGE_HEALTH_REQUIRED_ENV"
+	_ = os.Unsetenv(key)
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID:  "echo",
+		Binary:      "/bin/echo",
+		RequiredEnv: []string{key},
+	})
+
+	err := p.Health(context.Background())
+	if err == nil || !strings.Contains(err.Error(), key) {
+		t.Fatalf("Health with missing env: got %v, want error containing %q", err, key)
+	}
+
+	t.Setenv(key, "present")
+	if err := p.Health(context.Background()); err != nil {
+		t.Fatalf("Health with env set: %v", err)
+	}
+}
+
 func TestValidateStartupRequiredEnv(t *testing.T) {
 	const key = "BRIDGE_PROVIDER_REQUIRED_ENV"
 	_ = os.Unsetenv(key)

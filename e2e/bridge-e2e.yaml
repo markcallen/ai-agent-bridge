@@ -37,7 +37,7 @@ providers:
     args: ["--verbose"]
     startup_timeout: "120s"
     startup_probe: "prompt"
-    required_env: ["ANTHROPIC_API_KEY"]
+    required_env: ["CLAUDE_CODE_OAUTH_TOKEN"]
     validate_startup: false
     prompt_pattern: "(?m)(❯|>\\s*$)"
   opencode:

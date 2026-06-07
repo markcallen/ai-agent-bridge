@@ -46,10 +46,6 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if err := config.ValidateProviderEnv(cfg); err != nil {
-		bootstrapLogger.Error("provider environment validation failed", "error", err)
-		os.Exit(1)
-	}
 	redactor, err := redact.New(cfg.Logging.RedactPatterns)
 	if err != nil {
 		bootstrapLogger.Error("failed to compile redact patterns", "error", err)
@@ -60,6 +56,8 @@ func main() {
 
 	// Set up provider registry
 	registry := bridge.NewRegistry()
+	// Keep concrete references so startup errors can be stored on the provider.
+	startupProviders := make(map[string]*provider.StdioProvider, len(cfg.Providers))
 	for name, pcfg := range cfg.Providers {
 		p := provider.NewStdioProvider(provider.StdioConfig{
 			ProviderID:     name,
@@ -78,6 +76,7 @@ func main() {
 			logger.Error("register provider", "provider", name, "error", err)
 			os.Exit(1)
 		}
+		startupProviders[name] = p
 		logger.Info("registered provider", "provider", name, "binary", pcfg.Binary)
 	}
 
@@ -94,22 +93,21 @@ func main() {
 			logger.Info("provider version", "provider", name, "version", v)
 		}
 	}
-	for name := range cfg.Providers {
+	for name, p := range startupProviders {
 		pcfg := cfg.Providers[name]
 		if !pcfg.ShouldValidateStartup() {
 			logger.Info("provider startup validation skipped by config", "provider", name)
 			continue
 		}
-		if p, err := registry.Get(name); err == nil {
-			checkCtx, cancel := context.WithTimeout(context.Background(), p.StartupTimeout())
-			err = p.ValidateStartup(checkCtx)
-			cancel()
-			if err != nil {
-				logger.Error("provider startup validation failed", "provider", name, "error", err)
-				os.Exit(1)
-			}
-			logger.Info("provider startup validation passed", "provider", name)
+		checkCtx, cancel := context.WithTimeout(context.Background(), p.StartupTimeout())
+		err := p.ValidateStartup(checkCtx)
+		cancel()
+		if err != nil {
+			logger.Warn("provider unavailable at startup", "provider", name, "error", err)
+			p.SetUnavailable(fmt.Errorf("startup probe failed: %w", err))
+			continue
 		}
+		logger.Info("provider startup validation passed", "provider", name)
 	}
 
 	// Set up policy

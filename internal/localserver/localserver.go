@@ -650,7 +650,9 @@ func knownProviders() []providerDef {
 			StartupTimeout: 60 * time.Second,
 			StartupProbe:   "prompt",
 			PromptPattern:  `(?m)(❯|>\s*$)`,
-			RequiredEnv:    []string{"ANTHROPIC_API_KEY"},
+			// No RequiredEnv: local-server mode relies on native CLI auth
+			// (e.g. claude auth login). Env vars are still forwarded to the
+			// subprocess if present in the environment.
 		},
 		{
 			ID:             "codex",
@@ -659,7 +661,6 @@ func knownProviders() []providerDef {
 			StartupTimeout: 60 * time.Second,
 			StartupProbe:   "prompt",
 			PromptPattern:  `(?m)(>\s*$|›)`,
-			RequiredEnv:    []string{"OPENAI_API_KEY"},
 		},
 		{
 			ID:             "opencode",
@@ -668,7 +669,6 @@ func knownProviders() []providerDef {
 			StartupTimeout: 60 * time.Second,
 			StartupProbe:   "output",
 			PromptPattern:  `❯`,
-			RequiredEnv:    []string{"OPENAI_API_KEY"},
 		},
 		{
 			ID:             "gemini",
@@ -677,7 +677,6 @@ func knownProviders() []providerDef {
 			StartupTimeout: 60 * time.Second,
 			StartupProbe:   "prompt",
 			PromptPattern:  `^\s*>\s*$`,
-			RequiredEnv:    []string{"GEMINI_API_KEY"},
 		},
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -37,8 +38,19 @@ type StdioConfig struct {
 
 // StdioProvider defines how to launch and validate one interactive CLI.
 type StdioProvider struct {
-	cfg      StdioConfig
-	promptRe *regexp.Regexp
+	cfg            StdioConfig
+	promptRe       *regexp.Regexp
+	mu             sync.RWMutex
+	unavailableErr error
+}
+
+// SetUnavailable persists a startup-time error so that Health() reports the
+// provider as unavailable until the process restarts. Used by the daemon to
+// propagate startup-probe failures into the runtime health state.
+func (p *StdioProvider) SetUnavailable(err error) {
+	p.mu.Lock()
+	p.unavailableErr = err
+	p.mu.Unlock()
 }
 
 func NewStdioProvider(cfg StdioConfig) *StdioProvider {
@@ -237,6 +249,12 @@ func (p *StdioProvider) Version(ctx context.Context) (string, error) {
 }
 
 func (p *StdioProvider) Health(ctx context.Context) error {
+	p.mu.RLock()
+	unavailErr := p.unavailableErr
+	p.mu.RUnlock()
+	if unavailErr != nil {
+		return unavailErr
+	}
 	path, err := resolveBinaryPath(p.cfg.Binary, p.cfg.ProviderRoot)
 	if err != nil {
 		return fmt.Errorf("binary %q not found: %w", p.cfg.Binary, err)
@@ -247,6 +265,11 @@ func (p *StdioProvider) Health(ctx context.Context) error {
 	}
 	if info.Mode()&0o111 == 0 {
 		return fmt.Errorf("binary %q is not executable", path)
+	}
+	for _, envName := range p.cfg.RequiredEnv {
+		if strings.TrimSpace(os.Getenv(envName)) == "" {
+			return fmt.Errorf("required env var %s not set", envName)
+		}
 	}
 	return nil
 }
