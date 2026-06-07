@@ -119,11 +119,11 @@ func TestVersionProbeEnvExcludesAuthTokens(t *testing.T) {
 
 	env := versionProbeEnv()
 
-	for _, item := range env {
-		for _, secret := range []string{"tok-secret", "sk-secret", "sk-open-secret"} {
-			if strings.Contains(item, secret) {
-				t.Errorf("auth token leaked into version probe env: %q", item)
-			}
+	// Assert by key name — more robust than value substring matching, and
+	// catches the case where the key is present with a different value.
+	for _, key := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"} {
+		if hasEnvKey(env, key) {
+			t.Errorf("auth token key %q must not appear in version probe env", key)
 		}
 	}
 	if !hasEnvKey(env, "PATH") {

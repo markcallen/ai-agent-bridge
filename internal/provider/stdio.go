@@ -356,13 +356,26 @@ func isStandaloneRelativePathArg(arg string) bool {
 // that make network calls when credentials are present (e.g. token validation)
 // do not time out during the startup version probe.
 func versionProbeEnv() []string {
+	// Use the parent PATH when set; fall back to a safe minimal default so
+	// that binaries can still locate their dynamic linker and helpers.
+	path := os.Getenv("PATH")
+	if path == "" {
+		path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	}
 	env := []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
+		"PATH=" + path,
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
 	}
-	// Preserve NO_COLOR and similar display hints if set.
+	// Only set HOME when non-empty; leaving it unset lets the OS fall back to
+	// the passwd database, which is preferable to forcing an empty value that
+	// can confuse CLIs expecting a writable home directory.
+	if home := os.Getenv("HOME"); home != "" {
+		env = append(env, "HOME="+home)
+	} else if home, err := os.UserHomeDir(); err == nil {
+		env = append(env, "HOME="+home)
+	}
+	// Preserve NO_COLOR and temp-dir hints if set.
 	for _, key := range []string{"NO_COLOR", "TMPDIR", "TMP", "TEMP"} {
 		if v := os.Getenv(key); v != "" {
 			env = append(env, key+"="+v)
