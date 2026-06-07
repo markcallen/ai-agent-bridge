@@ -149,7 +149,7 @@ The daemon is a production-grade service designed to run headlessly on a server 
 | Binary | `cmd/bridge` |
 | Startup validation | Per-provider: providers with all required credentials become available; providers with missing credentials register as unavailable (daemon does not exit) |
 | Credential source | `/etc/ai-agent-bridge/agents.env` injected at service startup (e.g. via systemd drop-in), or inherited environment |
-| Transport security | Required — mTLS + JWT enforced; no plain connections |
+| Transport security | Strongly recommended — mTLS + JWT enforced when TLS certs and JWT keys are configured; falls back to plain gRPC with a warning when unconfigured (dev/local use only) |
 | Intended operator | DevOps / platform engineer provisioning a persistent agent host |
 | Typical use | Production deployments, ai-desktops hosts, headless CI/CD agents, integration target for control-plane services |
 
@@ -329,7 +329,7 @@ The bridge must support a first-class deployment profile for the **ai-desktops**
   - Verifies or installs Node.js at the required major version.
   - Installs pinned provider CLIs (Claude Code, Codex, OpenCode, Gemini) into `/opt/ai-agent-bridge` using `npm ci` with a staging directory pattern so a failed install never destroys a working runtime.
   - Reports installed CLI versions for operator verification.
-- The package must ship an ai-desktops example config (`bridge-ai-desktops.yaml`) with correct provider stanzas for all four supported providers and `/workspace` included in `allowed_paths`.
+- The package must ship an example config (`bridge-example.yaml`) with correct provider stanzas for all four supported providers. Operators deploying to ai-desktops should add `/workspace` to `allowed_paths` in their local copy.
 - The package must ship a systemd drop-in example (`ai-desktops.conf`) that:
   - Injects provider API keys from `/etc/ai-agent-bridge/agents.env` at service startup.
   - Grants agent subprocesses write access to `/workspace`, `/var/lib/ai-agent-bridge`, `/tmp`, and `/var/tmp`.
@@ -343,7 +343,7 @@ The bridge must support a first-class deployment profile for the **ai-desktops**
 | Claude Code | `/usr/bin/node ... @anthropic-ai/claude-code/cli.js` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | Codex | `/usr/bin/node ... @openai/codex/bin/codex.js` | `OPENAI_API_KEY` |
 | OpenCode | `/opt/ai-agent-bridge/node_modules/.bin/opencode` (native binary) | `OPENAI_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
-| Gemini CLI | `/usr/bin/node ... @google/gemini-cli/dist/index.js` | `GOOGLE_API_KEY` |
+| Gemini CLI | `/usr/bin/node ... @google/gemini-cli/dist/index.js` | `GEMINI_API_KEY` |
 
 ### Acceptance Criteria
 
@@ -485,14 +485,16 @@ Response:
     error: string        // reason if unavailable: missing credential, binary not found, probe failure, etc.
 ```
 
-Provider availability reflects **both** binary presence **and** credential availability:
+Provider availability reflects binary presence, credential availability, and daemon-startup probe results:
 
 | Condition | `available` | `error` |
 |---|---|---|
 | Binary found, all required env vars set | `true` | `""` |
 | Binary found, required env var missing | `false` | `"required env var CLAUDE_CODE_OAUTH_TOKEN not set"` |
 | Binary not found or not executable | `false` | `"binary not found: claude"` |
-| Startup probe timed out or failed | `false` | `"startup probe failed: ..."` |
+| Startup probe timed out or failed (daemon only) | `false` | `"startup probe failed: ..."` |
+
+Startup probe failures are recorded on the provider at daemon boot via `SetUnavailable` and returned by every subsequent `Health()` call until the daemon restarts. The local server (`bridgectl`) does not run startup probes, so this condition applies to the daemon only.
 
 The daemon `status` field reflects overall daemon health, not aggregate provider health. A daemon with zero available providers still returns `"serving"` — callers must inspect per-provider entries to determine which providers can accept sessions.
 
