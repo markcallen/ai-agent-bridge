@@ -61,7 +61,7 @@ The base package installs a provider-neutral daemon. It starts and passes a heal
 /usr/share/ai-agent-bridge/provider-runtime/.nvmrc
 /usr/share/ai-agent-bridge/provider-runtime/package.json
 /usr/share/ai-agent-bridge/provider-runtime/package-lock.json
-/usr/share/doc/ai-agent-bridge/examples/bridge-ai-desktops.yaml
+/usr/share/doc/ai-agent-bridge/examples/bridge-example.yaml
 /usr/share/doc/ai-agent-bridge/examples/ai-desktops.conf
 ```
 
@@ -96,7 +96,7 @@ sudo /usr/lib/ai-agent-bridge/install-provider-runtime --verify
 Copy and customize the example config:
 
 ```bash
-sudo cp /usr/share/doc/ai-agent-bridge/examples/bridge-ai-desktops.yaml \
+sudo cp /usr/share/doc/ai-agent-bridge/examples/bridge-example.yaml \
   /etc/ai-agent-bridge/bridge.yaml
 sudo $EDITOR /etc/ai-agent-bridge/bridge.yaml
 ```
