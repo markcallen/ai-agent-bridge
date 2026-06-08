@@ -14,17 +14,15 @@ chown bridge:bridge "$CERT_DIR"
 mkdir -p /home/bridge/.gemini /home/bridge/.config
 chown -R bridge:bridge /home/bridge
 
-# Mirror what systemd RuntimeDirectory=ai-agent-bridge does: create and own
+# Mirror what systemd RuntimeDirectory=bridge does: create and own
 # the runtime dir so the bridge process can write the system addr file.
-mkdir -p /run/ai-agent-bridge
-chown bridge:bridge /run/ai-agent-bridge
+mkdir -p /run/bridge
+chown bridge:bridge /run/bridge
 
 # Ensure bridge user can read/write mounted workspace volumes such as /repos.
-# chmod o+rwx preserves the original owner while allowing the bridge user
-# (who runs as a non-root, non-owner uid) to write session files there.
 for _vol in /repos /workspace; do
   if [ -d "$_vol" ]; then
-    chmod o+rwx "$_vol"
+    chown bridge:bridge "$_vol"
   fi
 done
 

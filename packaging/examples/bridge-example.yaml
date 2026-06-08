@@ -6,7 +6,7 @@
 #
 # This profile:
 #   - binds to 127.0.0.1:9445 (localhost only)
-#   - enables persistence under /var/lib/ai-agent-bridge
+#   - enables persistence under /var/lib/bridge
 #   - resolves provider CLIs from /opt/ai-agent-bridge (the provider runtime root)
 #   - keeps TLS and JWT disabled (localhost-only — add mTLS+JWT for remote access)
 #

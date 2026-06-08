@@ -272,7 +272,7 @@ func generateServerID() string {
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-const systemAddrFile = "/run/ai-agent-bridge/server.addr"
+const systemAddrFile = "/run/bridge/server.addr"
 
 func writeSystemAddrFile(addr string, logger *slog.Logger) {
 	// Replace wildcard bind address with loopback so remote clients can connect.
@@ -284,7 +284,7 @@ func writeSystemAddrFile(addr string, logger *slog.Logger) {
 			addr = "[::1]:" + port
 		}
 	}
-	if err := os.MkdirAll("/run/ai-agent-bridge", 0o755); err != nil {
+	if err := os.MkdirAll("/run/bridge", 0o755); err != nil {
 		logger.Warn("create system addr dir", "error", err)
 		return
 	}

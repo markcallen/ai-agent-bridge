@@ -75,9 +75,6 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 	if err := validateStringField("repo_path", req.RepoPath, maxRepoPathLen, false); err != nil {
 		return nil, err
 	}
-	if err := checkDirReadWrite(req.RepoPath); err != nil {
-		return nil, status.Errorf(codes.PermissionDenied, "repo_path %q: %v", req.RepoPath, err)
-	}
 	if err := validateStringField("provider", req.Provider, maxProviderLen, false); err != nil {
 		return nil, err
 	}
@@ -91,6 +88,10 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 	}
 	if !s.startRL.allow(clientID) {
 		return nil, status.Error(codes.ResourceExhausted, "start session rate limit exceeded for client")
+	}
+
+	if err := checkDirReadWrite(req.RepoPath); err != nil {
+		return nil, status.Errorf(codes.PermissionDenied, "repo_path %q: %v", req.RepoPath, err)
 	}
 
 	opts := map[string]string{"provider": req.Provider}
@@ -439,9 +440,9 @@ func mapState(s bridge.SessionState) bridgev1.SessionStatus {
 	}
 }
 
-// checkDirReadWrite verifies that dir exists, is a directory, and is readable
-// and writable by the current process. Returns an error if any check fails so
-// that StartSession can reject requests before spawning a provider process.
+// checkDirReadWrite verifies that dir exists, is a directory, and is writable
+// by the current process. Returns an error if any check fails so that
+// StartSession can reject requests before spawning a provider process.
 func checkDirReadWrite(dir string) error {
 	info, err := os.Stat(dir)
 	if err != nil {

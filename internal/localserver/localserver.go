@@ -533,7 +533,7 @@ func DiscoverTarget(stateDir string) (target string, mode ServerMode) {
 // SystemAddrFile is the well-known path written by the system daemon
 // (cmd/bridge running under systemd). bridgectl checks this before
 // self-spawning so it reuses the system daemon when available.
-const SystemAddrFile = "/run/ai-agent-bridge/server.addr"
+const SystemAddrFile = "/run/bridge/server.addr"
 
 func discoverTarget(stateDir string) string {
 	// Check the mode file first to avoid a stale unix socket from a

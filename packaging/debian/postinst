@@ -18,6 +18,14 @@ fi
 mkdir -p /var/lib/bridge
 chown bridge:bridge /var/lib/bridge
 
+# Migrate state from the old directory name on upgrade.
+if [ -d /var/lib/ai-agent-bridge ] && [ ! -e /var/lib/bridge/sessions.db ]; then
+  if [ -e /var/lib/ai-agent-bridge/sessions.db ]; then
+    cp /var/lib/ai-agent-bridge/sessions.db /var/lib/bridge/sessions.db
+    chown bridge:bridge /var/lib/bridge/sessions.db
+  fi
+fi
+
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   systemctl daemon-reload >/dev/null 2>&1 || true
   systemctl enable ai-agent-bridge.service >/dev/null 2>&1 || true
