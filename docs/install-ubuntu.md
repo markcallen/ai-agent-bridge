@@ -45,7 +45,7 @@ sudo apt-get install -y ai-agent-bridge
 - `/etc/ai-agent-bridge/bridge.yaml`
 - `/lib/systemd/system/ai-agent-bridge.service`
 
-The systemd unit runs as the `ai-agent-bridge` system user and stores state under `/var/lib/ai-agent-bridge`.
+The systemd unit runs as the `bridge` system user and stores state under `/var/lib/bridge`.
 
 ## Default Runtime Behavior
 
@@ -77,15 +77,3 @@ For a usable agent host you still need to:
 2. Supply the required API keys and environment for those providers.
 3. Replace the default provider-less config with your real provider and auth settings.
 4. Review the service account and repository path permissions before exposing the daemon beyond localhost.
-
-## ai-desktops Agent-Host Profile
-
-If you are provisioning a dedicated Ubuntu 24.04 machine where the bridge runs as a system service and spawns AI agents against repositories under `/workspace`, follow the **ai-desktops** profile instead of the manual steps above.
-
-The ai-desktops profile adds:
-
-- A provider runtime installer (`/usr/lib/ai-agent-bridge/install-provider-runtime`) that installs pinned Claude, Codex, OpenCode, and Gemini CLIs into `/opt/ai-agent-bridge`.
-- An example config (`/usr/share/doc/ai-agent-bridge/examples/bridge-example.yaml`) with all four provider stanzas pre-written and the `/workspace` path policy enabled.
-- A systemd drop-in (`/usr/share/doc/ai-agent-bridge/examples/ai-desktops.conf`) that injects credentials from `/etc/ai-agent-bridge/agents.env` and grants agent write access to `/workspace`.
-
-See [ai-desktops.md](ai-desktops.md) for the full provisioning guide.

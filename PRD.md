@@ -151,7 +151,7 @@ The daemon is a production-grade service designed to run headlessly on a server 
 | Credential source | `/etc/ai-agent-bridge/agents.env` injected at service startup (e.g. via systemd drop-in), or inherited environment |
 | Transport security | Strongly recommended — mTLS + JWT enforced when TLS certs and JWT keys are configured; falls back to plain gRPC with a warning when unconfigured (dev/local use only) |
 | Intended operator | DevOps / platform engineer provisioning a persistent agent host |
-| Typical use | Production deployments, ai-desktops hosts, headless CI/CD agents, integration target for control-plane services |
+| Typical use | Production deployments, headless CI/CD agents, integration target for control-plane services |
 
 **Provider availability at startup**: the daemon performs per-provider validation at startup. A provider with all required credentials present is registered as available. A provider missing credentials (or whose startup probe fails) is registered as unavailable with a reason — the daemon continues serving and reports the unavailable provider through the `Health` RPC. Credentials can be added to the environment and the daemon restarted to make a previously unavailable provider available.
 
@@ -319,39 +319,9 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
 - The release workflow includes smoke coverage that validates apt installation in containers and on an EC2 host.
 - `README.md` and `docs/` describe package installation, runtime prerequisites, and service behavior accurately.
 
-## 7.7 ai-desktops Agent-Host Deployment Target
+## 7.7 External Deployment Profiles
 
-The bridge must support a first-class deployment profile for the **ai-desktops** platform: Ubuntu 24.04 machines where the daemon runs as a system service and AI agents operate against repositories mounted under `/workspace`.
-
-### Deployment Profile Requirements
-
-- The package must ship a provider runtime installer (`install-provider-runtime`) that:
-  - Verifies or installs Node.js at the required major version.
-  - Installs pinned provider CLIs (Claude Code, Codex, OpenCode, Gemini) into `/opt/ai-agent-bridge` using `npm ci` with a staging directory pattern so a failed install never destroys a working runtime.
-  - Reports installed CLI versions for operator verification.
-- The package must ship an example config (`bridge-example.yaml`) with correct provider stanzas for all four supported providers. Operators deploying to ai-desktops should add `/workspace` to `allowed_paths` in their local copy.
-- The package must ship a systemd drop-in example (`ai-desktops.conf`) that:
-  - Injects provider API keys from `/etc/ai-agent-bridge/agents.env` at service startup.
-  - Grants agent subprocesses write access to `/workspace`, `/var/lib/ai-agent-bridge`, `/tmp`, and `/var/tmp`.
-- Provider API keys must be stored in `/etc/ai-agent-bridge/agents.env` with `root:root 0600` permissions and never written to disk by the bridge itself.
-- The Node.js runtime validation must only run when at least one configured provider actually invokes Node.js (native binary providers such as OpenCode must not trigger Node validation).
-
-### Supported Providers on ai-desktops
-
-| Provider | Invocation | Required Credential |
-|---|---|---|
-| Claude Code | `/usr/bin/node ... @anthropic-ai/claude-code/cli.js` | `CLAUDE_CODE_OAUTH_TOKEN` |
-| Codex | `/usr/bin/node ... @openai/codex/bin/codex.js` | `OPENAI_API_KEY` |
-| OpenCode | `/opt/ai-agent-bridge/node_modules/.bin/opencode` (native binary) | `OPENAI_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
-| Gemini CLI | `/usr/bin/node ... @google/gemini-cli/dist/index.js` | `GEMINI_API_KEY` |
-
-### Acceptance Criteria
-
-- `install-provider-runtime` installs all four provider CLIs and reports their versions on a clean Ubuntu 24.04 host with Node.js 24.
-- A failed `npm ci` during runtime install does not remove a previously working `/opt/ai-agent-bridge/node_modules`.
-- An apt profile smoke test verifies: package install, fixture provider registration, session start, `/workspace` access, echo round-trip, daemon restart, and health check — all without real API keys.
-- The bridge daemon starts with an OpenCode (native binary) provider configured and does not trigger Node.js runtime validation.
-- `docs/ai-desktops.md` provides a complete operator provisioning guide covering architecture, install, config, credentials, upgrade, and troubleshooting.
+The bridge package is deployment-neutral. Consumer platforms are responsible for authoring their own systemd drop-ins, credential injection, provisioning guides, and readiness checks. The package ships `bridge-example.yaml` as a reference config; all deployment-specific orchestration lives outside this repository.
 
 ---
 

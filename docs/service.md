@@ -202,7 +202,7 @@ Controls how the bridge locates provider CLIs and the Node.js runtime. These set
 |-------|---------|-------------|
 | `provider_root` | `""` (daemon CWD) | Absolute path to the directory that contains `.nvmrc` and provider `node_modules`. When set: (1) Node.js version validation reads `{provider_root}/.nvmrc` instead of the daemon working directory; (2) a relative `binary` path (one that contains a `/`) resolves against `provider_root`; (3) bare standalone relative path arguments (e.g. `./node_modules/foo/bin/cli.js`) resolve against `provider_root`. Plain command names looked up via `PATH` (e.g. `node`) and embedded flag values (e.g. `--config=./foo`) are not affected. Use this when the daemon runs as a systemd service with a different `WorkingDirectory` than where provider CLIs are installed. |
 
-Example (`ai-desktops` deployment):
+Example:
 
 ```yaml
 runtime:
