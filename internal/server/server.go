@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/auth"
@@ -73,6 +74,9 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 	}
 	if err := validateStringField("repo_path", req.RepoPath, maxRepoPathLen, false); err != nil {
 		return nil, err
+	}
+	if err := checkDirReadWrite(req.RepoPath); err != nil {
+		return nil, status.Errorf(codes.PermissionDenied, "repo_path %q: %v", req.RepoPath, err)
 	}
 	if err := validateStringField("provider", req.Provider, maxProviderLen, false); err != nil {
 		return nil, err
@@ -433,6 +437,26 @@ func mapState(s bridge.SessionState) bridgev1.SessionStatus {
 	default:
 		return bridgev1.SessionStatus_SESSION_STATUS_UNSPECIFIED
 	}
+}
+
+// checkDirReadWrite verifies that dir exists, is a directory, and is readable
+// and writable by the current process. Returns an error if any check fails so
+// that StartSession can reject requests before spawning a provider process.
+func checkDirReadWrite(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("not a directory")
+	}
+	f, err := os.CreateTemp(dir, ".bridge-rw-check-*")
+	if err != nil {
+		return fmt.Errorf("not writable: %w", err)
+	}
+	_ = f.Close()
+	_ = os.Remove(f.Name())
+	return nil
 }
 
 func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *bridgev1.AttachSessionEvent {

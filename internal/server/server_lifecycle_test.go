@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -179,6 +181,70 @@ func TestBridgeServerValidationAndPermissions(t *testing.T) {
 	if _, err := s.Health(context.Background(), &bridgev1.HealthRequest{}); err != nil {
 		t.Fatalf("Health: %v", err)
 	}
+}
+
+func TestBridgeServerStartSessionDirAccess(t *testing.T) {
+	registry := bridge.NewRegistry()
+	if err := registry.Register(&serverTestProvider{id: "cat", version: "1"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	supervisor := bridge.NewSupervisor(registry, bridge.DefaultPolicy(), 1024, time.Minute)
+	defer supervisor.Close()
+
+	s := New(supervisor, registry, nil, RateLimitConfig{
+		GlobalRPS:                  10,
+		GlobalBurst:                10,
+		StartSessionPerClientRPS:   10,
+		StartSessionPerClientBurst: 10,
+	}, "test-instance", nil)
+
+	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "project-a"})
+
+	t.Run("nonexistent directory", func(t *testing.T) {
+		_, err := s.StartSession(ctx, &bridgev1.StartSessionRequest{
+			ProjectId: "project-a",
+			SessionId: uuid.NewString(),
+			RepoPath:  filepath.Join(t.TempDir(), "does-not-exist"),
+			Provider:  "cat",
+		})
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("got code %v, want PermissionDenied", status.Code(err))
+		}
+	})
+
+	t.Run("not a directory", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "file-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = f.Close()
+		_, err = s.StartSession(ctx, &bridgev1.StartSessionRequest{
+			ProjectId: "project-a",
+			SessionId: uuid.NewString(),
+			RepoPath:  f.Name(),
+			Provider:  "cat",
+		})
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("got code %v, want PermissionDenied", status.Code(err))
+		}
+	})
+
+	t.Run("read-only directory", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Chmod(dir, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+		_, err := s.StartSession(ctx, &bridgev1.StartSessionRequest{
+			ProjectId: "project-a",
+			SessionId: uuid.NewString(),
+			RepoPath:  dir,
+			Provider:  "cat",
+		})
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("got code %v, want PermissionDenied", status.Code(err))
+		}
+	})
 }
 
 func TestBridgeServerStartSessionUsesConfiguredFallbacks(t *testing.T) {
