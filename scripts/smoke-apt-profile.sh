@@ -105,7 +105,7 @@ rate_limits:
   send_input_per_session_burst: 20
 
 persistence:
-  db_path: "/var/lib/ai-agent-bridge/sessions.db"
+  db_path: "/var/lib/bridge/sessions.db"
 
 providers:
   fixture:

@@ -19,6 +19,15 @@ chown -R bridge:bridge /home/bridge
 mkdir -p /run/ai-agent-bridge
 chown bridge:bridge /run/ai-agent-bridge
 
+# Ensure bridge user can read/write mounted workspace volumes such as /repos.
+# chmod o+rwx preserves the original owner while allowing the bridge user
+# (who runs as a non-root, non-owner uid) to write session files there.
+for _vol in /repos /workspace; do
+  if [ -d "$_vol" ]; then
+    chmod o+rwx "$_vol"
+  fi
+done
+
 if [ ! -f "$CERT_DIR/ca.crt" ]; then
   echo "==> Initializing CA..."
   ai-agent-bridge-ca init --name ai-agent-bridge-ca --out "$CERT_DIR"
