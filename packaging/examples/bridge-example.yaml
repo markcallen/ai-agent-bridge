@@ -6,7 +6,7 @@
 #
 # This profile:
 #   - binds to 127.0.0.1:9445 (localhost only)
-#   - enables persistence under /var/lib/ai-agent-bridge
+#   - enables persistence under /var/lib/bridge
 #   - resolves provider CLIs from /opt/ai-agent-bridge (the provider runtime root)
 #   - keeps TLS and JWT disabled (localhost-only — add mTLS+JWT for remote access)
 #
@@ -50,7 +50,7 @@ rate_limits:
   send_input_per_session_burst: 20
 
 persistence:
-  db_path: "/var/lib/ai-agent-bridge/sessions.db"
+  db_path: "/var/lib/bridge/sessions.db"
 
 runtime:
   provider_root: "/opt/ai-agent-bridge"

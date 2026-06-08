@@ -6,11 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ai-agent-bridge
-Group=ai-agent-bridge
-StateDirectory=ai-agent-bridge
-RuntimeDirectory=ai-agent-bridge
-WorkingDirectory=/var/lib/ai-agent-bridge
+User=bridge
+Group=bridge
+StateDirectory=bridge
+RuntimeDirectory=bridge
+WorkingDirectory=/var/lib/bridge
 ExecStart=/usr/bin/ai-agent-bridge --config /etc/ai-agent-bridge/bridge.yaml
 Restart=on-failure
 RestartSec=5s
@@ -18,7 +18,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/ai-agent-bridge
+ReadWritePaths=/var/lib/bridge
 LimitNOFILE=65536
 
 [Install]

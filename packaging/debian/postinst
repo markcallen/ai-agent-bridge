@@ -1,22 +1,30 @@
 #!/bin/sh
 set -eu
 
-if ! getent group ai-agent-bridge >/dev/null 2>&1; then
-  addgroup --system ai-agent-bridge >/dev/null
+if ! getent group bridge >/dev/null 2>&1; then
+  addgroup --system bridge >/dev/null
 fi
 
-if ! getent passwd ai-agent-bridge >/dev/null 2>&1; then
+if ! getent passwd bridge >/dev/null 2>&1; then
   adduser \
     --system \
-    --ingroup ai-agent-bridge \
-    --home /var/lib/ai-agent-bridge \
+    --ingroup bridge \
+    --home /var/lib/bridge \
     --no-create-home \
     --shell /usr/sbin/nologin \
-    ai-agent-bridge >/dev/null
+    bridge >/dev/null
 fi
 
-mkdir -p /var/lib/ai-agent-bridge
-chown ai-agent-bridge:ai-agent-bridge /var/lib/ai-agent-bridge
+mkdir -p /var/lib/bridge
+chown bridge:bridge /var/lib/bridge
+
+# Migrate state from the old directory name on upgrade.
+if [ -d /var/lib/ai-agent-bridge ] && [ ! -e /var/lib/bridge/sessions.db ]; then
+  if [ -e /var/lib/ai-agent-bridge/sessions.db ]; then
+    cp /var/lib/ai-agent-bridge/sessions.db /var/lib/bridge/sessions.db
+    chown bridge:bridge /var/lib/bridge/sessions.db
+  fi
+fi
 
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   systemctl daemon-reload >/dev/null 2>&1 || true
