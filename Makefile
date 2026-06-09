@@ -21,7 +21,7 @@ build: proto
 
 build-cli:
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BRIDGE_CLI) ./cmd/bridgectl
+	go build $(LDFLAGS) -o $(BRIDGE_CLI) ./cmd/bridgectl
 
 proto:
 	protoc \
