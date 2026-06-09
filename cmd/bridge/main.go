@@ -25,9 +25,17 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "config/bridge.yaml", "Path to configuration file")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("ai-agent-bridge %s\n", version)
+		os.Exit(0)
+	}
 
 	bootstrapLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 

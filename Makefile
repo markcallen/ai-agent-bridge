@@ -4,6 +4,8 @@ BIN_DIR := bin
 BRIDGE := $(BIN_DIR)/ai-agent-bridge
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
 BRIDGE_CLI := $(BIN_DIR)/bridgectl
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 CONFIG ?= config/bridge.yaml
 DEV_CONFIG ?= config/bridge-dev.yaml
 CHAT_TARGET ?= bridge.local:9445
@@ -13,9 +15,9 @@ CHAT_REPO ?= /repos/penduin
 CHAT_JWT_KEY ?= ../../certs/jwt-signing.key
 build: proto
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BRIDGE) ./cmd/bridge
-	go build -o $(BRIDGE_CA) ./cmd/bridge-ca
-	go build -o $(BRIDGE_CLI) ./cmd/bridgectl
+	go build $(LDFLAGS) -o $(BRIDGE) ./cmd/bridge
+	go build $(LDFLAGS) -o $(BRIDGE_CA) ./cmd/bridge-ca
+	go build $(LDFLAGS) -o $(BRIDGE_CLI) ./cmd/bridgectl
 
 build-cli:
 	@mkdir -p $(BIN_DIR)
