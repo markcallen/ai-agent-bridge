@@ -1,13 +1,13 @@
 Package: ai-agent-bridge
-Version: 0.6.2
+Version: 0.6.3
 Architecture: amd64
 Maintainer: Mark Callen <opensource@markcallen.com>
 Depends: adduser, ca-certificates
-Filename: pool/main/ai-agent-bridge_0.6.2_amd64.deb
-Size: 19713658
-MD5sum: 6c51fe21d520eb27c8047ae5197e99ea
-SHA1: 63724d2c2db0c1a59468468c7e74eccf3cffd50f
-SHA256: 591425050a97a8c67faf3d3b8737b23b0bee3d5fa8c3ea6af4a6502ee3145c8b
+Filename: pool/main/ai-agent-bridge_0.6.3_amd64.deb
+Size: 19715850
+MD5sum: 2637aa293f04bb9e9722279213075ef6
+SHA1: e1f5cf515a7dfcdb6ceb6a2e81218a4429e7be9f
+SHA256: 10d253a06150497bca48b295519d13fe7bb4b1480edebca8df621a489425f494
 Section: admin
 Priority: optional
 Description: AI Agent Bridge daemon
