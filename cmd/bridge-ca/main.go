@@ -9,6 +9,8 @@ import (
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 )
 
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -33,6 +35,9 @@ func main() {
 		cmdVerify()
 	case "help", "--help", "-h":
 		usage()
+	case "--version", "-version":
+		fmt.Printf("ai-agent-bridge-ca %s\n", version)
+		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		usage()
@@ -50,6 +55,9 @@ Commands:
   bundle       Build a trust bundle from multiple CA certs
   jwt-keygen   Generate Ed25519 keypair for JWT signing
   verify       Verify a certificate against a trust bundle
+
+Flags:
+  --version    Print version and exit
 
 Run 'ai-agent-bridge-ca <command> --help' for details.
 `)

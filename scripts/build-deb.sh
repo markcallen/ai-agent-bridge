@@ -32,9 +32,10 @@ fi
 mkdir -p "$OUTPUT_DIR"
 
 mkdir -p "$ROOT_DIR/bin"
-GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/ai-agent-bridge" ./cmd/bridge
-GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/ai-agent-bridge-ca" ./cmd/bridge-ca
-GOARCH="$ARCH" go build -o "$ROOT_DIR/bin/bridgectl" ./cmd/bridgectl
+LDFLAGS="-X main.version=${VERSION}"
+GOARCH="$ARCH" go build -ldflags "$LDFLAGS" -o "$ROOT_DIR/bin/ai-agent-bridge" ./cmd/bridge
+GOARCH="$ARCH" go build -ldflags "$LDFLAGS" -o "$ROOT_DIR/bin/ai-agent-bridge-ca" ./cmd/bridge-ca
+GOARCH="$ARCH" go build -ldflags "$LDFLAGS" -o "$ROOT_DIR/bin/bridgectl" ./cmd/bridgectl
 
 mkdir -p \
   "$PKG_ROOT/DEBIAN" \
