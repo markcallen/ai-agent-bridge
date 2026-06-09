@@ -15,8 +15,8 @@ This is the canonical documentation index for the repository.
 
 1. [install-ubuntu.md](install-ubuntu.md) if you are installing the packaged daemon on Ubuntu
 2. [service.md](service.md)
-4. [grpc-api.md](grpc-api.md)
-5. [go-sdk.md](go-sdk.md) or [node-sdk.md](node-sdk.md), depending on the client you are building
+3. [grpc-api.md](grpc-api.md)
+4. [go-sdk.md](go-sdk.md) or [node-sdk.md](node-sdk.md), depending on the client you are building
 
 ## Local Development
 
