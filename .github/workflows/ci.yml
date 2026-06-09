@@ -194,25 +194,3 @@ jobs:
 
       - name: Run local apt smoke test
         run: ./scripts/smoke-apt-local.sh
-
-  apt-smoke-profile:
-    if: github.event_name == 'pull_request'
-    needs:
-      - go-lint
-      - go-test
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Install packaging tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y apt-utils dpkg-dev gnupg
-
-      - name: Run ai-desktops profile apt smoke test
-        run: ./scripts/smoke-apt-profile.sh

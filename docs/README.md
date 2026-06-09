@@ -5,7 +5,6 @@ This is the canonical documentation index for the repository.
 ## Core Guides
 
 - [install-ubuntu.md](install-ubuntu.md): apt repository installation, package contents, systemd behavior, and runtime prerequisites.
-- [ai-desktops.md](ai-desktops.md): provisioning, operating, and troubleshooting the bridge on an ai-desktops Ubuntu 24.04 agent host with provider CLIs, `/workspace` access, and credential injection.
 - [service.md](service.md): daemon architecture, configuration, security model, Docker usage, and operational details.
 - [grpc-api.md](grpc-api.md): protobuf RPC surface, message fields, error codes, and client generation details.
 - [go-sdk.md](go-sdk.md): Go SDK usage, client options, reconnect behavior, and API examples.
@@ -15,10 +14,9 @@ This is the canonical documentation index for the repository.
 ## Recommended Reading Order
 
 1. [install-ubuntu.md](install-ubuntu.md) if you are installing the packaged daemon on Ubuntu
-2. [ai-desktops.md](ai-desktops.md) if you are setting up an ai-desktops agent host
-3. [service.md](service.md)
-4. [grpc-api.md](grpc-api.md)
-5. [go-sdk.md](go-sdk.md) or [node-sdk.md](node-sdk.md), depending on the client you are building
+2. [service.md](service.md)
+3. [grpc-api.md](grpc-api.md)
+4. [go-sdk.md](go-sdk.md) or [node-sdk.md](node-sdk.md), depending on the client you are building
 
 ## Local Development
 
