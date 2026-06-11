@@ -65,6 +65,7 @@ func AddrPath() string {
 type Server struct {
 	grpcServer *grpc.Server
 	supervisor *bridge.Supervisor
+	registry   *bridge.Registry
 	listener   net.Listener
 	logger     *slog.Logger
 	stateDir   string
@@ -328,6 +329,7 @@ func Start(cfg Config) (*Server, error) {
 	s := &Server{
 		grpcServer: grpcServer,
 		supervisor: sup,
+		registry:   registry,
 		listener:   ln,
 		logger:     logger,
 		stateDir:   stateDir,

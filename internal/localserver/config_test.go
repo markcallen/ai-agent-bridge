@@ -1,6 +1,7 @@
 package localserver
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,14 +10,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestStartWithConfigPath verifies that Start loads provider declarations from
-// a YAML config file and registers them before auto-detected providers.
+// registeredProviders returns the provider IDs registered with the server.
+// Uses the internal registry directly to avoid the HealthAll probe that
+// Health/ListProviders RPCs trigger.
+func registeredProviders(srv *Server) []string {
+	return srv.registry.List()
+}
+
+// TestStartWithConfigPath verifies that Start loads providers from a YAML
+// config file and that the declared provider is actually registered.
 func TestStartWithConfigPath(t *testing.T) {
 	stateDir := t.TempDir()
-	configDir := t.TempDir()
-	configPath := filepath.Join(configDir, "bridge.yaml")
+	configPath := filepath.Join(t.TempDir(), "bridge.yaml")
 
-	// Write a minimal config declaring a provider that uses 'cat' (always present).
 	yaml := `
 providers:
   testprovider:
@@ -32,16 +38,21 @@ providers:
 	})
 	require.NoError(t, err)
 	defer srv.Stop()
+
+	assert.Contains(t, registeredProviders(srv), "testprovider")
 }
 
 // TestStartWithMissingConfigPath verifies that Start succeeds when ConfigPath
 // points to a non-existent file (missing file is silently ignored).
 func TestStartWithMissingConfigPath(t *testing.T) {
 	stateDir := t.TempDir()
+	// Use a path inside a temp dir whose subdirectory was never created —
+	// guaranteed missing without relying on any fixed absolute path.
+	missingPath := filepath.Join(t.TempDir(), "subdir", "bridge.yaml")
 
 	srv, err := Start(Config{
 		StateDir:   stateDir,
-		ConfigPath: "/nonexistent/path/bridge.yaml",
+		ConfigPath: missingPath,
 		Logger:     testLogger(),
 	})
 	require.NoError(t, err)
@@ -63,19 +74,28 @@ func TestStartWithEmptyConfigPath(t *testing.T) {
 }
 
 // TestStartConfigProviderOverridesAutoDetect verifies that a provider declared
-// in the config file is not overwritten by an auto-detected provider with the
-// same ID.
+// in the config file takes precedence over an auto-detected provider with the
+// same ID. It creates a fake executable named after a known provider on PATH,
+// then declares the same ID in config with a different binary (cat), and
+// asserts the server registers it exactly once.
 func TestStartConfigProviderOverridesAutoDetect(t *testing.T) {
-	stateDir := t.TempDir()
-	configDir := t.TempDir()
-	configPath := filepath.Join(configDir, "bridge.yaml")
+	// Create a temp bin dir with a fake "codex" executable so detectProviders
+	// will auto-detect it.
+	binDir := t.TempDir()
+	fakeBin := filepath.Join(binDir, "codex")
+	require.NoError(t, os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755))
 
-	// Declare 'echo' in the config — the same ID that Start always registers
-	// via auto-registration. The config-declared version should take precedence
-	// (the loop skips any auto-detected provider whose ID is already registered).
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", fmt.Sprintf("%s:%s", binDir, origPath))
+
+	stateDir := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "bridge.yaml")
+
+	// Declare "codex" in config — registered first, so the auto-detected
+	// duplicate must be skipped.
 	yaml := `
 providers:
-  echo:
+  codex:
     binary: "cat"
     startup_probe: "none"
 `
@@ -89,19 +109,24 @@ providers:
 	require.NoError(t, err)
 	defer srv.Stop()
 
-	// Server should have started successfully — duplicate registration is
-	// handled by the "already registered from config" skip guard.
-	assert.NotNil(t, srv)
+	// "codex" must appear exactly once — config-declared version registered
+	// first, auto-detected duplicate skipped.
+	count := 0
+	for _, id := range registeredProviders(srv) {
+		if id == "codex" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "codex should be registered exactly once")
 }
 
 // TestStartWithInvalidConfigReturnsError verifies that Start returns an error
-// when ConfigPath exists but contains invalid YAML.
+// when ConfigPath exists but contains invalid configuration.
 func TestStartWithInvalidConfigReturnsError(t *testing.T) {
 	stateDir := t.TempDir()
-	configDir := t.TempDir()
-	configPath := filepath.Join(configDir, "bridge.yaml")
+	configPath := filepath.Join(t.TempDir(), "bridge.yaml")
 
-	// Use YAML with a bad duration value to trigger config.Validate failure.
+	// Bad duration value triggers config.Validate failure.
 	invalidYAML := `
 sessions:
   idle_timeout: "not-a-duration"
