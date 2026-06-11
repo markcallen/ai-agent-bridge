@@ -58,12 +58,12 @@ func TestSupervisorSessionLifecycle(t *testing.T) {
 		t.Fatalf("Provider=%q want %q", info.Provider, "fake")
 	}
 
-	state, err := supervisor.Attach("session-a", "client-a", 0)
+	state, err := supervisor.Attach("session-a", "client-a", 0, AttachRoleWriter)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
-	if _, err := supervisor.Attach("session-a", "client-b", 0); !errors.Is(err, ErrSessionAlreadyAttached) {
-		t.Fatalf("Attach while attached error=%v want %v", err, ErrSessionAlreadyAttached)
+	if _, err := supervisor.Attach("session-a", "client-b", 0, AttachRoleWriter); !errors.Is(err, ErrWriterConflict) {
+		t.Fatalf("Attach while attached error=%v want %v", err, ErrWriterConflict)
 	}
 
 	if _, err := supervisor.WriteInput("session-a", "wrong-client", []byte("hello\n")); !errors.Is(err, ErrClientMismatch) {
@@ -95,7 +95,7 @@ func TestSupervisorSessionLifecycle(t *testing.T) {
 	if err := supervisor.Detach("session-a", "client-a"); err != nil {
 		t.Fatalf("Detach: %v", err)
 	}
-	replayState, err := supervisor.Attach("session-a", "client-b", 0)
+	replayState, err := supervisor.Attach("session-a", "client-b", 0, AttachRoleWriter)
 	if err != nil {
 		t.Fatalf("Attach replay: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestSupervisorLoadHistoryRecoversRunningProcess(t *testing.T) {
 		t.Fatal("Recovered flag was false")
 	}
 
-	attach, err := sup.Attach("recover-1", "client-a", 0)
+	attach, err := sup.Attach("recover-1", "client-a", 0, AttachRoleWriter)
 	if err != nil {
 		t.Fatalf("Attach recovered: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestSupervisorLoadHistoryRecoversRunningProcess(t *testing.T) {
 	default:
 		t.Fatal("recovered live channel should be immediately closed")
 	}
-	attachAfter, err := sup.Attach("recover-1", "client-b", chunk.Seq)
+	attachAfter, err := sup.Attach("recover-1", "client-b", chunk.Seq, AttachRoleWriter)
 	if err != nil {
 		t.Fatalf("Attach recovered after seq: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestSupervisorHistoryChunkReplay(t *testing.T) {
 	}
 
 	// Write some input so /bin/cat echoes it into the PTY buffer.
-	state, err := sup.Attach("replay-1", "client-a", 0)
+	state, err := sup.Attach("replay-1", "client-a", 0, AttachRoleWriter)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -450,7 +450,7 @@ func TestSupervisorHistoryChunkReplay(t *testing.T) {
 	}
 
 	// AttachSession on a history session must return replay chunks from the store.
-	state2, err := sup2.Attach("replay-1", "client-b", 0)
+	state2, err := sup2.Attach("replay-1", "client-b", 0, AttachRoleWriter)
 	if err != nil {
 		t.Fatalf("Attach history session: %v", err)
 	}
@@ -505,9 +505,12 @@ func TestReadLoopStreamJSONParsing(t *testing.T) {
 	sup := NewSupervisor(NewRegistry(), DefaultPolicy(), 64*1024, time.Minute)
 	defer sup.Close()
 
+	liveCh := make(chan OutputChunk, 100)
 	ms := &managedSession{
-		buf:  NewByteBuffer(64 * 1024),
-		live: make(chan OutputChunk, 100),
+		buf: NewByteBuffer(64 * 1024),
+		observers: map[string]*observerEntry{
+			"test-client": {ch: liveCh, role: AttachRoleWriter},
+		},
 		info: SessionInfo{SessionID: "test-stream"},
 	}
 
@@ -590,7 +593,6 @@ func TestReadLoopStreamJSONHandlesLargeLines(t *testing.T) {
 
 	ms := &managedSession{
 		buf:  NewByteBuffer(256 * 1024),
-		live: make(chan OutputChunk, 10),
 		info: SessionInfo{SessionID: "test-large-stream"},
 	}
 
@@ -671,7 +673,7 @@ func TestStreamJSONSessionLifecycle(t *testing.T) {
 	}
 
 	// Attach and wait for at least one chunk from the process output.
-	state, err := sup.Attach("stream-1", "client-x", 0)
+	state, err := sup.Attach("stream-1", "client-x", 0, AttachRoleWriter)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -829,7 +831,7 @@ func TestReadLoopStripsANSIEscapeCodes(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	state, err := sup.Attach("ansi-1", "client-ansi", 0)
+	state, err := sup.Attach("ansi-1", "client-ansi", 0, AttachRoleWriter)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
@@ -895,4 +897,190 @@ func waitForRecoveredStopped(t *testing.T, supervisor *Supervisor, sessionID str
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for recovered session %q to stop", sessionID)
+}
+
+func newTestSupervisor(t *testing.T) *Supervisor {
+	t.Helper()
+	registry := NewRegistry()
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024*1024, time.Minute)
+	t.Cleanup(func() { sup.Close() })
+	return sup
+}
+
+func startTestSession(t *testing.T, sup *Supervisor, sessionID string) *SessionInfo {
+	t.Helper()
+	info, err := sup.Start(context.Background(), SessionConfig{
+		ProjectID:   "project-test",
+		SessionID:   sessionID,
+		RepoPath:    t.TempDir(),
+		Options:     map[string]string{"provider": "fake"},
+		InitialCols: 80,
+		InitialRows: 24,
+	})
+	if err != nil {
+		t.Fatalf("Start %s: %v", sessionID, err)
+	}
+	return info
+}
+
+func TestMultiObserverFanOut(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "fan-out")
+
+	w, err := sup.Attach("fan-out", "writer", 0, AttachRoleWriter)
+	if err != nil {
+		t.Fatalf("Attach writer: %v", err)
+	}
+	o1, err := sup.Attach("fan-out", "obs-1", 0, AttachRoleObserver)
+	if err != nil {
+		t.Fatalf("Attach observer 1: %v", err)
+	}
+	o2, err := sup.Attach("fan-out", "obs-2", 0, AttachRoleObserver)
+	if err != nil {
+		t.Fatalf("Attach observer 2: %v", err)
+	}
+
+	if _, err := sup.WriteInput("fan-out", "writer", []byte("ping\n")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+
+	for label, ch := range map[string]<-chan OutputChunk{"writer": w.Live, "obs-1": o1.Live, "obs-2": o2.Live} {
+		c := waitForChunk(t, ch, "ping")
+		if !bytes.Contains(c.Payload, []byte("ping")) {
+			t.Errorf("%s: expected 'ping' in chunk", label)
+		}
+	}
+}
+
+func TestWriterConflictWithObserverAllowed(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "conflict")
+
+	if _, err := sup.Attach("conflict", "writer-1", 0, AttachRoleWriter); err != nil {
+		t.Fatalf("Attach writer-1: %v", err)
+	}
+	// Second writer must fail.
+	if _, err := sup.Attach("conflict", "writer-2", 0, AttachRoleWriter); !errors.Is(err, ErrWriterConflict) {
+		t.Fatalf("want ErrWriterConflict, got %v", err)
+	}
+	// Observers are always allowed.
+	if _, err := sup.Attach("conflict", "obs-1", 0, AttachRoleObserver); err != nil {
+		t.Fatalf("Attach observer while writer held: %v", err)
+	}
+}
+
+func TestClaimWriterForce(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "claim")
+
+	// First client attaches as observer (will be upgraded to writer via ClaimWriter).
+	if _, err := sup.Attach("claim", "old-writer", 0, AttachRoleWriter); err != nil {
+		t.Fatalf("Attach old-writer: %v", err)
+	}
+	// New client attaches as observer.
+	if _, err := sup.Attach("claim", "new-client", 0, AttachRoleObserver); err != nil {
+		t.Fatalf("Attach new-client as observer: %v", err)
+	}
+
+	// Force-claim the writer slot.
+	result, err := sup.ClaimWriter("claim", "new-client", true)
+	if err != nil {
+		t.Fatalf("ClaimWriter force: %v", err)
+	}
+	if result.PreviousWriterClientID != "old-writer" {
+		t.Errorf("PreviousClientID=%q want %q", result.PreviousWriterClientID, "old-writer")
+	}
+
+	// Confirm old-writer is now observer.
+	info, err := sup.Get("claim")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if info.ActiveWriterClientID != "new-client" {
+		t.Errorf("ActiveWriterClientID=%q want new-client", info.ActiveWriterClientID)
+	}
+}
+
+func TestClaimWriterNoForceConflict(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "claim-noforce")
+
+	if _, err := sup.Attach("claim-noforce", "existing-writer", 0, AttachRoleWriter); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if _, err := sup.Attach("claim-noforce", "new-obs", 0, AttachRoleObserver); err != nil {
+		t.Fatalf("Attach observer: %v", err)
+	}
+
+	_, err := sup.ClaimWriter("claim-noforce", "new-obs", false)
+	if !errors.Is(err, ErrWriterConflict) {
+		t.Fatalf("want ErrWriterConflict without force, got %v", err)
+	}
+}
+
+func TestReleaseWriter(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "release")
+
+	if _, err := sup.Attach("release", "the-writer", 0, AttachRoleWriter); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+
+	info, err := sup.Get("release")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if info.ActiveWriterClientID != "the-writer" {
+		t.Fatalf("expected the-writer to hold writer slot")
+	}
+
+	if err := sup.ReleaseWriter("release", "the-writer"); err != nil {
+		t.Fatalf("ReleaseWriter: %v", err)
+	}
+
+	info, err = sup.Get("release")
+	if err != nil {
+		t.Fatalf("Get after release: %v", err)
+	}
+	if info.ActiveWriterClientID != "" {
+		t.Errorf("ActiveWriterClientID=%q want empty after release", info.ActiveWriterClientID)
+	}
+}
+
+func TestReleaseWriterNonWriter(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "release-nonwriter")
+
+	if _, err := sup.Attach("release-nonwriter", "obs", 0, AttachRoleObserver); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	// Releasing when you are not the writer should error.
+	if err := sup.ReleaseWriter("release-nonwriter", "obs"); err == nil {
+		t.Fatal("expected error releasing writer as observer, got nil")
+	}
+}
+
+func TestDetachClearsWriterSlot(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "detach-clear")
+
+	state, err := sup.Attach("detach-clear", "wr", 0, AttachRoleWriter)
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	_ = state
+
+	if err := sup.Detach("detach-clear", "wr"); err != nil {
+		t.Fatalf("Detach: %v", err)
+	}
+	info, err := sup.Get("detach-clear")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if info.ActiveWriterClientID != "" {
+		t.Errorf("ActiveWriterClientID=%q want empty after detach", info.ActiveWriterClientID)
+	}
 }

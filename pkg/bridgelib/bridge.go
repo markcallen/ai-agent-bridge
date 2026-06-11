@@ -114,5 +114,9 @@ func (b *Bridge) ResizeSession(sessionID, clientID string, cols, rows uint32) er
 	return b.supervisor.Resize(sessionID, clientID, cols, rows)
 }
 func (b *Bridge) AttachSession(sessionID, clientID string, afterSeq uint64) (*bridge.AttachState, error) {
-	return b.supervisor.Attach(sessionID, clientID, afterSeq)
+	return b.supervisor.Attach(sessionID, clientID, afterSeq, bridge.AttachRoleWriter)
+}
+
+func (b *Bridge) AttachSessionObserver(sessionID, clientID string, afterSeq uint64) (*bridge.AttachState, error) {
+	return b.supervisor.Attach(sessionID, clientID, afterSeq, bridge.AttachRoleObserver)
 }

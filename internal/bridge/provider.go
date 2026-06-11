@@ -65,6 +65,11 @@ type SessionInfo struct {
 	LastSeq          uint64
 	Cols             uint32
 	Rows             uint32
+	// ActiveWriterClientID is the client currently holding the writer slot.
+	// Empty when no writer is attached.
+	ActiveWriterClientID string
+	// ObserverCount is the number of read-only observer clients currently attached.
+	ObserverCount int
 }
 
 // ChunkType classifies an OutputChunk's content.

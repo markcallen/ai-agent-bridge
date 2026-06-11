@@ -161,43 +161,51 @@ func Start(cfg Config) (*Server, error) {
 	// Merge YAML config file values into cfg. Explicit fields in cfg take
 	// precedence: we only apply file values when the cfg field is still at
 	// its zero value.
+	var configProviderDefs map[string]config.ProviderConfig
+	var providerRoot string
 	if cfg.ConfigPath != "" {
 		fileCfg, err := config.Load(cfg.ConfigPath)
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("load config %q: %w", cfg.ConfigPath, err)
 		}
-		if cfg.DBPath == "" && fileCfg.Persistence.DBPath != "" {
-			cfg.DBPath = fileCfg.Persistence.DBPath
-		}
-		if cfg.RedactPatterns == nil && len(fileCfg.Logging.RedactPatterns) > 0 {
-			cfg.RedactPatterns = fileCfg.Logging.RedactPatterns
-		}
-		if cfg.RateLimits.GlobalRPS == 0 && fileCfg.RateLimits.GlobalRPS > 0 {
-			cfg.RateLimits.GlobalRPS = fileCfg.RateLimits.GlobalRPS
-		}
-		if cfg.RateLimits.GlobalBurst == 0 && fileCfg.RateLimits.GlobalBurst > 0 {
-			cfg.RateLimits.GlobalBurst = fileCfg.RateLimits.GlobalBurst
-		}
-		if cfg.RateLimits.StartSessionPerClientRPS == 0 && fileCfg.RateLimits.StartSessionPerClientRPS > 0 {
-			cfg.RateLimits.StartSessionPerClientRPS = fileCfg.RateLimits.StartSessionPerClientRPS
-		}
-		if cfg.RateLimits.StartSessionPerClientBurst == 0 && fileCfg.RateLimits.StartSessionPerClientBurst > 0 {
-			cfg.RateLimits.StartSessionPerClientBurst = fileCfg.RateLimits.StartSessionPerClientBurst
-		}
-		if cfg.RateLimits.SendInputPerSessionRPS == 0 && fileCfg.RateLimits.SendInputPerSessionRPS > 0 {
-			cfg.RateLimits.SendInputPerSessionRPS = fileCfg.RateLimits.SendInputPerSessionRPS
-		}
-		if cfg.RateLimits.SendInputPerSessionBurst == 0 && fileCfg.RateLimits.SendInputPerSessionBurst > 0 {
-			cfg.RateLimits.SendInputPerSessionBurst = fileCfg.RateLimits.SendInputPerSessionBurst
-		}
-		if cfg.EventBufferSize == 0 && fileCfg.Sessions.EventBufferSize > 0 {
-			cfg.EventBufferSize = fileCfg.Sessions.EventBufferSize
-		}
-		if cfg.IdleTimeout == 0 && fileCfg.Sessions.IdleTimeout != "" {
-			cfg.IdleTimeout = config.ParseDuration(fileCfg.Sessions.IdleTimeout, 0)
-		}
-		if cfg.AllowedPaths == nil && len(fileCfg.AllowedPaths) > 0 {
-			cfg.AllowedPaths = fileCfg.AllowedPaths
+		if fileCfg != nil {
+			if len(fileCfg.Providers) > 0 {
+				configProviderDefs = fileCfg.Providers
+			}
+			providerRoot = fileCfg.Runtime.ProviderRoot
+			if cfg.DBPath == "" && fileCfg.Persistence.DBPath != "" {
+				cfg.DBPath = fileCfg.Persistence.DBPath
+			}
+			if cfg.RedactPatterns == nil && len(fileCfg.Logging.RedactPatterns) > 0 {
+				cfg.RedactPatterns = fileCfg.Logging.RedactPatterns
+			}
+			if cfg.RateLimits.GlobalRPS == 0 && fileCfg.RateLimits.GlobalRPS > 0 {
+				cfg.RateLimits.GlobalRPS = fileCfg.RateLimits.GlobalRPS
+			}
+			if cfg.RateLimits.GlobalBurst == 0 && fileCfg.RateLimits.GlobalBurst > 0 {
+				cfg.RateLimits.GlobalBurst = fileCfg.RateLimits.GlobalBurst
+			}
+			if cfg.RateLimits.StartSessionPerClientRPS == 0 && fileCfg.RateLimits.StartSessionPerClientRPS > 0 {
+				cfg.RateLimits.StartSessionPerClientRPS = fileCfg.RateLimits.StartSessionPerClientRPS
+			}
+			if cfg.RateLimits.StartSessionPerClientBurst == 0 && fileCfg.RateLimits.StartSessionPerClientBurst > 0 {
+				cfg.RateLimits.StartSessionPerClientBurst = fileCfg.RateLimits.StartSessionPerClientBurst
+			}
+			if cfg.RateLimits.SendInputPerSessionRPS == 0 && fileCfg.RateLimits.SendInputPerSessionRPS > 0 {
+				cfg.RateLimits.SendInputPerSessionRPS = fileCfg.RateLimits.SendInputPerSessionRPS
+			}
+			if cfg.RateLimits.SendInputPerSessionBurst == 0 && fileCfg.RateLimits.SendInputPerSessionBurst > 0 {
+				cfg.RateLimits.SendInputPerSessionBurst = fileCfg.RateLimits.SendInputPerSessionBurst
+			}
+			if cfg.EventBufferSize == 0 && fileCfg.Sessions.EventBufferSize > 0 {
+				cfg.EventBufferSize = fileCfg.Sessions.EventBufferSize
+			}
+			if cfg.IdleTimeout == 0 && fileCfg.Sessions.IdleTimeout != "" {
+				cfg.IdleTimeout = config.ParseDuration(fileCfg.Sessions.IdleTimeout, 0)
+			}
+			if cfg.AllowedPaths == nil && len(fileCfg.AllowedPaths) > 0 {
+				cfg.AllowedPaths = fileCfg.AllowedPaths
+			}
 		}
 	}
 
@@ -256,9 +264,55 @@ func Start(cfg Config) (*Server, error) {
 		}))
 	}
 
-	// Build provider registry from auto-detected CLIs.
+	// Build provider registry. Config-file providers take precedence; the
+	// auto-detect path fills in any providers not explicitly configured.
 	registry := bridge.NewRegistry()
+
+	// Register providers explicitly declared in the config file.
+	for id, pc := range configProviderDefs {
+		timeout := 60 * time.Second
+		if pc.StartupTimeout != "" {
+			if d, err := time.ParseDuration(pc.StartupTimeout); err == nil {
+				timeout = d
+			}
+		}
+		p := provider.NewStdioProvider(provider.StdioConfig{
+			ProviderID:     id,
+			Binary:         pc.Binary,
+			DefaultArgs:    pc.Args,
+			StartupTimeout: timeout,
+			StopGrace:      10 * time.Second,
+			StartupProbe:   pc.StartupProbe,
+			PromptPattern:  pc.PromptPattern,
+			RequiredEnv:    pc.RequiredEnv,
+			StreamJSON:     pc.StreamJSON,
+			StripANSI:      pc.StripANSI,
+			ProviderRoot:   providerRoot,
+		})
+		if err := registry.Register(p); err != nil {
+			logger.Warn("skip config provider", "provider", id, "error", err)
+			continue
+		}
+		logger.Info("registered config provider", "provider", id, "binary", pc.Binary)
+	}
+
+	// Build fallbacks map from config providers (merged with any set on cfg).
+	if cfg.ProviderFallbacks == nil && len(configProviderDefs) > 0 {
+		cfg.ProviderFallbacks = make(map[string][]string)
+	}
+	for id, pc := range configProviderDefs {
+		if len(pc.Fallbacks) > 0 {
+			if _, already := cfg.ProviderFallbacks[id]; !already {
+				cfg.ProviderFallbacks[id] = pc.Fallbacks
+			}
+		}
+	}
+
+	// Auto-detect additional providers not already registered via config.
 	for _, pd := range detectProviders() {
+		if _, err := registry.Get(pd.ID); err == nil {
+			continue // already registered from config
+		}
 		p := provider.NewStdioProvider(provider.StdioConfig{
 			ProviderID:     pd.ID,
 			Binary:         pd.Binary,

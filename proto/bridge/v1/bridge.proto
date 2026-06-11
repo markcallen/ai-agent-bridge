@@ -16,6 +16,14 @@ service BridgeService {
   rpc WriteInput(WriteInputRequest) returns (WriteInputResponse);
   rpc ResizeSession(ResizeSessionRequest) returns (ResizeSessionResponse);
 
+  // ClaimWriter promotes the caller from OBSERVER to WRITER, taking the active
+  // writer slot. Returns ErrWriterConflict (ALREADY_EXISTS) when another client
+  // already holds the slot.
+  rpc ClaimWriter(ClaimWriterRequest) returns (ClaimWriterResponse);
+  // ReleaseWriter demotes the caller from WRITER to OBSERVER, freeing the slot
+  // so another client can claim it.
+  rpc ReleaseWriter(ReleaseWriterRequest) returns (ReleaseWriterResponse);
+
   rpc Health(HealthRequest) returns (HealthResponse);
   rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
 }
@@ -30,6 +38,18 @@ enum SessionStatus {
   SESSION_STATUS_FAILED = 6;
 }
 
+// AttachRole controls whether the connecting client can send input to the
+// session (WRITER) or only observe the output stream (OBSERVER).
+enum AttachRole {
+  ATTACH_ROLE_UNSPECIFIED = 0;
+  // ATTACH_ROLE_WRITER requests the active-writer slot. The server rejects the
+  // attach with ALREADY_EXISTS when another client already holds the slot.
+  ATTACH_ROLE_WRITER = 1;
+  // ATTACH_ROLE_OBSERVER attaches read-only. The client receives all output
+  // events but WriteInput / ResizeSession calls are rejected.
+  ATTACH_ROLE_OBSERVER = 2;
+}
+
 enum AttachEventType {
   ATTACH_EVENT_TYPE_UNSPECIFIED = 0;
   ATTACH_EVENT_TYPE_ATTACHED = 1;
@@ -40,6 +60,12 @@ enum AttachEventType {
   // ATTACH_EVENT_TYPE_THINKING carries a thinking block emitted by an agent
   // before its final response. Only emitted by stream-JSON providers (issue #1).
   ATTACH_EVENT_TYPE_THINKING = 6;
+  // ATTACH_EVENT_TYPE_WRITER_CLAIMED is sent to all observers when a client
+  // claims the active-writer slot.
+  ATTACH_EVENT_TYPE_WRITER_CLAIMED = 7;
+  // ATTACH_EVENT_TYPE_WRITER_RELEASED is sent to all observers when the active
+  // writer releases the slot.
+  ATTACH_EVENT_TYPE_WRITER_RELEASED = 8;
 }
 
 message StartSessionRequest {
@@ -87,6 +113,11 @@ message GetSessionResponse {
   uint64 last_seq = 13;
   uint32 cols = 14;
   uint32 rows = 15;
+  // active_writer_client_id is the client currently holding the writer slot,
+  // or empty when no writer is attached.
+  string active_writer_client_id = 16;
+  // observer_count is the number of read-only observers currently attached.
+  int32 observer_count = 17;
 }
 
 message ListSessionsRequest {
@@ -101,6 +132,9 @@ message AttachSessionRequest {
   string session_id = 1;
   uint64 after_seq = 2;
   string client_id = 3;
+  // role controls whether this client attaches as a writer or observer.
+  // Defaults to ATTACH_ROLE_WRITER for backwards compatibility.
+  AttachRole role = 4;
 }
 
 message AttachSessionEvent {
@@ -119,6 +153,9 @@ message AttachSessionEvent {
   uint32 rows = 13;
   // thinking_text is set when type == ATTACH_EVENT_TYPE_THINKING (issue #1).
   string thinking_text = 14;
+  // writer_client_id is set on WRITER_CLAIMED / WRITER_RELEASED events to
+  // identify which client claimed or released the writer slot.
+  string writer_client_id = 15;
 }
 
 message WriteInputRequest {
@@ -141,6 +178,31 @@ message ResizeSessionRequest {
 
 message ResizeSessionResponse {
   bool applied = 1;
+}
+
+message ClaimWriterRequest {
+  string session_id = 1;
+  string client_id = 2;
+  // force, when true, evicts the current writer rather than returning
+  // ALREADY_EXISTS. The evicted writer receives a WRITER_RELEASED event.
+  bool force = 3;
+}
+
+message ClaimWriterResponse {
+  // claimed is true when the caller now holds the writer slot.
+  bool claimed = 1;
+  // previous_writer_client_id is set when force evicted another writer.
+  string previous_writer_client_id = 2;
+}
+
+message ReleaseWriterRequest {
+  string session_id = 1;
+  string client_id = 2;
+}
+
+message ReleaseWriterResponse {
+  // released is true when the caller successfully released the writer slot.
+  bool released = 1;
 }
 
 message HealthRequest {}
