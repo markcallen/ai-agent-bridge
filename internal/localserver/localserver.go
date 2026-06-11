@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -22,6 +23,7 @@ import (
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/auth"
 	"github.com/markcallen/ai-agent-bridge/internal/bridge"
+	"github.com/markcallen/ai-agent-bridge/internal/config"
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/internal/provider"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
@@ -119,6 +121,10 @@ type Config struct {
 	// ServerSANs are additional DNS names or IP addresses for the server
 	// certificate. The host from ListenAddr is added automatically.
 	ServerSANs []string
+
+	// ConfigPath is the path to a YAML config file. Providers declared in
+	// the file are registered before auto-detection. Missing file is ignored.
+	ConfigPath string
 }
 
 // Start launches a local bridge gRPC server. In local mode (default) it
@@ -138,9 +144,49 @@ func Start(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	}
 
-	// Build provider registry from auto-detected CLIs.
+	// Load providers declared in the config file.
+	var configProviders map[string]config.ProviderConfig
+	var providerRoot string
+	if cfg.ConfigPath != "" {
+		fileCfg, err := config.Load(cfg.ConfigPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("load config %q: %w", cfg.ConfigPath, err)
+		}
+		if fileCfg != nil {
+			configProviders = fileCfg.Providers
+			providerRoot = fileCfg.Runtime.ProviderRoot
+		}
+	}
+
+	// Build provider registry: config-declared providers first, then auto-detected.
 	registry := bridge.NewRegistry()
+
+	for id, pc := range configProviders {
+		timeout := config.ParseDuration(pc.StartupTimeout, 60*time.Second)
+		p := provider.NewStdioProvider(provider.StdioConfig{
+			ProviderID:     id,
+			Binary:         pc.Binary,
+			DefaultArgs:    pc.Args,
+			StartupTimeout: timeout,
+			StopGrace:      10 * time.Second,
+			StartupProbe:   pc.StartupProbe,
+			PromptPattern:  pc.PromptPattern,
+			RequiredEnv:    pc.RequiredEnv,
+			StreamJSON:     pc.StreamJSON,
+			StripANSI:      pc.StripANSI,
+			ProviderRoot:   providerRoot,
+		})
+		if err := registry.Register(p); err != nil {
+			logger.Warn("skip config provider", "provider", id, "error", err)
+			continue
+		}
+		logger.Info("registered config provider", "provider", id, "binary", pc.Binary)
+	}
+
 	for _, pd := range detectProviders() {
+		if _, err := registry.Get(pd.ID); err == nil {
+			continue // already registered from config
+		}
 		p := provider.NewStdioProvider(provider.StdioConfig{
 			ProviderID:     pd.ID,
 			Binary:         pd.Binary,
