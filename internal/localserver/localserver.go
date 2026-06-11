@@ -22,8 +22,10 @@ import (
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/auth"
 	"github.com/markcallen/ai-agent-bridge/internal/bridge"
+	"github.com/markcallen/ai-agent-bridge/internal/config"
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/internal/provider"
+	"github.com/markcallen/ai-agent-bridge/internal/redact"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -63,6 +65,7 @@ func AddrPath() string {
 type Server struct {
 	grpcServer *grpc.Server
 	supervisor *bridge.Supervisor
+	store      bridge.SessionStore // non-nil when persistence is enabled
 	listener   net.Listener
 	logger     *slog.Logger
 	stateDir   string
@@ -119,12 +122,111 @@ type Config struct {
 	// ServerSANs are additional DNS names or IP addresses for the server
 	// certificate. The host from ListenAddr is added automatically.
 	ServerSANs []string
+
+	// ConfigPath is an optional path to a YAML config file (same schema as
+	// the former daemon bridge.yaml). Values from the file are merged into
+	// Config; explicit fields in Config take precedence over file values.
+	ConfigPath string
+
+	// DBPath enables BoltDB session persistence. When set, the supervisor
+	// writes session metadata and PTY chunks to the file and rehydrates
+	// them on startup via LoadHistory.
+	DBPath string
+
+	// ProviderFallbacks maps each provider ID to an ordered list of
+	// fallback provider IDs to try when the primary is unavailable.
+	ProviderFallbacks map[string][]string
+
+	// RedactPatterns are compiled into a Redactor that scrubs sensitive
+	// values from log output.
+	RedactPatterns []string
+
+	// RateLimits overrides the default rate-limit config. Zero values keep
+	// the built-in defaults.
+	RateLimits server.RateLimitConfig
+
+	// EventBufferSize overrides the per-session output ring-buffer size in
+	// bytes. Zero uses the default (8 MiB).
+	EventBufferSize int
+
+	// IdleTimeout overrides the session idle-timeout. Zero uses the
+	// default (30 minutes).
+	IdleTimeout time.Duration
 }
 
 // Start launches a local bridge gRPC server. In local mode (default) it
 // listens on a unix socket (or TCP localhost on Windows) without auth.
 // In secure mode (ListenAddr set) it binds to TCP with mTLS + JWT.
 func Start(cfg Config) (*Server, error) {
+	// Merge YAML config file values into cfg. Explicit fields in cfg take
+	// precedence: we only apply file values when the cfg field is still at
+	// its zero value.
+	if cfg.ConfigPath != "" {
+		fileCfg, err := config.Load(cfg.ConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("load config %q: %w", cfg.ConfigPath, err)
+		}
+		if cfg.DBPath == "" && fileCfg.Persistence.DBPath != "" {
+			cfg.DBPath = fileCfg.Persistence.DBPath
+		}
+		if cfg.RedactPatterns == nil && len(fileCfg.Logging.RedactPatterns) > 0 {
+			cfg.RedactPatterns = fileCfg.Logging.RedactPatterns
+		}
+		if cfg.RateLimits.GlobalRPS == 0 && fileCfg.RateLimits.GlobalRPS > 0 {
+			cfg.RateLimits.GlobalRPS = fileCfg.RateLimits.GlobalRPS
+		}
+		if cfg.RateLimits.GlobalBurst == 0 && fileCfg.RateLimits.GlobalBurst > 0 {
+			cfg.RateLimits.GlobalBurst = fileCfg.RateLimits.GlobalBurst
+		}
+		if cfg.RateLimits.StartSessionPerClientRPS == 0 && fileCfg.RateLimits.StartSessionPerClientRPS > 0 {
+			cfg.RateLimits.StartSessionPerClientRPS = fileCfg.RateLimits.StartSessionPerClientRPS
+		}
+		if cfg.RateLimits.StartSessionPerClientBurst == 0 && fileCfg.RateLimits.StartSessionPerClientBurst > 0 {
+			cfg.RateLimits.StartSessionPerClientBurst = fileCfg.RateLimits.StartSessionPerClientBurst
+		}
+		if cfg.RateLimits.SendInputPerSessionRPS == 0 && fileCfg.RateLimits.SendInputPerSessionRPS > 0 {
+			cfg.RateLimits.SendInputPerSessionRPS = fileCfg.RateLimits.SendInputPerSessionRPS
+		}
+		if cfg.RateLimits.SendInputPerSessionBurst == 0 && fileCfg.RateLimits.SendInputPerSessionBurst > 0 {
+			cfg.RateLimits.SendInputPerSessionBurst = fileCfg.RateLimits.SendInputPerSessionBurst
+		}
+		if cfg.EventBufferSize == 0 && fileCfg.Sessions.EventBufferSize > 0 {
+			cfg.EventBufferSize = fileCfg.Sessions.EventBufferSize
+		}
+		if cfg.IdleTimeout == 0 && fileCfg.Sessions.IdleTimeout != "" {
+			cfg.IdleTimeout = config.ParseDuration(fileCfg.Sessions.IdleTimeout, 0)
+		}
+		if cfg.AllowedPaths == nil && len(fileCfg.AllowedPaths) > 0 {
+			cfg.AllowedPaths = fileCfg.AllowedPaths
+		}
+	}
+
+	// Apply built-in defaults for any fields still at zero.
+	if cfg.RateLimits.GlobalRPS == 0 {
+		cfg.RateLimits.GlobalRPS = 100
+	}
+	if cfg.RateLimits.GlobalBurst == 0 {
+		cfg.RateLimits.GlobalBurst = 200
+	}
+	if cfg.RateLimits.StartSessionPerClientRPS == 0 {
+		cfg.RateLimits.StartSessionPerClientRPS = 5
+	}
+	if cfg.RateLimits.StartSessionPerClientBurst == 0 {
+		cfg.RateLimits.StartSessionPerClientBurst = 10
+	}
+	if cfg.RateLimits.SendInputPerSessionRPS == 0 {
+		cfg.RateLimits.SendInputPerSessionRPS = 20
+	}
+	if cfg.RateLimits.SendInputPerSessionBurst == 0 {
+		cfg.RateLimits.SendInputPerSessionBurst = 50
+	}
+	if cfg.EventBufferSize <= 0 {
+		cfg.EventBufferSize = 8 << 20
+	}
+	if cfg.IdleTimeout <= 0 {
+		cfg.IdleTimeout = 30 * time.Minute
+	}
+
 	stateDir := cfg.StateDir
 	if stateDir == "" {
 		stateDir = StateDir()
@@ -136,6 +238,22 @@ func Start(cfg Config) (*Server, error) {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	}
+
+	// Apply log redaction when patterns are configured.
+	if len(cfg.RedactPatterns) > 0 {
+		redactor, err := redact.New(cfg.RedactPatterns)
+		if err != nil {
+			return nil, fmt.Errorf("compile redact patterns: %w", err)
+		}
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+				if a.Value.Kind() == slog.KindString {
+					a.Value = slog.StringValue(redactor.Redact(a.Value.String()))
+				}
+				return a
+			},
+		}))
 	}
 
 	// Build provider registry from auto-detected CLIs.
@@ -179,8 +297,24 @@ func Start(cfg Config) (*Server, error) {
 		AllowedPaths:  cfg.AllowedPaths,
 	}
 
-	// Supervisor
-	sup := bridge.NewSupervisor(registry, policy, 8<<20, 30*time.Minute)
+	// Supervisor options: persistence store when DBPath is set.
+	var supOpts []bridge.SupervisorOption
+	var store bridge.SessionStore
+	if cfg.DBPath != "" {
+		var err error
+		store, err = bridge.NewBoltSessionStore(cfg.DBPath)
+		if err != nil {
+			return nil, fmt.Errorf("open session store %q: %w", cfg.DBPath, err)
+		}
+		supOpts = append(supOpts, bridge.WithStore(store))
+	}
+
+	sup := bridge.NewSupervisor(registry, policy, cfg.EventBufferSize, cfg.IdleTimeout, supOpts...)
+	if store != nil {
+		if err := sup.LoadHistory(); err != nil {
+			logger.Warn("failed to load session history", "error", err)
+		}
+	}
 
 	// Server instance ID
 	instanceID := generateInstanceID()
@@ -195,6 +329,9 @@ func Start(cfg Config) (*Server, error) {
 		// Windows support requires named-pipe ACLs or equivalent transport security.
 		if runtime.GOOS == "windows" {
 			sup.Close()
+			if store != nil {
+				_ = store.Close()
+			}
 			return nil, fmt.Errorf("secure mode (--listen) is not yet supported on Windows")
 		}
 
@@ -205,12 +342,18 @@ func Start(cfg Config) (*Server, error) {
 		mat, err := EnsurePKI(stateDir, sans, logger)
 		if err != nil {
 			sup.Close()
+			if store != nil {
+				_ = store.Close()
+			}
 			return nil, fmt.Errorf("ensure PKI: %w", err)
 		}
 
 		secureOpts, err := buildSecureGRPCOpts(mat, stateDir, logger)
 		if err != nil {
 			sup.Close()
+			if store != nil {
+				_ = store.Close()
+			}
 			return nil, fmt.Errorf("build secure gRPC options: %w", err)
 		}
 		grpcOpts = secureOpts
@@ -224,14 +367,9 @@ func Start(cfg Config) (*Server, error) {
 
 	grpcServer := grpc.NewServer(grpcOpts...)
 
-	bridgeServer := server.New(sup, registry, logger, server.RateLimitConfig{
-		GlobalRPS:                  100,
-		GlobalBurst:                200,
-		StartSessionPerClientRPS:   5,
-		StartSessionPerClientBurst: 10,
-		SendInputPerSessionRPS:     20,
-		SendInputPerSessionBurst:   50,
-	}, instanceID, nil)
+	providerFallbacks := cfg.ProviderFallbacks
+
+	bridgeServer := server.New(sup, registry, logger, cfg.RateLimits, instanceID, providerFallbacks)
 	bridgev1.RegisterBridgeServiceServer(grpcServer, bridgeServer)
 
 	// Listen: TCP for secure mode, unix socket for local mode.
@@ -282,6 +420,7 @@ func Start(cfg Config) (*Server, error) {
 	s := &Server{
 		grpcServer: grpcServer,
 		supervisor: sup,
+		store:      store,
 		listener:   ln,
 		logger:     logger,
 		stateDir:   stateDir,
@@ -430,6 +569,11 @@ func (s *Server) Stop() {
 
 	s.supervisor.Close()
 	_ = s.listener.Close()
+	if s.store != nil {
+		if err := s.store.Close(); err != nil {
+			s.logger.Warn("close session store", "error", err)
+		}
+	}
 
 	// Clean up state files.
 	_ = os.Remove(filepath.Join(s.stateDir, "server.pid"))
@@ -530,11 +674,6 @@ func DiscoverTarget(stateDir string) (target string, mode ServerMode) {
 	return target, mode
 }
 
-// SystemAddrFile is the well-known path written by the system daemon
-// (cmd/bridge running under systemd). bridgectl checks this before
-// self-spawning so it reuses the system daemon when available.
-const SystemAddrFile = "/run/bridge/server.addr"
-
 func discoverTarget(stateDir string) string {
 	// Check the mode file first to avoid a stale unix socket from a
 	// previous crashed local-mode server masking a running secure server.
@@ -568,17 +707,6 @@ func discoverTarget(stateDir string) string {
 				addr = "unix://" + addr
 			}
 			if probeHealth(addr, mode, stateDir) {
-				return addr
-			}
-		}
-	}
-
-	// Check for a system daemon (cmd/bridge under systemd) as a last resort.
-	// Only on Linux: the file is written by the system daemon to a path
-	// created by systemd's RuntimeDirectory directive.
-	if runtime.GOOS == "linux" {
-		if sysData, err := os.ReadFile(SystemAddrFile); err == nil {
-			if addr := strings.TrimSpace(string(sysData)); addr != "" {
 				return addr
 			}
 		}
