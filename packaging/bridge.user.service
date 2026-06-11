@@ -1,0 +1,14 @@
+[Unit]
+Description=AI Agent Bridge (user session)
+Documentation=https://github.com/markcallen/ai-agent-bridge
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/bridgectl server start
+Restart=on-failure
+RestartSec=5s
+Environment=HOME=%h
+
+[Install]
+WantedBy=default.target

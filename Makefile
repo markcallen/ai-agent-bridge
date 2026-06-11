@@ -184,10 +184,20 @@ test-cli-e2e-docker:
 
 install-user-service:
 	@echo "Installing bridgectl user service..."
-	@mkdir -p ~/.config/systemd/user
-	@cp packaging/bridge.user.service ~/.config/systemd/user/bridge.service
-	@systemctl --user daemon-reload
-	@echo "Run 'systemctl --user enable --now bridge' to start the service"
+	@OS=$$(uname -s); \
+	if [ "$$OS" = "Darwin" ]; then \
+		mkdir -p ~/Library/LaunchAgents; \
+		cp packaging/com.markcallen.ai-agent-bridge.plist ~/Library/LaunchAgents/; \
+		launchctl load ~/Library/LaunchAgents/com.markcallen.ai-agent-bridge.plist 2>/dev/null || true; \
+		echo "LaunchAgent installed. Run 'launchctl start com.markcallen.ai-agent-bridge' to start now."; \
+	elif [ "$$OS" = "Linux" ]; then \
+		mkdir -p ~/.config/systemd/user; \
+		cp packaging/bridge.user.service ~/.config/systemd/user/bridge.service; \
+		systemctl --user daemon-reload; \
+		echo "Run 'systemctl --user enable --now bridge' to start the service"; \
+	else \
+		echo "Unsupported OS: $$OS"; exit 1; \
+	fi
 
 check-deps:
 	./scripts/check-deps.sh
