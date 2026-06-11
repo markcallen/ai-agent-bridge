@@ -152,6 +152,19 @@ type Config struct {
 	// IdleTimeout overrides the session idle-timeout. Zero uses the
 	// default (30 minutes).
 	IdleTimeout time.Duration
+
+	// Explicit TLS cert paths. When set, these override auto-PKI generation
+	// so pre-issued certificates (e.g. from a CI/CD pipeline) can be used.
+	// All three (CABundlePath, TLSCertPath, TLSKeyPath) must be provided
+	// together; mixed partial configuration is not supported.
+	CABundlePath string
+	TLSCertPath  string
+	TLSKeyPath   string
+
+	// JWTPublicKeys maps issuer name to public key file path for JWT
+	// verification in explicit-cert mode. Populated from auth.jwt_public_keys
+	// in the config file.
+	JWTPublicKeys map[string]string
 }
 
 // Start launches a local bridge gRPC server. In local mode (default) it
@@ -205,6 +218,20 @@ func Start(cfg Config) (*Server, error) {
 			}
 			if cfg.AllowedPaths == nil && len(fileCfg.AllowedPaths) > 0 {
 				cfg.AllowedPaths = fileCfg.AllowedPaths
+			}
+			if cfg.ListenAddr == "" && fileCfg.Server.Listen != "" {
+				cfg.ListenAddr = fileCfg.Server.Listen
+			}
+			if cfg.CABundlePath == "" && fileCfg.TLS.CABundle != "" {
+				cfg.CABundlePath = fileCfg.TLS.CABundle
+				cfg.TLSCertPath = fileCfg.TLS.Cert
+				cfg.TLSKeyPath = fileCfg.TLS.Key
+			}
+			if cfg.JWTPublicKeys == nil && len(fileCfg.Auth.JWTPublicKeys) > 0 {
+				cfg.JWTPublicKeys = make(map[string]string, len(fileCfg.Auth.JWTPublicKeys))
+				for _, k := range fileCfg.Auth.JWTPublicKeys {
+					cfg.JWTPublicKeys[k.Issuer] = k.KeyPath
+				}
 			}
 		}
 	}
@@ -391,18 +418,29 @@ func Start(cfg Config) (*Server, error) {
 
 		mode = ModeSecure
 
-		// Auto-generate PKI material if not present.
-		sans := buildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
-		mat, err := EnsurePKI(stateDir, sans, logger)
-		if err != nil {
-			sup.Close()
-			if store != nil {
-				_ = store.Close()
+		var mat *PKIMaterial
+		if cfg.CABundlePath != "" {
+			// Use pre-issued certificates from Config (e.g. provided via config file).
+			mat = &PKIMaterial{
+				CABundlePath:   cfg.CABundlePath,
+				ServerCertPath: cfg.TLSCertPath,
+				ServerKeyPath:  cfg.TLSKeyPath,
 			}
-			return nil, fmt.Errorf("ensure PKI: %w", err)
+		} else {
+			// Auto-generate PKI material if not present.
+			sans := buildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
+			var pkiErr error
+			mat, pkiErr = EnsurePKI(stateDir, sans, logger)
+			if pkiErr != nil {
+				sup.Close()
+				if store != nil {
+					_ = store.Close()
+				}
+				return nil, fmt.Errorf("ensure PKI: %w", pkiErr)
+			}
 		}
 
-		secureOpts, err := buildSecureGRPCOpts(mat, stateDir, logger)
+		secureOpts, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys)
 		if err != nil {
 			sup.Close()
 			if store != nil {
@@ -490,7 +528,9 @@ func Start(cfg Config) (*Server, error) {
 }
 
 // buildSecureGRPCOpts returns gRPC server options for mTLS + JWT mode.
-func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger) ([]grpc.ServerOption, error) {
+// extraKeys maps issuer name to public key file path for JWT verification
+// when using pre-issued certificates instead of auto-PKI.
+func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string) ([]grpc.ServerOption, error) {
 	// TLS credentials with client cert verification.
 	tlsCfg, err := auth.ServerTLSConfig(auth.TLSConfig{
 		CABundlePath: mat.CABundlePath,
@@ -504,11 +544,23 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger)
 	// JWT verifier: load the local key plus any per-client keys.
 	keys := make(map[string]ed25519.PublicKey)
 
-	localPub, err := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
-	if err != nil {
-		return nil, fmt.Errorf("load JWT public key: %w", err)
+	if len(extraKeys) > 0 {
+		// Load explicit issuer→key mappings from config (explicit cert mode).
+		for issuer, keyPath := range extraKeys {
+			pub, keyErr := pki.LoadEd25519PublicKey(keyPath)
+			if keyErr != nil {
+				return nil, fmt.Errorf("load JWT public key for issuer %q: %w", issuer, keyErr)
+			}
+			keys[issuer] = pub
+		}
+	} else if mat.JWTSigningPub != "" {
+		// Auto-PKI mode: load the locally generated key as the "local" verifier.
+		localPub, keyErr := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
+		if keyErr != nil {
+			return nil, fmt.Errorf("load JWT public key: %w", keyErr)
+		}
+		keys["local"] = localPub
 	}
-	keys["local"] = localPub
 
 	// Load per-client JWT public keys from certs/jwt-clients/*.pub.
 	clientKeysDir := filepath.Join(CertsDir(stateDir), "jwt-clients")
