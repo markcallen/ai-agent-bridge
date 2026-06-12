@@ -178,7 +178,7 @@ func Start(cfg Config) (*Server, error) {
 	var providerRoot string
 	if cfg.ConfigPath != "" {
 		fileCfg, err := config.Load(cfg.ConfigPath)
-		if err != nil && !os.IsNotExist(err) {
+		if err != nil {
 			return nil, fmt.Errorf("load config %q: %w", cfg.ConfigPath, err)
 		}
 		if fileCfg != nil {
@@ -281,14 +281,7 @@ func Start(cfg Config) (*Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("compile redact patterns: %w", err)
 		}
-		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
-				if a.Value.Kind() == slog.KindString {
-					a.Value = slog.StringValue(redactor.Redact(a.Value.String()))
-				}
-				return a
-			},
-		}))
+		logger = slog.New(&redactingHandler{inner: logger.Handler(), redactor: redactor})
 	}
 
 	// Build provider registry. Config-file providers take precedence; the
@@ -421,6 +414,13 @@ func Start(cfg Config) (*Server, error) {
 		var mat *PKIMaterial
 		if cfg.CABundlePath != "" {
 			// Use pre-issued certificates from Config (e.g. provided via config file).
+			if cfg.TLSCertPath == "" || cfg.TLSKeyPath == "" {
+				sup.Close()
+				if store != nil {
+					_ = store.Close()
+				}
+				return nil, fmt.Errorf("CABundlePath requires TLSCertPath and TLSKeyPath to also be set")
+			}
 			mat = &PKIMaterial{
 				CABundlePath:   cfg.CABundlePath,
 				ServerCertPath: cfg.TLSCertPath,
@@ -924,4 +924,44 @@ func generateInstanceID() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// redactingHandler wraps an existing slog.Handler and redacts string values
+// in log messages and attributes. It preserves the wrapped handler's output
+// format and configured log level.
+type redactingHandler struct {
+	inner    slog.Handler
+	redactor *redact.Redactor
+}
+
+func (h *redactingHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
+}
+
+func (h *redactingHandler) Handle(ctx context.Context, r slog.Record) error {
+	r2 := slog.NewRecord(r.Time, r.Level, h.redactor.Redact(r.Message), r.PC)
+	r.Attrs(func(a slog.Attr) bool {
+		r2.AddAttrs(h.redactAttr(a))
+		return true
+	})
+	return h.inner.Handle(ctx, r2)
+}
+
+func (h *redactingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	redacted := make([]slog.Attr, len(attrs))
+	for i, a := range attrs {
+		redacted[i] = h.redactAttr(a)
+	}
+	return &redactingHandler{inner: h.inner.WithAttrs(redacted), redactor: h.redactor}
+}
+
+func (h *redactingHandler) WithGroup(name string) slog.Handler {
+	return &redactingHandler{inner: h.inner.WithGroup(name), redactor: h.redactor}
+}
+
+func (h *redactingHandler) redactAttr(a slog.Attr) slog.Attr {
+	if a.Value.Kind() == slog.KindString {
+		a.Value = slog.StringValue(h.redactor.Redact(a.Value.String()))
+	}
+	return a
 }

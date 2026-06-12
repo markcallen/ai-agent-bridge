@@ -5,7 +5,7 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/bridgectl server start
+ExecStart=/usr/bin/bridgectl server start
 Restart=on-failure
 RestartSec=5s
 Environment=HOME=%h

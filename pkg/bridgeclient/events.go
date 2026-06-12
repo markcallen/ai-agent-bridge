@@ -14,6 +14,7 @@ type OutputStream struct {
 	session  string
 	clientID string
 	afterSeq uint64
+	role     bridgev1.AttachRole
 }
 
 func (c *Client) AttachSession(ctx context.Context, req *bridgev1.AttachSessionRequest) (*OutputStream, error) {
@@ -33,6 +34,7 @@ func (c *Client) AttachSession(ctx context.Context, req *bridgev1.AttachSessionR
 		session:  req.SessionId,
 		clientID: clientID,
 		afterSeq: afterSeq,
+		role:     req.Role,
 	}, nil
 }
 
@@ -43,6 +45,7 @@ func (s *OutputStream) RecvAll(ctx context.Context, callback func(*bridgev1.Atta
 		SessionId: s.session,
 		ClientId:  s.clientID,
 		AfterSeq:  s.afterSeq,
+		Role:      s.role,
 	})
 	if err != nil {
 		return mapError(err)

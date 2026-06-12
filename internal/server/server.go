@@ -255,10 +255,13 @@ func (s *BridgeServer) AttachSession(req *bridgev1.AttachSessionRequest, stream 
 			if !ok {
 				return nil
 			}
-			if chunk.Seq <= lastSeq {
-				continue
+			isControl := chunk.Type == bridge.ChunkTypeWriterClaimed || chunk.Type == bridge.ChunkTypeWriterReleased
+			if !isControl {
+				if chunk.Seq <= lastSeq {
+					continue
+				}
+				lastSeq = chunk.Seq
 			}
-			lastSeq = chunk.Seq
 			if err := stream.Send(chunkToProto(req.SessionId, chunk, false)); err != nil {
 				return err
 			}
@@ -405,6 +408,7 @@ func (s *BridgeServer) ClaimWriter(ctx context.Context, req *bridgev1.ClaimWrite
 	if err != nil {
 		return nil, mapBridgeError(err, "claim writer")
 	}
+	s.supervisor.NotifyWriterClaimed(req.SessionId, clientID)
 	return &bridgev1.ClaimWriterResponse{
 		Claimed:                true,
 		PreviousWriterClientId: result.PreviousWriterClientID,
@@ -432,6 +436,7 @@ func (s *BridgeServer) ReleaseWriter(ctx context.Context, req *bridgev1.ReleaseW
 	if err := s.supervisor.ReleaseWriter(req.SessionId, clientID); err != nil {
 		return nil, mapBridgeError(err, "release writer")
 	}
+	s.supervisor.NotifyWriterReleased(req.SessionId, clientID)
 	return &bridgev1.ReleaseWriterResponse{Released: true}, nil
 }
 
@@ -527,10 +532,17 @@ func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *brid
 		Payload:   chunk.Payload,
 		Replay:    replay,
 	}
-	if chunk.Type == bridge.ChunkTypeThinking {
+	switch chunk.Type {
+	case bridge.ChunkTypeThinking:
 		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_THINKING
 		ev.ThinkingText = string(chunk.Payload)
 		ev.Payload = nil
+	case bridge.ChunkTypeWriterClaimed:
+		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED
+		ev.Payload = chunk.Payload
+	case bridge.ChunkTypeWriterReleased:
+		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED
+		ev.Payload = chunk.Payload
 	}
 	return ev
 }

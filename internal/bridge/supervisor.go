@@ -640,8 +640,8 @@ func (s *Supervisor) closeLive(ms *managedSession) {
 }
 
 // appendChunk adds a new chunk with the given type to the session buffer and
-// fans it out to all attached observers. Slow observers are dropped with a
-// warning so one stalled client cannot block PTY reads.
+// fans it out to all attached observers. Chunks for slow observers are dropped
+// with a warning; the observer remains attached.
 func (s *Supervisor) appendChunk(ms *managedSession, payload []byte, ctype ChunkType) {
 	chunk := ms.buf.AppendTyped(payload, ctype)
 	s.persistChunk(ms.info.SessionID, chunk)
@@ -661,6 +661,49 @@ func (s *Supervisor) appendChunk(ms *managedSession, payload []byte, ctype Chunk
 			slog.Warn("observer channel full, dropping chunk", "session_id", ms.info.SessionID, "client_id", clientID)
 		}
 	}
+}
+
+// fanoutControlEvent broadcasts a control chunk to all current observers
+// without appending it to the replay buffer or persisting it.
+func (s *Supervisor) fanoutControlEvent(ms *managedSession, ctype ChunkType, payload []byte) {
+	chunk := OutputChunk{Type: ctype, Payload: payload}
+	ms.mu.Lock()
+	obs := make(map[string]*observerEntry, len(ms.observers))
+	maps.Copy(obs, ms.observers)
+	ms.mu.Unlock()
+
+	for clientID, entry := range obs {
+		select {
+		case entry.ch <- chunk:
+		default:
+			slog.Warn("observer channel full, dropping control event", "session_id", ms.info.SessionID, "client_id", clientID, "type", ctype)
+		}
+	}
+}
+
+// NotifyWriterClaimed broadcasts a ChunkTypeWriterClaimed control event to all
+// observers of sessionID so they learn immediately which client now owns the
+// writer role. The payload is the claimant clientID.
+func (s *Supervisor) NotifyWriterClaimed(sessionID, claimantClientID string) {
+	s.mu.RLock()
+	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return
+	}
+	s.fanoutControlEvent(ms, ChunkTypeWriterClaimed, []byte(claimantClientID))
+}
+
+// NotifyWriterReleased broadcasts a ChunkTypeWriterReleased control event to
+// all observers of sessionID. The payload is the releasing clientID.
+func (s *Supervisor) NotifyWriterReleased(sessionID, releasingClientID string) {
+	s.mu.RLock()
+	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return
+	}
+	s.fanoutControlEvent(ms, ChunkTypeWriterReleased, []byte(releasingClientID))
 }
 
 func (s *Supervisor) waitLoop(ms *managedSession) {

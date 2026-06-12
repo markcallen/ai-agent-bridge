@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -121,14 +122,7 @@ rate_limits:
 	srv := startLocalServer(t, Config{
 		StateDir:   dir,
 		ConfigPath: cfgFile,
-		RateLimits: struct {
-			GlobalRPS                  float64
-			GlobalBurst                int
-			StartSessionPerClientRPS   float64
-			StartSessionPerClientBurst int
-			SendInputPerSessionRPS     float64
-			SendInputPerSessionBurst   int
-		}{GlobalRPS: 200},
+		RateLimits: server.RateLimitConfig{GlobalRPS: 200},
 	})
 	assert.NotNil(t, srv)
 }
