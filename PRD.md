@@ -264,10 +264,12 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
   - Ubuntu `24.04` (`noble`) on `amd64`
   - Ubuntu `25.04` (`plucky`) on `amd64`
 - Install package contents to conventional system locations:
-  - `ai-agent-bridge` and `ai-agent-bridge-ca` binaries in `/usr/bin`
+  - `bridgectl` and `ai-agent-bridge-ca` binaries in `/usr/bin`
   - default config in `/etc/ai-agent-bridge/bridge.yaml`
-  - systemd unit in `/lib/systemd/system/ai-agent-bridge.service`
-- Provide a default packaged config that allows the daemon to start on a fresh host without bundled provider CLIs or API keys.
+  - systemd user unit in `/usr/lib/systemd/user/bridge.service`
+- Post-install script prints instructions for `systemctl --user enable --now bridge`.
+- No system user or group is created; the bridge runs as the login user.
+- Provide a default packaged config that allows the server to start on a fresh host without bundled provider CLIs or API keys.
 - Provider CLIs and their API credentials remain operator-managed prerequisites and must be documented separately from the package install flow.
 
 ### Publishing and Hosting

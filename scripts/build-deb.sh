@@ -79,10 +79,11 @@ Section: admin
 Priority: optional
 Architecture: $ARCH
 Maintainer: Mark Callen <opensource@markcallen.com>
-Depends: adduser, ca-certificates
-Description: AI Agent Bridge daemon
- Standalone gRPC daemon and SDK bridge for supervising AI agent subprocesses.
- This package installs the bridge binaries, a default config, and a systemd unit.
+Depends: ca-certificates
+Description: AI Agent Bridge
+ gRPC server and SDK bridge for supervising AI agent subprocesses inside a
+ login session. Installs bridgectl, a default config, and a systemd user unit.
+ Enable with: systemctl --user enable --now bridge
 EOF
 
 dpkg-deb --build --root-owner-group "$PKG_ROOT" "$OUTPUT_DIR/${PACKAGE_NAME}_${VERSION}_${ARCH}.deb"
