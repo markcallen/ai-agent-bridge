@@ -86,3 +86,23 @@ func (c *Client) ListProviders(ctx context.Context) (*bridgev1.ListProvidersResp
 	})
 	return resp, err
 }
+
+func (c *Client) ClaimWriter(ctx context.Context, req *bridgev1.ClaimWriterRequest) (*bridgev1.ClaimWriterResponse, error) {
+	var resp *bridgev1.ClaimWriterResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.ClaimWriter(callCtx, req)
+		return callErr
+	})
+	return resp, err
+}
+
+func (c *Client) ReleaseWriter(ctx context.Context, req *bridgev1.ReleaseWriterRequest) (*bridgev1.ReleaseWriterResponse, error) {
+	var resp *bridgev1.ReleaseWriterResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.ReleaseWriter(callCtx, req)
+		return callErr
+	})
+	return resp, err
+}

@@ -79,15 +79,32 @@ func newSessionListCmd() *cobra.Command {
 }
 
 func newSessionAttachCmd() *cobra.Command {
+	var (
+		observeOnly bool
+		takeOver    bool
+		release     bool
+	)
+
 	cmd := &cobra.Command{
 		Use:   "attach <session-id>",
 		Short: "Attach to a running session",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
-			return attachSession(sessionID)
+			if release {
+				return releaseWriter(sessionID)
+			}
+			role := bridgev1.AttachRole_ATTACH_ROLE_WRITER
+			if observeOnly {
+				role = bridgev1.AttachRole_ATTACH_ROLE_OBSERVER
+			}
+			return attachSession(sessionID, role, takeOver)
 		},
 	}
+
+	cmd.Flags().BoolVar(&observeOnly, "observe", false, "attach as read-only observer (no input)")
+	cmd.Flags().BoolVar(&takeOver, "take-over", false, "forcibly claim the writer slot from the current active writer")
+	cmd.Flags().BoolVar(&release, "release", false, "release the writer slot (demote to observer)")
 	return cmd
 }
 
@@ -125,7 +142,7 @@ func newSessionStopCmd() *cobra.Command {
 	return cmd
 }
 
-func attachSession(sessionID string) error {
+func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool) error {
 	client, err := connectClient("", 30*time.Minute)
 	if err != nil {
 		return err
@@ -151,16 +168,40 @@ func attachSession(sessionID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
+	clientID := uuid.NewString()
+
+	// When --take-over is set, attach as observer first, then claim the writer
+	// slot with force. This way the ClaimWriter RPC evicts the existing writer
+	// before we start sending input.
+	attachRole := role
+	if takeOver {
+		attachRole = bridgev1.AttachRole_ATTACH_ROLE_OBSERVER
+	}
+
 	stream, err := client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
 		SessionId: sessionID,
-		ClientId:  uuid.NewString(),
+		ClientId:  clientID,
 		AfterSeq:  0,
+		Role:      attachRole,
 	})
 	if err != nil {
 		restore()
 		return fmt.Errorf("attach: %w", err)
 	}
 
+	if takeOver {
+		_, claimErr := client.ClaimWriter(ctx, &bridgev1.ClaimWriterRequest{
+			SessionId: sessionID,
+			ClientId:  clientID,
+			Force:     true,
+		})
+		if claimErr != nil {
+			restore()
+			return fmt.Errorf("claim writer: %w", claimErr)
+		}
+	}
+
+	isWriter := role == bridgev1.AttachRole_ATTACH_ROLE_WRITER || takeOver
 	var detached atomic.Bool
 
 	sigCh := make(chan os.Signal, 2)
@@ -170,7 +211,7 @@ func attachSession(sessionID string) error {
 
 	go func() {
 		for sig := range sigCh {
-			if isSigwinch(sig) {
+			if isSigwinch(sig) && isWriter {
 				c, r := currentTTYSize()
 				_, _ = client.ResizeSession(context.Background(), &bridgev1.ResizeSessionRequest{
 					SessionId: sessionID,
@@ -185,30 +226,38 @@ func attachSession(sessionID string) error {
 		}
 	}()
 
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			n, readErr := os.Stdin.Read(buf)
-			if n > 0 {
-				for i := 0; i < n; i++ {
-					if buf[i] == detachKey {
-						detached.Store(true)
-						cancel()
-						return
+	if isWriter {
+		go func() {
+			buf := make([]byte, 1024)
+			for {
+				n, readErr := os.Stdin.Read(buf)
+				if n > 0 {
+					for i := 0; i < n; i++ {
+						if buf[i] == detachKey {
+							// Release the writer slot before detaching so another
+							// observer can claim it.
+							_, _ = client.ReleaseWriter(context.Background(), &bridgev1.ReleaseWriterRequest{
+								SessionId: sessionID,
+								ClientId:  stream.ClientID(),
+							})
+							detached.Store(true)
+							cancel()
+							return
+						}
 					}
+					data := normalizeTTYInput(buf[:n])
+					_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
+						SessionId: sessionID,
+						ClientId:  stream.ClientID(),
+						Data:      data,
+					})
 				}
-				data := normalizeTTYInput(buf[:n])
-				_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
-					SessionId: sessionID,
-					ClientId:  stream.ClientID(),
-					Data:      data,
-				})
+				if readErr != nil {
+					return
+				}
 			}
-			if readErr != nil {
-				return
-			}
-		}
-	}()
+		}()
+	}
 
 	err = stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {
 		switch ev.Type {
@@ -220,6 +269,12 @@ func attachSession(sessionID string) error {
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
 			return errors.New(ev.Error)
+		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED:
+			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[ai-agent-bridge] writer claimed by %s\r\n", ev.WriterClientId)
+			return writeErr
+		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED:
+			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[ai-agent-bridge] writer released by %s\r\n", ev.WriterClientId)
+			return writeErr
 		default:
 			return nil
 		}
@@ -234,6 +289,39 @@ func attachSession(sessionID string) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\nsession ended: %v\r\n", err)
 	}
+	return nil
+}
+
+// releaseWriter sends a ReleaseWriter RPC for sessionID, using the client's
+// own client-id. This is a fire-and-forget command: it doesn't attach a stream.
+func releaseWriter(sessionID string) error {
+	client, err := connectClient("", 10*time.Second)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// We need a stable client-id for this operation; obtain it from the session info.
+	resp, err := client.GetSession(ctx, &bridgev1.GetSessionRequest{SessionId: sessionID})
+	if err != nil {
+		return fmt.Errorf("get session: %w", err)
+	}
+	writerID := resp.ActiveWriterClientId
+	if writerID == "" {
+		fmt.Fprintf(os.Stderr, "Session %s has no active writer.\n", sessionID)
+		return nil
+	}
+	_, err = client.ReleaseWriter(ctx, &bridgev1.ReleaseWriterRequest{
+		SessionId: sessionID,
+		ClientId:  writerID,
+	})
+	if err != nil {
+		return fmt.Errorf("release writer: %w", err)
+	}
+	fmt.Printf("Released writer slot for session %s (was: %s)\n", sessionID, writerID)
 	return nil
 }
 

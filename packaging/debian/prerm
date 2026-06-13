@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-  systemctl stop ai-agent-bridge.service >/dev/null 2>&1 || true
-  systemctl disable ai-agent-bridge.service >/dev/null 2>&1 || true
-fi
+# The bridge runs as a user service; per-user enablement is the user's
+# responsibility. We do not touch user-unit state on package removal.
+# Users can stop and disable the service themselves:
+#   systemctl --user stop bridge
+#   systemctl --user disable bridge

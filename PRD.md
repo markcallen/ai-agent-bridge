@@ -44,13 +44,14 @@ The bridge replaces direct in-process agent management with a networked, provide
 - Ship a Go SDK (`bridgeclient`) for integration by consumer projects.
 - Provide durable per-session pub/sub replay so SDK clients can reconnect and receive events they missed while disconnected (while bridge process is alive).
 - Provide a CLI tool for CA/cert management (`ai-agent-bridge-ca`).
+- Enable AI agents to build web and mobile applications by running sessions inside the user's login environment with access to display servers, emulators, and user credentials.
+- Support concurrent human observation of and interjection into active agent sessions without stopping the agent.
 
 ---
 
 ## 4. Non-Goals
 
-- Web UI or dashboard (consumers provide their own).
-- Persistent event storage (in-memory ring buffer only; consumers can persist if needed).
+- A first-party web UI is deferred but not excluded; the WebSocket adapter (`bridge-client-node`) already provides the foundation.
 - AI model routing or selection (consumers decide which provider to use).
 - Acting as a CI/CD system.
 - SDKs for languages other than Go and Node.js (protobuf definitions available for future stub generation).
@@ -64,6 +65,7 @@ The bridge replaces direct in-process agent management with a networked, provide
 - **Web Application Developers** - Use `packages/bridge-client-node` and the `useBridgeSession` React hook to embed agent sessions in browser-based UIs without needing to speak gRPC directly.
 - **DevOps/Platform Engineers** - Deploy and operate bridge daemons on agent host machines.
 - **Security Engineers** - Configure and audit the zero-trust PKI infrastructure.
+- **Human Operators** - Engineers who need to observe a running agent session in real time, optionally inject a correction or question, then return control to the automated flow without restarting the session.
 
 ---
 
@@ -121,70 +123,43 @@ The bridge replaces direct in-process agent management with a networked, provide
 
 ### 6.2 Operational Modes
 
-The bridge ships two distinct runtime binaries with different assumptions, startup behaviours, and intended operators. Understanding this separation is fundamental to deploying and integrating the system correctly.
+#### User Session Server (`bridgectl server start [--listen]`)
 
-#### Local Server (`bridgectl server start`)
-
-The local server is a developer-facing tool for managing AI agent sessions on a machine where the agent CLIs are already installed and configured through their **native interfaces** (e.g. `claude` authenticated via `claude auth login`, `codex` with `OPENAI_API_KEY` in the shell environment).
+The bridge runs as the login user inside an interactive or graphical session. This is the only deployment mode. There is no separate system daemon.
 
 | Property | Behaviour |
 |---|---|
 | Binary | `cmd/bridgectl` |
-| Startup validation | Binary existence and executability only — no API key checks |
-| Credential source | Inherits the operator's existing shell environment |
-| Transport security | Optional — defaults to plain gRPC on localhost |
-| Intended operator | Developer or local user who has already configured their AI agents natively |
-| Typical use | Local development, ad-hoc sessions, testing bridge plumbing without production infrastructure |
+| Process context | Login session of the operating user |
+| Windowing access | Full — inherits `$DISPLAY`, `$WAYLAND_DISPLAY`, `$XDG_RUNTIME_DIR` |
+| Credential source | Inherits the user's shell environment and native CLI auth |
+| Local access | Unix socket at `~/.ai-agent-bridge/server.sock`, no auth |
+| Remote access | TCP with auto-generated mTLS + JWT (`--listen <addr>`) |
+| Startup | Systemd user service (Linux) or LaunchAgent (macOS) |
+| Persistence | Optional BoltDB session store (`--db-path`) |
+| Intended operator | Any user who needs to run AI agents locally or expose them remotely |
 
-**Key assumption**: the developer has already authenticated each provider CLI using that provider's own tooling. The bridge does not manage or validate credentials; it simply launches the CLIs that are already ready to run.
+**Why the login session is required**: AI agent CLIs (claude, codex, opencode, gemini) are user-space programs that need access to home directories, auth tokens, and on graphically-capable machines, running display servers and device emulators. A system daemon running as a service account cannot provide this without recreating the user's environment, which reintroduces all the trust problems mTLS is designed to eliminate.
 
-**What the local server manages**: session lifecycle (start, stop, event streaming, reconnect), provider multiplexing, and the gRPC API surface — not credential provisioning.
+**Remote access model**: when `--listen` is set, the server binds to the specified TCP address and generates PKI material in `~/.ai-agent-bridge/certs/` on first start. SDK clients authenticate with mTLS + JWT. Human operators authenticate using OIDC via `bridgectl server issue-client --oidc` (see Security Architecture). The server must be reachable via WireGuard or Tailscale; it must not be exposed to the public internet.
 
-#### Daemon (`bridge` / `cmd/bridge`)
+**Session persistence**: with `--db-path`, the server writes session metadata and PTY output chunks to a BoltDB file. On restart, `LoadHistory()` rehydrates sessions so SDK clients can reconnect and replay events they missed.
 
-The daemon is a production-grade service designed to run headlessly on a server or agent host. External systems (prd-manager-control-plane, ndara-ai-orchestrator, web clients) connect to it remotely over mTLS + JWT. It is expected to operate without user intervention after initial provisioning.
+#### Human Interjection
 
-| Property | Behaviour |
-|---|---|
-| Binary | `cmd/bridge` |
-| Startup validation | Per-provider: providers with all required credentials become available; providers with missing credentials register as unavailable (daemon does not exit) |
-| Credential source | `/etc/ai-agent-bridge/agents.env` injected at service startup (e.g. via systemd drop-in), or inherited environment |
-| Transport security | Strongly recommended — mTLS + JWT enforced when TLS certs and JWT keys are configured; falls back to plain gRPC with a warning when unconfigured (dev/local use only) |
-| Intended operator | DevOps / platform engineer provisioning a persistent agent host |
-| Typical use | Production deployments, headless CI/CD agents, integration target for control-plane services |
+Human operators can observe and interact with any running session without stopping it. The session model distinguishes two roles:
 
-**Provider availability at startup**: the daemon performs per-provider validation at startup. A provider with all required credentials present is registered as available. A provider missing credentials (or whose startup probe fails) is registered as unavailable with a reason — the daemon continues serving and reports the unavailable provider through the `Health` RPC. Credentials can be added to the environment and the daemon restarted to make a previously unavailable provider available.
+**Observer** (`--observe` flag on `bridgectl session attach`): receives the live PTY output stream and the full replay buffer. Multiple observers may be attached simultaneously. Observers cannot write input to the session.
 
-**Mixed-credential deployments**: a single daemon instance may have some providers fully credentialed and others not yet provisioned. This supports gradual rollout (e.g. start with Claude only, add Codex later) and mixed local/remote use cases where the same host runs both natively configured CLIs and daemon-managed sessions. The `Health` endpoint always reflects the current per-provider state.
+**Active Writer**: exactly one client holds the active writer slot at a time. The writer can send input via `WriteInput` and resize the terminal via `ResizeSession`. By default, the client that calls `StartSession` becomes the active writer. A human operator can claim the writer slot with `bridgectl session attach --take-over <id>`, which transitions the previous writer to observer role. Returning control is done with Ctrl-] (detach key), which releases the writer slot and restores the previous active client.
 
-**What the daemon manages**: everything the local server manages, plus zero-trust PKI, rate limiting, audit logging, systemd lifecycle, and the expectation of continuous uptime.
-
-#### Mode Comparison
-
-```
-               Local Server (bridgectl)          Daemon (bridge)
-               ─────────────────────────         ─────────────────────────
-Operator       Developer                         DevOps / platform team
-Setup          Native CLI auth already done      API keys in agents.env
-Key check      At session launch (by the CLI)    Per-provider at startup; missing
-                                                 keys → unavailable, not fatal
-Transport      Plain gRPC (localhost default)    mTLS + JWT (required)
-Auth           None (localhost only)             Per-project CAs + short-lived JWTs
-Deployment     Foreground process / dev tool     systemd service
-External conn  Not intended                      Primary purpose
-Mixed creds    N/A                               Supported — partial key sets are
-                                                 valid; only credentialed providers
-                                                 accept sessions
-```
-
-#### Mixed-Mode on a Single Host
-
-Both binaries may run on the same machine. A common pattern is:
-
-- The **local server** (`bridgectl`) serves developer sessions using the developer's own native CLI credentials, bound to localhost.
-- The **daemon** serves production sessions on a different port using credentials provisioned in `agents.env`, secured with mTLS + JWT.
-
-There is no coordination between the two processes; they are independent and manage separate session sets.
+Writer transition protocol:
+1. Human runs `bridgectl session attach --take-over <id>`.
+2. Server sends a `WRITER_CLAIMED` event to all observers including the SDK.
+3. Human types, resizes, or reads.
+4. Human presses Ctrl-] or `bridgectl session attach --release <id>`.
+5. Server sends a `WRITER_RELEASED` event to all observers.
+6. SDK may re-claim the writer slot via `ClaimWriter` RPC.
 
 ---
 
@@ -192,7 +167,7 @@ There is no coordination between the two processes; they are independent and man
 
 | Deliverable | Description |
 |---|---|
-| `cmd/bridge` | Standalone bridge daemon binary |
+| `cmd/bridgectl` | User-session bridge server and CLI |
 | `cmd/bridge-ca` | CA and certificate management CLI |
 | `pkg/bridgeclient` | Go SDK for consumer integration (gRPC client) |
 | `pkg/bridgelib` | Embeddable Go library (no separate gRPC server; includes WebSocket handler) |
@@ -289,10 +264,12 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
   - Ubuntu `24.04` (`noble`) on `amd64`
   - Ubuntu `25.04` (`plucky`) on `amd64`
 - Install package contents to conventional system locations:
-  - `ai-agent-bridge` and `ai-agent-bridge-ca` binaries in `/usr/bin`
+  - `bridgectl` and `ai-agent-bridge-ca` binaries in `/usr/bin`
   - default config in `/etc/ai-agent-bridge/bridge.yaml`
-  - systemd unit in `/lib/systemd/system/ai-agent-bridge.service`
-- Provide a default packaged config that allows the daemon to start on a fresh host without bundled provider CLIs or API keys.
+  - systemd user unit in `/usr/lib/systemd/user/bridge.service`
+- Post-install script prints instructions for `systemctl --user enable --now bridge`.
+- No system user or group is created; the bridge runs as the login user.
+- Provide a default packaged config that allows the server to start on a fresh host without bundled provider CLIs or API keys.
 - Provider CLIs and their API credentials remain operator-managed prerequisites and must be documented separately from the package install flow.
 
 ### Publishing and Hosting
@@ -345,6 +322,10 @@ service BridgeService {
 
   // Event streaming
   rpc StreamEvents(StreamEventsRequest) returns (stream SessionEvent);
+
+  // Writer handoff (multi-observer model)
+  rpc ClaimWriter(ClaimWriterRequest) returns (ClaimWriterResponse);
+  rpc ReleaseWriter(ReleaseWriterRequest) returns (ReleaseWriterResponse);
 
   // Health
   rpc Health(HealthRequest) returns (HealthResponse);
@@ -771,10 +752,9 @@ Changes required:
 ## 16. Future Scope (Deferred)
 
 - Additional providers: `gemini`, `droid`
-- Persistent event storage (SQLite backend)
 - SDKs for Python, TypeScript (generated from protobuf)
 - SPIFFE/SPIRE integration for workload identity
-- Web UI for bridge status and session management
+- Web UI for bridge status and session management (foundation: `bridge-client-node` WebSocket adapter is already implemented)
 - CRL/OCSP for real-time certificate revocation
 - Multi-bridge clustering and session migration
 - Policy-as-code (OPA/Rego) for authorization decisions

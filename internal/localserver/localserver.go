@@ -26,6 +26,7 @@ import (
 	"github.com/markcallen/ai-agent-bridge/internal/config"
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/internal/provider"
+	"github.com/markcallen/ai-agent-bridge/internal/redact"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -65,6 +66,7 @@ func AddrPath() string {
 type Server struct {
 	grpcServer *grpc.Server
 	supervisor *bridge.Supervisor
+	store      bridge.SessionStore // non-nil when persistence is enabled
 	registry   *bridge.Registry
 	listener   net.Listener
 	logger     *slog.Logger
@@ -123,15 +125,145 @@ type Config struct {
 	// certificate. The host from ListenAddr is added automatically.
 	ServerSANs []string
 
-	// ConfigPath is the path to a YAML config file. Providers declared in
-	// the file are registered before auto-detection. Missing file is ignored.
+	// ConfigPath is an optional path to a YAML config file (same schema as
+	// the former daemon bridge.yaml). Values from the file are merged into
+	// Config; explicit fields in Config take precedence over file values.
 	ConfigPath string
+
+	// DBPath enables BoltDB session persistence. When set, the supervisor
+	// writes session metadata and PTY chunks to the file and rehydrates
+	// them on startup via LoadHistory.
+	DBPath string
+
+	// ProviderFallbacks maps each provider ID to an ordered list of
+	// fallback provider IDs to try when the primary is unavailable.
+	ProviderFallbacks map[string][]string
+
+	// RedactPatterns are compiled into a Redactor that scrubs sensitive
+	// values from log output.
+	RedactPatterns []string
+
+	// RateLimits overrides the default rate-limit config. Zero values keep
+	// the built-in defaults.
+	RateLimits server.RateLimitConfig
+
+	// EventBufferSize overrides the per-session output ring-buffer size in
+	// bytes. Zero uses the default (8 MiB).
+	EventBufferSize int
+
+	// IdleTimeout overrides the session idle-timeout. Zero uses the
+	// default (30 minutes).
+	IdleTimeout time.Duration
+
+	// Explicit TLS cert paths. When set, these override auto-PKI generation
+	// so pre-issued certificates (e.g. from a CI/CD pipeline) can be used.
+	// All three (CABundlePath, TLSCertPath, TLSKeyPath) must be provided
+	// together; mixed partial configuration is not supported.
+	CABundlePath string
+	TLSCertPath  string
+	TLSKeyPath   string
+
+	// JWTPublicKeys maps issuer name to public key file path for JWT
+	// verification in explicit-cert mode. Populated from auth.jwt_public_keys
+	// in the config file.
+	JWTPublicKeys map[string]string
 }
 
 // Start launches a local bridge gRPC server. In local mode (default) it
 // listens on a unix socket (or TCP localhost on Windows) without auth.
 // In secure mode (ListenAddr set) it binds to TCP with mTLS + JWT.
 func Start(cfg Config) (*Server, error) {
+	// Merge YAML config file values into cfg. Explicit fields in cfg take
+	// precedence: we only apply file values when the cfg field is still at
+	// its zero value.
+	var configProviderDefs map[string]config.ProviderConfig
+	var providerRoot string
+	if cfg.ConfigPath != "" {
+		fileCfg, err := config.Load(cfg.ConfigPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("load config %q: %w", cfg.ConfigPath, err)
+		}
+		if fileCfg != nil {
+			if len(fileCfg.Providers) > 0 {
+				configProviderDefs = fileCfg.Providers
+			}
+			providerRoot = fileCfg.Runtime.ProviderRoot
+			if cfg.DBPath == "" && fileCfg.Persistence.DBPath != "" {
+				cfg.DBPath = fileCfg.Persistence.DBPath
+			}
+			if cfg.RedactPatterns == nil && len(fileCfg.Logging.RedactPatterns) > 0 {
+				cfg.RedactPatterns = fileCfg.Logging.RedactPatterns
+			}
+			if cfg.RateLimits.GlobalRPS == 0 && fileCfg.RateLimits.GlobalRPS > 0 {
+				cfg.RateLimits.GlobalRPS = fileCfg.RateLimits.GlobalRPS
+			}
+			if cfg.RateLimits.GlobalBurst == 0 && fileCfg.RateLimits.GlobalBurst > 0 {
+				cfg.RateLimits.GlobalBurst = fileCfg.RateLimits.GlobalBurst
+			}
+			if cfg.RateLimits.StartSessionPerClientRPS == 0 && fileCfg.RateLimits.StartSessionPerClientRPS > 0 {
+				cfg.RateLimits.StartSessionPerClientRPS = fileCfg.RateLimits.StartSessionPerClientRPS
+			}
+			if cfg.RateLimits.StartSessionPerClientBurst == 0 && fileCfg.RateLimits.StartSessionPerClientBurst > 0 {
+				cfg.RateLimits.StartSessionPerClientBurst = fileCfg.RateLimits.StartSessionPerClientBurst
+			}
+			if cfg.RateLimits.SendInputPerSessionRPS == 0 && fileCfg.RateLimits.SendInputPerSessionRPS > 0 {
+				cfg.RateLimits.SendInputPerSessionRPS = fileCfg.RateLimits.SendInputPerSessionRPS
+			}
+			if cfg.RateLimits.SendInputPerSessionBurst == 0 && fileCfg.RateLimits.SendInputPerSessionBurst > 0 {
+				cfg.RateLimits.SendInputPerSessionBurst = fileCfg.RateLimits.SendInputPerSessionBurst
+			}
+			if cfg.EventBufferSize == 0 && fileCfg.Sessions.EventBufferSize > 0 {
+				cfg.EventBufferSize = fileCfg.Sessions.EventBufferSize
+			}
+			if cfg.IdleTimeout == 0 && fileCfg.Sessions.IdleTimeout != "" {
+				cfg.IdleTimeout = config.ParseDuration(fileCfg.Sessions.IdleTimeout, 0)
+			}
+			if cfg.AllowedPaths == nil && len(fileCfg.AllowedPaths) > 0 {
+				cfg.AllowedPaths = fileCfg.AllowedPaths
+			}
+			if cfg.ListenAddr == "" && fileCfg.Server.Listen != "" {
+				cfg.ListenAddr = fileCfg.Server.Listen
+			}
+			if cfg.CABundlePath == "" && fileCfg.TLS.CABundle != "" {
+				cfg.CABundlePath = fileCfg.TLS.CABundle
+				cfg.TLSCertPath = fileCfg.TLS.Cert
+				cfg.TLSKeyPath = fileCfg.TLS.Key
+			}
+			if cfg.JWTPublicKeys == nil && len(fileCfg.Auth.JWTPublicKeys) > 0 {
+				cfg.JWTPublicKeys = make(map[string]string, len(fileCfg.Auth.JWTPublicKeys))
+				for _, k := range fileCfg.Auth.JWTPublicKeys {
+					cfg.JWTPublicKeys[k.Issuer] = k.KeyPath
+				}
+			}
+		}
+	}
+
+	// Apply built-in defaults for any fields still at zero.
+	if cfg.RateLimits.GlobalRPS == 0 {
+		cfg.RateLimits.GlobalRPS = 100
+	}
+	if cfg.RateLimits.GlobalBurst == 0 {
+		cfg.RateLimits.GlobalBurst = 200
+	}
+	if cfg.RateLimits.StartSessionPerClientRPS == 0 {
+		cfg.RateLimits.StartSessionPerClientRPS = 5
+	}
+	if cfg.RateLimits.StartSessionPerClientBurst == 0 {
+		cfg.RateLimits.StartSessionPerClientBurst = 10
+	}
+	if cfg.RateLimits.SendInputPerSessionRPS == 0 {
+		cfg.RateLimits.SendInputPerSessionRPS = 20
+	}
+	if cfg.RateLimits.SendInputPerSessionBurst == 0 {
+		cfg.RateLimits.SendInputPerSessionBurst = 50
+	}
+	if cfg.EventBufferSize <= 0 {
+		cfg.EventBufferSize = 8 << 20
+	}
+	if cfg.IdleTimeout <= 0 {
+		cfg.IdleTimeout = 30 * time.Minute
+	}
+
 	stateDir := cfg.StateDir
 	if stateDir == "" {
 		stateDir = StateDir()
@@ -145,24 +277,21 @@ func Start(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	}
 
-	// Load providers declared in the config file.
-	var configProviders map[string]config.ProviderConfig
-	var providerRoot string
-	if cfg.ConfigPath != "" {
-		fileCfg, err := config.Load(cfg.ConfigPath)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("load config %q: %w", cfg.ConfigPath, err)
+	// Apply log redaction when patterns are configured.
+	if len(cfg.RedactPatterns) > 0 {
+		redactor, err := redact.New(cfg.RedactPatterns)
+		if err != nil {
+			return nil, fmt.Errorf("compile redact patterns: %w", err)
 		}
-		if fileCfg != nil {
-			configProviders = fileCfg.Providers
-			providerRoot = fileCfg.Runtime.ProviderRoot
-		}
+		logger = slog.New(&redactingHandler{inner: logger.Handler(), redactor: redactor})
 	}
 
-	// Build provider registry: config-declared providers first, then auto-detected.
+	// Build provider registry. Config-file providers take precedence; the
+	// auto-detect path fills in any providers not explicitly configured.
 	registry := bridge.NewRegistry()
 
-	for id, pc := range configProviders {
+	// Register providers explicitly declared in the config file.
+	for id, pc := range configProviderDefs {
 		timeout := config.ParseDuration(pc.StartupTimeout, 60*time.Second)
 		p := provider.NewStdioProvider(provider.StdioConfig{
 			ProviderID:     id,
@@ -184,6 +313,19 @@ func Start(cfg Config) (*Server, error) {
 		logger.Info("registered config provider", "provider", id, "binary", pc.Binary)
 	}
 
+	// Build fallbacks map from config providers (merged with any set on cfg).
+	if cfg.ProviderFallbacks == nil && len(configProviderDefs) > 0 {
+		cfg.ProviderFallbacks = make(map[string][]string)
+	}
+	for id, pc := range configProviderDefs {
+		if len(pc.Fallbacks) > 0 {
+			if _, already := cfg.ProviderFallbacks[id]; !already {
+				cfg.ProviderFallbacks[id] = pc.Fallbacks
+			}
+		}
+	}
+
+	// Auto-detect additional providers not already registered via config.
 	for _, pd := range detectProviders() {
 		if _, err := registry.Get(pd.ID); err == nil {
 			continue // already registered from config
@@ -226,8 +368,24 @@ func Start(cfg Config) (*Server, error) {
 		AllowedPaths:  cfg.AllowedPaths,
 	}
 
-	// Supervisor
-	sup := bridge.NewSupervisor(registry, policy, 8<<20, 30*time.Minute)
+	// Supervisor options: persistence store when DBPath is set.
+	var supOpts []bridge.SupervisorOption
+	var store bridge.SessionStore
+	if cfg.DBPath != "" {
+		var err error
+		store, err = bridge.NewBoltSessionStore(cfg.DBPath)
+		if err != nil {
+			return nil, fmt.Errorf("open session store %q: %w", cfg.DBPath, err)
+		}
+		supOpts = append(supOpts, bridge.WithStore(store))
+	}
+
+	sup := bridge.NewSupervisor(registry, policy, cfg.EventBufferSize, cfg.IdleTimeout, supOpts...)
+	if store != nil {
+		if err := sup.LoadHistory(); err != nil {
+			logger.Warn("failed to load session history", "error", err)
+		}
+	}
 
 	// Server instance ID
 	instanceID := generateInstanceID()
@@ -242,22 +400,49 @@ func Start(cfg Config) (*Server, error) {
 		// Windows support requires named-pipe ACLs or equivalent transport security.
 		if runtime.GOOS == "windows" {
 			sup.Close()
+			if store != nil {
+				_ = store.Close()
+			}
 			return nil, fmt.Errorf("secure mode (--listen) is not yet supported on Windows")
 		}
 
 		mode = ModeSecure
 
-		// Auto-generate PKI material if not present.
-		sans := buildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
-		mat, err := EnsurePKI(stateDir, sans, logger)
-		if err != nil {
-			sup.Close()
-			return nil, fmt.Errorf("ensure PKI: %w", err)
+		var mat *PKIMaterial
+		if cfg.CABundlePath != "" {
+			// Use pre-issued certificates from Config (e.g. provided via config file).
+			if cfg.TLSCertPath == "" || cfg.TLSKeyPath == "" {
+				sup.Close()
+				if store != nil {
+					_ = store.Close()
+				}
+				return nil, fmt.Errorf("CABundlePath requires TLSCertPath and TLSKeyPath to also be set")
+			}
+			mat = &PKIMaterial{
+				CABundlePath:   cfg.CABundlePath,
+				ServerCertPath: cfg.TLSCertPath,
+				ServerKeyPath:  cfg.TLSKeyPath,
+			}
+		} else {
+			// Auto-generate PKI material if not present.
+			sans := buildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
+			var pkiErr error
+			mat, pkiErr = EnsurePKI(stateDir, sans, logger)
+			if pkiErr != nil {
+				sup.Close()
+				if store != nil {
+					_ = store.Close()
+				}
+				return nil, fmt.Errorf("ensure PKI: %w", pkiErr)
+			}
 		}
 
-		secureOpts, err := buildSecureGRPCOpts(mat, stateDir, logger)
+		secureOpts, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys)
 		if err != nil {
 			sup.Close()
+			if store != nil {
+				_ = store.Close()
+			}
 			return nil, fmt.Errorf("build secure gRPC options: %w", err)
 		}
 		grpcOpts = secureOpts
@@ -271,14 +456,9 @@ func Start(cfg Config) (*Server, error) {
 
 	grpcServer := grpc.NewServer(grpcOpts...)
 
-	bridgeServer := server.New(sup, registry, logger, server.RateLimitConfig{
-		GlobalRPS:                  100,
-		GlobalBurst:                200,
-		StartSessionPerClientRPS:   5,
-		StartSessionPerClientBurst: 10,
-		SendInputPerSessionRPS:     20,
-		SendInputPerSessionBurst:   50,
-	}, instanceID, nil)
+	providerFallbacks := cfg.ProviderFallbacks
+
+	bridgeServer := server.New(sup, registry, logger, cfg.RateLimits, instanceID, providerFallbacks)
 	bridgev1.RegisterBridgeServiceServer(grpcServer, bridgeServer)
 
 	// Listen: TCP for secure mode, unix socket for local mode.
@@ -329,6 +509,7 @@ func Start(cfg Config) (*Server, error) {
 	s := &Server{
 		grpcServer: grpcServer,
 		supervisor: sup,
+		store:      store,
 		registry:   registry,
 		listener:   ln,
 		logger:     logger,
@@ -345,7 +526,9 @@ func Start(cfg Config) (*Server, error) {
 }
 
 // buildSecureGRPCOpts returns gRPC server options for mTLS + JWT mode.
-func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger) ([]grpc.ServerOption, error) {
+// extraKeys maps issuer name to public key file path for JWT verification
+// when using pre-issued certificates instead of auto-PKI.
+func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string) ([]grpc.ServerOption, error) {
 	// TLS credentials with client cert verification.
 	tlsCfg, err := auth.ServerTLSConfig(auth.TLSConfig{
 		CABundlePath: mat.CABundlePath,
@@ -359,11 +542,23 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger)
 	// JWT verifier: load the local key plus any per-client keys.
 	keys := make(map[string]ed25519.PublicKey)
 
-	localPub, err := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
-	if err != nil {
-		return nil, fmt.Errorf("load JWT public key: %w", err)
+	if len(extraKeys) > 0 {
+		// Load explicit issuer→key mappings from config (explicit cert mode).
+		for issuer, keyPath := range extraKeys {
+			pub, keyErr := pki.LoadEd25519PublicKey(keyPath)
+			if keyErr != nil {
+				return nil, fmt.Errorf("load JWT public key for issuer %q: %w", issuer, keyErr)
+			}
+			keys[issuer] = pub
+		}
+	} else if mat.JWTSigningPub != "" {
+		// Auto-PKI mode: load the locally generated key as the "local" verifier.
+		localPub, keyErr := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
+		if keyErr != nil {
+			return nil, fmt.Errorf("load JWT public key: %w", keyErr)
+		}
+		keys["local"] = localPub
 	}
-	keys["local"] = localPub
 
 	// Load per-client JWT public keys from certs/jwt-clients/*.pub.
 	clientKeysDir := filepath.Join(CertsDir(stateDir), "jwt-clients")
@@ -478,6 +673,11 @@ func (s *Server) Stop() {
 
 	s.supervisor.Close()
 	_ = s.listener.Close()
+	if s.store != nil {
+		if err := s.store.Close(); err != nil {
+			s.logger.Warn("close session store", "error", err)
+		}
+	}
 
 	// Clean up state files.
 	_ = os.Remove(filepath.Join(s.stateDir, "server.pid"))
@@ -578,11 +778,6 @@ func DiscoverTarget(stateDir string) (target string, mode ServerMode) {
 	return target, mode
 }
 
-// SystemAddrFile is the well-known path written by the system daemon
-// (cmd/bridge running under systemd). bridgectl checks this before
-// self-spawning so it reuses the system daemon when available.
-const SystemAddrFile = "/run/bridge/server.addr"
-
 func discoverTarget(stateDir string) string {
 	// Check the mode file first to avoid a stale unix socket from a
 	// previous crashed local-mode server masking a running secure server.
@@ -616,17 +811,6 @@ func discoverTarget(stateDir string) string {
 				addr = "unix://" + addr
 			}
 			if probeHealth(addr, mode, stateDir) {
-				return addr
-			}
-		}
-	}
-
-	// Check for a system daemon (cmd/bridge under systemd) as a last resort.
-	// Only on Linux: the file is written by the system daemon to a path
-	// created by systemd's RuntimeDirectory directive.
-	if runtime.GOOS == "linux" {
-		if sysData, err := os.ReadFile(SystemAddrFile); err == nil {
-			if addr := strings.TrimSpace(string(sysData)); addr != "" {
 				return addr
 			}
 		}
@@ -738,4 +922,44 @@ func generateInstanceID() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// redactingHandler wraps an existing slog.Handler and redacts string values
+// in log messages and attributes. It preserves the wrapped handler's output
+// format and configured log level.
+type redactingHandler struct {
+	inner    slog.Handler
+	redactor *redact.Redactor
+}
+
+func (h *redactingHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
+}
+
+func (h *redactingHandler) Handle(ctx context.Context, r slog.Record) error {
+	r2 := slog.NewRecord(r.Time, r.Level, h.redactor.Redact(r.Message), r.PC)
+	r.Attrs(func(a slog.Attr) bool {
+		r2.AddAttrs(h.redactAttr(a))
+		return true
+	})
+	return h.inner.Handle(ctx, r2)
+}
+
+func (h *redactingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	redacted := make([]slog.Attr, len(attrs))
+	for i, a := range attrs {
+		redacted[i] = h.redactAttr(a)
+	}
+	return &redactingHandler{inner: h.inner.WithAttrs(redacted), redactor: h.redactor}
+}
+
+func (h *redactingHandler) WithGroup(name string) slog.Handler {
+	return &redactingHandler{inner: h.inner.WithGroup(name), redactor: h.redactor}
+}
+
+func (h *redactingHandler) redactAttr(a slog.Attr) slog.Attr {
+	if a.Value.Kind() == slog.KindString {
+		a.Value = slog.StringValue(h.redactor.Redact(a.Value.String()))
+	}
+	return a
 }

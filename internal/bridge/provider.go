@@ -65,6 +65,11 @@ type SessionInfo struct {
 	LastSeq          uint64
 	Cols             uint32
 	Rows             uint32
+	// ActiveWriterClientID is the client currently holding the writer slot.
+	// Empty when no writer is attached.
+	ActiveWriterClientID string
+	// ObserverCount is the number of read-only observer clients currently attached.
+	ObserverCount int
 }
 
 // ChunkType classifies an OutputChunk's content.
@@ -75,6 +80,12 @@ const (
 	ChunkTypeOutput ChunkType = 0
 	// ChunkTypeThinking carries a thinking block from a stream-JSON provider.
 	ChunkTypeThinking ChunkType = 1
+	// ChunkTypeWriterClaimed is a control event broadcast when a client claims
+	// the writer role. It is never appended to the replay buffer.
+	ChunkTypeWriterClaimed ChunkType = 2
+	// ChunkTypeWriterReleased is a control event broadcast when the writer
+	// releases its role. It is never appended to the replay buffer.
+	ChunkTypeWriterReleased ChunkType = 3
 )
 
 // OutputChunk is one retained output chunk from an agent session.

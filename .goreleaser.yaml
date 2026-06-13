@@ -3,19 +3,6 @@ version: 2
 project_name: ai-agent-bridge
 
 builds:
-  - id: bridge
-    binary: ai-agent-bridge
-    main: ./cmd/bridge
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w -X main.version={{.Version}}
-
   - id: bridge-ca
     binary: ai-agent-bridge-ca
     main: ./cmd/bridge-ca

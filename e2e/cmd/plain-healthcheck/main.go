@@ -7,18 +7,60 @@ import (
 	"os"
 	"time"
 
+	"github.com/markcallen/ai-agent-bridge/internal/localserver"
 	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
 
 func main() {
-	target := flag.String("target", "127.0.0.1:9445", "bridge address")
+	target := flag.String("target", "", "bridge address (empty = auto-discover from state dir)")
+	stateDir := flag.String("state-dir", "", "bridge state directory (empty = default)")
 	timeout := flag.Duration("timeout", 10*time.Second, "health check timeout")
 	flag.Parse()
 
-	client, err := bridgeclient.New(
-		bridgeclient.WithTarget(*target),
-		bridgeclient.WithTimeout(*timeout),
-	)
+	var client *bridgeclient.Client
+	var err error
+
+	if *target != "" {
+		// Explicit target: connect insecurely (backwards-compatible behaviour).
+		client, err = bridgeclient.New(
+			bridgeclient.WithTarget(*target),
+			bridgeclient.WithTimeout(*timeout),
+		)
+	} else {
+		// Auto-discover: use DiscoverTarget + mode-appropriate credentials.
+		sd := *stateDir
+		if sd == "" {
+			sd = localserver.StateDir()
+		}
+		addr, mode := localserver.DiscoverTarget(sd)
+		if addr == "" {
+			fmt.Fprintf(os.Stderr, "HEALTHCHECK FAILED: no bridge server found in %s\n", sd)
+			os.Exit(1)
+		}
+		opts := []bridgeclient.Option{
+			bridgeclient.WithTarget(addr),
+			bridgeclient.WithTimeout(*timeout),
+		}
+		if mode == localserver.ModeSecure {
+			mat := localserver.LoadPKIMaterial(sd)
+			opts = append(opts,
+				bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
+					CABundlePath: mat.CABundlePath,
+					CertPath:     mat.LocalClientCert,
+					KeyPath:      mat.LocalClientKey,
+					ServerName:   "server",
+				}),
+				bridgeclient.WithJWT(bridgeclient.JWTConfig{
+					PrivateKeyPath: mat.JWTSigningKey,
+					Issuer:         "local",
+					Audience:       "bridge",
+					TTL:            5 * time.Minute,
+				}),
+			)
+		}
+		client, err = bridgeclient.New(opts...)
+	}
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "HEALTHCHECK FAILED: connect: %v\n", err)
 		os.Exit(1)

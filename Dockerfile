@@ -11,12 +11,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/ai-agent-bridge ./cmd/bridge && \
+RUN CGO_ENABLED=0 go build -o /out/bridgectl ./cmd/bridgectl && \
     CGO_ENABLED=0 go build -o /out/ai-agent-bridge-ca ./cmd/bridge-ca
 
 # Pre-built binaries stage (GoReleaser provides these in the build context)
 FROM scratch AS prebuilt
-COPY ai-agent-bridge ai-agent-bridge-ca /out/
+COPY bridgectl ai-agent-bridge-ca /out/
 
 # Select binary source — BuildKit skips whichever stage is not referenced
 FROM ${BUILD_FROM} AS build
@@ -36,7 +36,7 @@ RUN useradd -m -s /bin/bash bridge && \
     mkdir -p /home/bridge/.gemini && \
     chown -R bridge:bridge /home/bridge/.gemini
 
-COPY --from=build /out/ai-agent-bridge /usr/local/bin/ai-agent-bridge
+COPY --from=build /out/bridgectl /usr/local/bin/bridgectl
 COPY --from=build /out/ai-agent-bridge-ca /usr/local/bin/ai-agent-bridge-ca
 COPY .nvmrc /app/.nvmrc
 COPY package.json package-lock.json /app/

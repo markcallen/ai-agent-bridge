@@ -51,6 +51,12 @@ func (f *fakeRPCClient) Health(context.Context, *bridgev1.HealthRequest, ...grpc
 func (f *fakeRPCClient) ListProviders(context.Context, *bridgev1.ListProvidersRequest, ...grpc.CallOption) (*bridgev1.ListProvidersResponse, error) {
 	return f.providersResp, f.err
 }
+func (f *fakeRPCClient) ClaimWriter(context.Context, *bridgev1.ClaimWriterRequest, ...grpc.CallOption) (*bridgev1.ClaimWriterResponse, error) {
+	return nil, f.err
+}
+func (f *fakeRPCClient) ReleaseWriter(context.Context, *bridgev1.ReleaseWriterRequest, ...grpc.CallOption) (*bridgev1.ReleaseWriterResponse, error) {
+	return nil, f.err
+}
 
 func TestClientSessionMethods(t *testing.T) {
 	c := &Client{
