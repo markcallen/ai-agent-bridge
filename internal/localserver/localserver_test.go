@@ -128,15 +128,17 @@ rate_limits:
 }
 
 // TestStartWithInvalidConfigFile verifies that Start() returns an error when
-// the config file path is set but points to an unreadable location.
+// the config file exists but contains invalid YAML.
 func TestStartWithInvalidConfigFile(t *testing.T) {
 	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "bridge.yaml")
+	require.NoError(t, os.WriteFile(cfgFile, []byte("{\nbroken: [unterminated"), 0o644))
 	cfg := Config{
 		StateDir:   dir,
-		ConfigPath: filepath.Join(dir, "missing.yaml"),
+		ConfigPath: cfgFile,
 	}
 	_, err := Start(cfg)
-	assert.Error(t, err, "Start should fail when ConfigPath points to a missing file")
+	assert.Error(t, err, "Start should fail when config file contains invalid YAML")
 }
 
 // TestStartWithRedactPatterns verifies that valid redaction patterns are

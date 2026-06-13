@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -66,6 +67,7 @@ type Server struct {
 	grpcServer *grpc.Server
 	supervisor *bridge.Supervisor
 	store      bridge.SessionStore // non-nil when persistence is enabled
+	registry   *bridge.Registry
 	listener   net.Listener
 	logger     *slog.Logger
 	stateDir   string
@@ -178,7 +180,7 @@ func Start(cfg Config) (*Server, error) {
 	var providerRoot string
 	if cfg.ConfigPath != "" {
 		fileCfg, err := config.Load(cfg.ConfigPath)
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("load config %q: %w", cfg.ConfigPath, err)
 		}
 		if fileCfg != nil {
@@ -290,12 +292,7 @@ func Start(cfg Config) (*Server, error) {
 
 	// Register providers explicitly declared in the config file.
 	for id, pc := range configProviderDefs {
-		timeout := 60 * time.Second
-		if pc.StartupTimeout != "" {
-			if d, err := time.ParseDuration(pc.StartupTimeout); err == nil {
-				timeout = d
-			}
-		}
+		timeout := config.ParseDuration(pc.StartupTimeout, 60*time.Second)
 		p := provider.NewStdioProvider(provider.StdioConfig{
 			ProviderID:     id,
 			Binary:         pc.Binary,
@@ -513,6 +510,7 @@ func Start(cfg Config) (*Server, error) {
 		grpcServer: grpcServer,
 		supervisor: sup,
 		store:      store,
+		registry:   registry,
 		listener:   ln,
 		logger:     logger,
 		stateDir:   stateDir,
