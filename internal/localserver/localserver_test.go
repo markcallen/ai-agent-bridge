@@ -1,11 +1,15 @@
 package localserver
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/markcallen/ai-agent-bridge/internal/redact"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -339,4 +343,65 @@ func TestIsServerRunningSecureMode(t *testing.T) {
 	target, mode := DiscoverTarget(dir)
 	assert.NotEmpty(t, target)
 	assert.Equal(t, ModeSecure, mode)
+}
+
+// TestRedactingHandlerRedactsMessage verifies that the redactingHandler wraps
+// the underlying handler and redacts sensitive values from log messages and
+// string attributes without altering non-string attributes.
+func TestRedactingHandlerRedactsMessage(t *testing.T) {
+	redactor, err := redact.New([]string{`secret=\S+`})
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	inner := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	h := &redactingHandler{inner: inner, redactor: redactor}
+
+	logger := slog.New(h)
+	logger.Info("token secret=abc123 sent", slog.String("key", "secret=xyz"), slog.Int("count", 5))
+
+	out := buf.String()
+	assert.NotContains(t, out, "abc123", "message should be redacted")
+	assert.NotContains(t, out, "xyz", "string attr value should be redacted")
+	assert.Contains(t, out, "count=5", "non-string attribute must pass through unchanged")
+}
+
+// TestRedactingHandlerEnabled delegates to the inner handler.
+func TestRedactingHandlerEnabled(t *testing.T) {
+	redactor, err := redact.New(nil)
+	require.NoError(t, err)
+
+	inner := slog.NewTextHandler(bytes.NewBuffer(nil), &slog.HandlerOptions{Level: slog.LevelWarn})
+	h := &redactingHandler{inner: inner, redactor: redactor}
+
+	assert.False(t, h.Enabled(context.Background(), slog.LevelDebug), "debug should be disabled")
+	assert.True(t, h.Enabled(context.Background(), slog.LevelWarn), "warn should be enabled")
+}
+
+// TestRedactingHandlerWithAttrs verifies that WithAttrs returns a new handler
+// that redacts string attrs added via WithAttrs.
+func TestRedactingHandlerWithAttrs(t *testing.T) {
+	redactor, err := redact.New([]string{`secret=\S+`})
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	inner := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	h := &redactingHandler{inner: inner, redactor: redactor}
+
+	child := h.WithAttrs([]slog.Attr{slog.String("creds", "secret=top")})
+	slog.New(child).Info("msg")
+
+	assert.NotContains(t, buf.String(), "top", "attr added via WithAttrs must be redacted")
+}
+
+// TestRedactingHandlerWithGroup verifies that WithGroup wraps correctly.
+func TestRedactingHandlerWithGroup(t *testing.T) {
+	redactor, err := redact.New(nil)
+	require.NoError(t, err)
+
+	inner := slog.NewTextHandler(bytes.NewBuffer(nil), &slog.HandlerOptions{Level: slog.LevelDebug})
+	h := &redactingHandler{inner: inner, redactor: redactor}
+
+	gh := h.WithGroup("grp")
+	// Must not panic and must still implement slog.Handler.
+	assert.NotNil(t, gh)
 }

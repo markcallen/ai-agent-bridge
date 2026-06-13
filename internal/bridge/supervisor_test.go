@@ -1084,3 +1084,131 @@ func TestDetachClearsWriterSlot(t *testing.T) {
 		t.Errorf("ActiveWriterClientID=%q want empty after detach", info.ActiveWriterClientID)
 	}
 }
+
+// TestNotifyWriterClaimedFanout verifies that NotifyWriterClaimed broadcasts a
+// ChunkTypeWriterClaimed control chunk to all attached observers and that the
+// chunk is NOT appended to the replay buffer.
+func TestNotifyWriterClaimedFanout(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "notify-claim")
+
+	w, err := sup.Attach("notify-claim", "writer", 0, AttachRoleWriter)
+	if err != nil {
+		t.Fatalf("Attach writer: %v", err)
+	}
+	o1, err := sup.Attach("notify-claim", "obs-1", 0, AttachRoleObserver)
+	if err != nil {
+		t.Fatalf("Attach obs-1: %v", err)
+	}
+	o2, err := sup.Attach("notify-claim", "obs-2", 0, AttachRoleObserver)
+	if err != nil {
+		t.Fatalf("Attach obs-2: %v", err)
+	}
+
+	sup.NotifyWriterClaimed("notify-claim", "writer")
+
+	// All three channels should receive the control event.
+	for label, ch := range map[string]<-chan OutputChunk{"writer": w.Live, "obs-1": o1.Live, "obs-2": o2.Live} {
+		select {
+		case chunk := <-ch:
+			if chunk.Type != ChunkTypeWriterClaimed {
+				t.Errorf("%s: chunk.Type=%v want ChunkTypeWriterClaimed", label, chunk.Type)
+			}
+			if string(chunk.Payload) != "writer" {
+				t.Errorf("%s: payload=%q want %q", label, chunk.Payload, "writer")
+			}
+		case <-time.After(2 * time.Second):
+			t.Errorf("%s: timed out waiting for ChunkTypeWriterClaimed", label)
+		}
+	}
+
+	// Control event must NOT appear in the replay buffer.
+	reattach, err := sup.Attach("notify-claim", "replay-check", 0, AttachRoleObserver)
+	if err != nil {
+		t.Fatalf("Attach replay-check: %v", err)
+	}
+	for _, c := range reattach.Replay {
+		if c.Type == ChunkTypeWriterClaimed || c.Type == ChunkTypeWriterReleased {
+			t.Errorf("control chunk type=%v found in replay buffer; should not be persisted", c.Type)
+		}
+	}
+}
+
+// TestNotifyWriterReleasedFanout verifies that NotifyWriterReleased broadcasts
+// a ChunkTypeWriterReleased control chunk to all observers without persisting
+// it in the replay buffer.
+func TestNotifyWriterReleasedFanout(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "notify-release")
+
+	w, err := sup.Attach("notify-release", "wr", 0, AttachRoleWriter)
+	if err != nil {
+		t.Fatalf("Attach writer: %v", err)
+	}
+	obs, err := sup.Attach("notify-release", "obs", 0, AttachRoleObserver)
+	if err != nil {
+		t.Fatalf("Attach obs: %v", err)
+	}
+
+	sup.NotifyWriterReleased("notify-release", "wr")
+
+	for label, ch := range map[string]<-chan OutputChunk{"wr": w.Live, "obs": obs.Live} {
+		select {
+		case chunk := <-ch:
+			if chunk.Type != ChunkTypeWriterReleased {
+				t.Errorf("%s: chunk.Type=%v want ChunkTypeWriterReleased", label, chunk.Type)
+			}
+			if string(chunk.Payload) != "wr" {
+				t.Errorf("%s: payload=%q want %q", label, chunk.Payload, "wr")
+			}
+		case <-time.After(2 * time.Second):
+			t.Errorf("%s: timed out waiting for ChunkTypeWriterReleased", label)
+		}
+	}
+
+	// Control event must NOT appear in the replay buffer.
+	reattach, err := sup.Attach("notify-release", "replay-check", 0, AttachRoleObserver)
+	if err != nil {
+		t.Fatalf("Attach replay-check: %v", err)
+	}
+	for _, c := range reattach.Replay {
+		if c.Type == ChunkTypeWriterClaimed || c.Type == ChunkTypeWriterReleased {
+			t.Errorf("control chunk type=%v found in replay buffer; should not be persisted", c.Type)
+		}
+	}
+}
+
+// TestControlEventNotSentToUnknownSession verifies that NotifyWriterClaimed
+// and NotifyWriterReleased are no-ops for sessions that do not exist.
+func TestControlEventNotSentToUnknownSession(t *testing.T) {
+	sup := newTestSupervisor(t)
+	// Neither call should panic or return an error.
+	sup.NotifyWriterClaimed("does-not-exist", "some-client")
+	sup.NotifyWriterReleased("does-not-exist", "some-client")
+}
+
+// TestControlEventSeqIsZero verifies that control chunks carry Seq=0 (they are
+// not sequenced output chunks and must not increment the ring-buffer sequence).
+func TestControlEventSeqIsZero(t *testing.T) {
+	sup := newTestSupervisor(t)
+	startTestSession(t, sup, "control-seq")
+
+	state, err := sup.Attach("control-seq", "client", 0, AttachRoleWriter)
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+
+	sup.NotifyWriterClaimed("control-seq", "client")
+
+	select {
+	case chunk := <-state.Live:
+		if chunk.Seq != 0 {
+			t.Errorf("control chunk Seq=%d want 0", chunk.Seq)
+		}
+		if chunk.Type != ChunkTypeWriterClaimed {
+			t.Errorf("chunk.Type=%v want ChunkTypeWriterClaimed", chunk.Type)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for control chunk")
+	}
+}
