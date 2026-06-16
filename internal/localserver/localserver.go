@@ -286,6 +286,10 @@ func Start(cfg Config) (*Server, error) {
 		logger = slog.New(&redactingHandler{inner: logger.Handler(), redactor: redactor})
 	}
 
+	// Install as the default so internal packages that call slog.Warn etc.
+	// (e.g. supervisor's slow-observer warning) use the same configured logger.
+	slog.SetDefault(logger)
+
 	// Build provider registry. Config-file providers take precedence; the
 	// auto-detect path fills in any providers not explicitly configured.
 	registry := bridge.NewRegistry()

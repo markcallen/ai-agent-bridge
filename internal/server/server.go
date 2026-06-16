@@ -408,6 +408,11 @@ func (s *BridgeServer) ClaimWriter(ctx context.Context, req *bridgev1.ClaimWrite
 	if err != nil {
 		return nil, mapBridgeError(err, "claim writer")
 	}
+	// Notify the evicted writer before announcing the new one so observers see
+	// a consistent released→claimed sequence.
+	if result.PreviousWriterClientID != "" {
+		s.supervisor.NotifyWriterReleased(req.SessionId, result.PreviousWriterClientID)
+	}
 	s.supervisor.NotifyWriterClaimed(req.SessionId, clientID)
 	return &bridgev1.ClaimWriterResponse{
 		Claimed:                true,
@@ -539,10 +544,12 @@ func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *brid
 		ev.Payload = nil
 	case bridge.ChunkTypeWriterClaimed:
 		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED
-		ev.Payload = chunk.Payload
+		ev.WriterClientId = string(chunk.Payload)
+		ev.Payload = nil
 	case bridge.ChunkTypeWriterReleased:
 		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED
-		ev.Payload = chunk.Payload
+		ev.WriterClientId = string(chunk.Payload)
+		ev.Payload = nil
 	}
 	return ev
 }

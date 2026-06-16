@@ -628,11 +628,13 @@ func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
 // closeLive marks the session output as exhausted and closes every observer
 // channel. Must only be called from readLoop or readLoopStreamJSON — after all
 // sends to observer channels are complete.
+// The observers map is kept intact so deferred Detach calls (from AttachSession
+// goroutines draining their channels) can still clean up session state.
 func (s *Supervisor) closeLive(ms *managedSession) {
 	ms.mu.Lock()
-	obs := ms.observers
-	ms.observers = nil
 	ms.liveClosed = true
+	obs := make(map[string]*observerEntry, len(ms.observers))
+	maps.Copy(obs, ms.observers)
 	ms.mu.Unlock()
 	for _, entry := range obs {
 		close(entry.ch)
@@ -946,6 +948,13 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64, role At
 
 	if ms.observers == nil {
 		ms.observers = make(map[string]*observerEntry)
+	}
+
+	// Close and evict any stale channel from a prior attach with the same client_id
+	// to avoid leaking goroutines that are draining the old channel.
+	if existing, ok := ms.observers[clientID]; ok {
+		close(existing.ch)
+		delete(ms.observers, clientID)
 	}
 
 	// Build the live channel. If the read loop already finished, hand the caller
