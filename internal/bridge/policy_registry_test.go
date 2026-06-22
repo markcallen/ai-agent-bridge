@@ -9,18 +9,27 @@ import (
 	"time"
 )
 
+// trueBin is the absolute path to the "true" binary, resolved once via
+// LookPath so tests work on both Linux (/bin/true) and macOS (/usr/bin/true).
+var trueBin = func() string {
+	if p, err := exec.LookPath("true"); err == nil {
+		return p
+	}
+	return "/usr/bin/true"
+}()
+
 type registryProvider struct {
 	id        string
 	healthErr error
 }
 
 func (p *registryProvider) ID() string                    { return p.id }
-func (p *registryProvider) Binary() string                { return "/bin/true" }
+func (p *registryProvider) Binary() string                { return trueBin }
 func (p *registryProvider) PromptPattern() *regexp.Regexp { return nil }
 func (p *registryProvider) StartupTimeout() time.Duration { return time.Second }
 func (p *registryProvider) StopGrace() time.Duration      { return time.Second }
 func (p *registryProvider) BuildCommand(context.Context, SessionConfig) (*exec.Cmd, error) {
-	return exec.Command("/bin/true"), nil
+	return exec.Command(trueBin), nil
 }
 func (p *registryProvider) ValidateStartup(context.Context) error { return nil }
 func (p *registryProvider) Health(context.Context) error          { return p.healthErr }
