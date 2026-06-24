@@ -142,7 +142,7 @@ func Start(cfg Config) (*Server, error) {
 
 	logger := cfg.Logger
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	}
 
 	// Load providers declared in the config file.
