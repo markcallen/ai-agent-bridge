@@ -30,7 +30,7 @@ jobs:
       tag: ${{ steps.select.outputs.tag }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -105,7 +105,7 @@ jobs:
       RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ env.RELEASE_REF }}
@@ -143,7 +143,7 @@ jobs:
       RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_REF }}
 
@@ -203,7 +203,7 @@ jobs:
       RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ env.RELEASE_REF }}
@@ -250,7 +250,7 @@ jobs:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && needs.bump_and_tag.outputs.tag || github.ref_name }}
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
 
@@ -282,7 +282,7 @@ jobs:
       contents: read
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
 
@@ -324,7 +324,7 @@ jobs:
       REPO_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apt
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ env.RELEASE_REF }}
@@ -392,7 +392,7 @@ jobs:
     steps:
       - name: Check out release tag
         if: env.AWS_SMOKE_ROLE_ARN != ''
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
@@ -459,7 +459,7 @@ jobs:
       REPO_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apt
     steps:
       - name: Check out release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ env.RELEASE_REF }}
