@@ -283,7 +283,9 @@ func (s *BridgeServer) AttachSession(req *bridgev1.AttachSessionRequest, stream 
 					time.Sleep(10 * time.Millisecond)
 				}
 				s.logger.Info("agent process exited", "session_id", req.SessionId, "client_id", clientID, "exit_code", exitEvt.ExitCode, "exit_recorded", exitEvt.ExitRecorded)
-				_ = stream.Send(exitEvt)
+				if err := stream.Send(exitEvt); err != nil {
+					s.logger.Warn("failed to send session exit event", "session_id", req.SessionId, "client_id", clientID, "error", err)
+				}
 				return nil
 			}
 			if chunk.Seq <= lastSeq {
