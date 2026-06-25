@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/auth"
@@ -46,6 +47,9 @@ type RateLimitConfig struct {
 }
 
 func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger, rl RateLimitConfig, serverInstanceID string, providerFallbacks map[string][]string) *BridgeServer {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &BridgeServer{
 		supervisor:        supervisor,
 		registry:          registry,
@@ -99,6 +103,7 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 		opts[k] = v
 	}
 
+	s.logger.Info("starting session", "session_id", req.SessionId, "project_id", req.ProjectId, "provider", req.Provider, "repo_path", req.RepoPath)
 	info, err := s.supervisor.Start(ctx, bridge.SessionConfig{
 		SessionID:   req.SessionId,
 		ProjectID:   req.ProjectId,
@@ -109,8 +114,10 @@ func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSess
 		InitialRows: req.InitialRows,
 	})
 	if err != nil {
+		s.logger.Warn("start session failed", "session_id", req.SessionId, "error", err)
 		return nil, mapBridgeError(err, "start session")
 	}
+	s.logger.Info("session started", "session_id", info.SessionID, "provider", info.Provider, "pid", info.ProcessID)
 	return &bridgev1.StartSessionResponse{
 		SessionId: info.SessionID,
 		Status:    mapState(info.State),
@@ -132,7 +139,9 @@ func (s *BridgeServer) StopSession(ctx context.Context, req *bridgev1.StopSessio
 	if err := s.authorizeSession(claims, req.SessionId); err != nil {
 		return nil, err
 	}
+	s.logger.Info("stopping session", "session_id", req.SessionId, "force", req.Force)
 	if err := s.supervisor.Stop(req.SessionId, req.Force); err != nil {
+		s.logger.Warn("stop session failed", "session_id", req.SessionId, "error", err)
 		return nil, mapBridgeError(err, "stop session")
 	}
 	return &bridgev1.StopSessionResponse{Status: bridgev1.SessionStatus_SESSION_STATUS_STOPPING}, nil
@@ -210,12 +219,16 @@ func (s *BridgeServer) AttachSession(req *bridgev1.AttachSessionRequest, stream 
 	if req.Role == bridgev1.AttachRole_ATTACH_ROLE_OBSERVER {
 		role = bridge.AttachRoleObserver
 	}
+	s.logger.Info("attaching to session", "session_id", req.SessionId, "client_id", clientID, "after_seq", req.AfterSeq, "role", role)
 	state, err := s.supervisor.Attach(req.SessionId, clientID, req.AfterSeq, role)
 	if err != nil {
+		s.logger.Warn("attach session failed", "session_id", req.SessionId, "client_id", clientID, "error", err)
 		return mapBridgeError(err, "attach session")
 	}
+	s.logger.Info("session attached", "session_id", req.SessionId, "client_id", clientID, "replay_chunks", len(state.Replay), "replay_gap", state.ReplayGap)
 	defer func() {
 		_ = s.supervisor.Detach(req.SessionId, clientID)
+		s.logger.Info("session detached", "session_id", req.SessionId, "client_id", clientID)
 	}()
 
 	if err := stream.Send(&bridgev1.AttachSessionEvent{
@@ -250,9 +263,33 @@ func (s *BridgeServer) AttachSession(req *bridgev1.AttachSessionRequest, stream 
 	for {
 		select {
 		case <-stream.Context().Done():
+			s.logger.Info("attach stream context done", "session_id", req.SessionId, "client_id", clientID)
 			return nil
 		case chunk, ok := <-state.Live:
 			if !ok {
+				// Agent process exited; send a SESSION_EXIT event so
+				// the client learns the exit code without a separate
+				// GetSession call.  The live channel closes from the
+				// read-loop goroutine while waitLoop records the exit
+				// code concurrently, so we poll briefly for the exit
+				// to be recorded.
+				exitEvt := &bridgev1.AttachSessionEvent{
+					Type:      bridgev1.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT,
+					SessionId: req.SessionId,
+				}
+				deadline := time.Now().Add(2 * time.Second)
+				for time.Now().Before(deadline) {
+					if info, err := s.supervisor.Get(req.SessionId); err == nil && info.ExitRecorded {
+						exitEvt.ExitRecorded = true
+						exitEvt.ExitCode = int32(info.ExitCode)
+						break
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				s.logger.Info("agent process exited", "session_id", req.SessionId, "client_id", clientID, "exit_code", exitEvt.ExitCode, "exit_recorded", exitEvt.ExitRecorded)
+				if err := stream.Send(exitEvt); err != nil {
+					s.logger.Warn("failed to send session exit event", "session_id", req.SessionId, "client_id", clientID, "error", err)
+				}
 				return nil
 			}
 			isControl := chunk.Type == bridge.ChunkTypeWriterClaimed || chunk.Type == bridge.ChunkTypeWriterReleased

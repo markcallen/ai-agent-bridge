@@ -298,6 +298,77 @@ func TestBridgeServerStartSessionUsesConfiguredFallbacks(t *testing.T) {
 	}
 }
 
+func TestAttachSessionSendsExitEvent(t *testing.T) {
+	registry := bridge.NewRegistry()
+	// The default (non-cat) serverTestProvider runs trueBin which exits
+	// immediately with code 0, simulating an agent that exits on its own.
+	if err := registry.Register(&serverTestProvider{id: "short", version: "1"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	supervisor := bridge.NewSupervisor(registry, bridge.DefaultPolicy(), 1024, time.Minute)
+	defer supervisor.Close()
+
+	s := New(supervisor, registry, nil, RateLimitConfig{
+		GlobalRPS:                  10,
+		GlobalBurst:                10,
+		StartSessionPerClientRPS:   10,
+		StartSessionPerClientBurst: 10,
+		SendInputPerSessionRPS:     10,
+		SendInputPerSessionBurst:   10,
+	}, "test-instance", nil)
+
+	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "project-a"})
+	sessionID := uuid.NewString()
+
+	_, err := s.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId:   "project-a",
+		SessionId:   sessionID,
+		RepoPath:    t.TempDir(),
+		Provider:    "short",
+		InitialCols: 80,
+		InitialRows: 24,
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	stream := newAttachStream(ctx)
+	attachDone := make(chan error, 1)
+	go func() {
+		attachDone <- s.AttachSession(&bridgev1.AttachSessionRequest{
+			SessionId: sessionID,
+			ClientId:  "client-exit",
+		}, stream)
+	}()
+
+	// The process exits immediately; AttachSession should send a
+	// SESSION_EXIT event and then return.
+	select {
+	case err := <-attachDone:
+		if err != nil {
+			t.Fatalf("AttachSession returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AttachSession did not return after process exit")
+	}
+
+	var found bool
+	for _, ev := range stream.snapshot() {
+		if ev.GetType() == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT {
+			found = true
+			if !ev.GetExitRecorded() {
+				t.Errorf("SESSION_EXIT event: exit_recorded=false, want true")
+			}
+			if ev.GetExitCode() != 0 {
+				t.Errorf("SESSION_EXIT event: exit_code=%d, want 0", ev.GetExitCode())
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no SESSION_EXIT event received; events: %v", stream.snapshot())
+	}
+}
+
 func waitForAttachEvent(t *testing.T, stream *attachStream, typ bridgev1.AttachEventType) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

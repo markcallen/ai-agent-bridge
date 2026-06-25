@@ -17,6 +17,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// trueBin is the absolute path to the "true" binary, resolved once via
+// LookPath so tests work on both Linux (/bin/true) and macOS (/usr/bin/true).
+var trueBin = func() string {
+	if p, err := exec.LookPath("true"); err == nil {
+		return p
+	}
+	return "/usr/bin/true"
+}()
+
 type serverTestProvider struct {
 	id        string
 	healthErr error
@@ -24,7 +33,7 @@ type serverTestProvider struct {
 }
 
 func (p *serverTestProvider) ID() string                    { return p.id }
-func (p *serverTestProvider) Binary() string                { return "/bin/true" }
+func (p *serverTestProvider) Binary() string                { return trueBin }
 func (p *serverTestProvider) PromptPattern() *regexp.Regexp { return nil }
 func (p *serverTestProvider) StartupTimeout() time.Duration { return time.Second }
 func (p *serverTestProvider) StopGrace() time.Duration      { return time.Second }
@@ -32,7 +41,7 @@ func (p *serverTestProvider) BuildCommand(context.Context, bridge.SessionConfig)
 	if p.id == "cat" {
 		return exec.Command("/bin/cat"), nil
 	}
-	return exec.Command("/bin/true"), nil
+	return exec.Command(trueBin), nil
 }
 func (p *serverTestProvider) ValidateStartup(context.Context) error { return nil }
 func (p *serverTestProvider) Health(context.Context) error          { return p.healthErr }

@@ -111,8 +111,12 @@ func DiscoverMode(stateDir string) ServerMode {
 type Config struct {
 	// StateDir overrides the default ~/.ai-agent-bridge directory.
 	StateDir string
-	// Logger overrides the default logger. Nil uses a discard logger.
+	// Logger overrides the default logger. Nil uses a default logger at
+	// Warn level; set Verbose to lower it to Info.
 	Logger *slog.Logger
+	// Verbose enables Info-level logging (session lifecycle events).
+	// Ignored when Logger is explicitly provided.
+	Verbose bool
 	// AllowedPaths restricts which repo paths sessions may use.
 	// Empty means allow all.
 	AllowedPaths []string
@@ -274,7 +278,11 @@ func Start(cfg Config) (*Server, error) {
 
 	logger := cfg.Logger
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+		level := slog.LevelWarn
+		if cfg.Verbose {
+			level = slog.LevelInfo
+		}
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	}
 
 	// Apply log redaction when patterns are configured.
