@@ -145,7 +145,7 @@ Where `AttachRole` is:
 
 ```
 enum AttachRole {
-  ATTACH_ROLE_UNSPECIFIED = 0; // defaults to ACTIVE for backwards compat
+  ATTACH_ROLE_UNSPECIFIED = 0; // defaults to WRITER for backwards compat
   ATTACH_ROLE_WRITER = 1;
   ATTACH_ROLE_OBSERVER = 2;
 }
