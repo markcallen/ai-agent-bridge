@@ -23,10 +23,11 @@ build-cli:
 	@mkdir -p $(BIN_DIR)
 	go build $(LDFLAGS) -o $(BRIDGE_CLI) ./cmd/bridgectl
 
+PROTOC_INCLUDE := $(shell brew --prefix 2>/dev/null)/include
 proto:
 	protoc \
 		--proto_path=proto \
-		--proto_path=/home/linuxbrew/.linuxbrew/include \
+		--proto_path=$(PROTOC_INCLUDE) \
 		--go_out=gen --go_opt=paths=source_relative \
 		--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
 		bridge/v1/bridge.proto

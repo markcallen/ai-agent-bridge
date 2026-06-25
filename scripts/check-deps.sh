@@ -26,6 +26,21 @@ check "gofmt" "gofmt"
 check "goimports" "goimports"
 check "golangci-lint" "golangci-lint"
 check "protoc" "protoc"
+check "protoc-gen-go" "protoc-gen-go"
+check "protoc-gen-go-grpc" "protoc-gen-go-grpc"
+
+# Protobuf well-known types (needed by make proto)
+if command -v brew >/dev/null 2>&1; then
+  PROTOC_INCLUDE="$(brew --prefix)/include"
+  if [ -f "$PROTOC_INCLUDE/google/protobuf/timestamp.proto" ]; then
+    printf "  %-20s %s\n" "proto includes" "$PROTOC_INCLUDE"
+  else
+    printf "  %-20s MISSING — install protobuf (brew install protobuf)\n" "proto includes"
+    ERRORS=$((ERRORS + 1))
+  fi
+else
+  printf "  %-20s SKIPPED — brew not found\n" "proto includes"
+fi
 
 # Node / npm (for AI agent CLIs and TypeScript linting)
 check "node" "node"

@@ -304,23 +304,10 @@ func (s *Supervisor) cleanupLoop() {
 		case <-s.done:
 			return
 		case <-ticker.C:
-			if s.idleTimeout <= 0 {
-				continue
-			}
-			var idle []string
-			s.mu.RLock()
-			for id, ms := range s.sessions {
-				ms.mu.Lock()
-				if (ms.info.State == SessionStateRunning || ms.info.State == SessionStateAttached) &&
-					time.Since(ms.lastActivity) > s.idleTimeout {
-					idle = append(idle, id)
-				}
-				ms.mu.Unlock()
-			}
-			s.mu.RUnlock()
-			for _, id := range idle {
-				_ = s.Stop(id, false)
-			}
+			// No-op: sessions are only stopped explicitly via Stop() or
+			// when the supervisor shuts down via Close(). The idle timeout
+			// field is retained for future use but does not reap running
+			// or attached sessions.
 		}
 	}
 }
@@ -526,7 +513,10 @@ func (s *Supervisor) readLoop(ms *managedSession) {
 			s.appendChunk(ms, chunk, ChunkTypeOutput)
 		}
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
+			if errors.Is(err, io.EOF) {
+				slog.Info("session PTY closed", "session_id", ms.info.SessionID, "provider", ms.info.Provider)
+			} else {
+				slog.Warn("session PTY read error", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "error", err)
 				ms.mu.Lock()
 				if ms.info.Error == "" && !ms.info.ExitRecorded {
 					ms.info.Error = err.Error()
@@ -558,6 +548,7 @@ func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
 	for {
 		line, err := reader.ReadBytes('\n')
 		if errors.Is(err, io.EOF) && len(line) == 0 {
+			slog.Info("session stream-JSON pipe closed", "session_id", ms.info.SessionID, "provider", ms.info.Provider)
 			return
 		}
 		line = bytes.TrimSuffix(line, []byte{'\n'})
@@ -565,6 +556,7 @@ func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
 		if len(line) == 0 {
 			if err != nil {
 				// EOF or pipe closed by cmd.Wait — either way, no more data.
+				slog.Info("session stream-JSON pipe closed", "session_id", ms.info.SessionID, "provider", ms.info.Provider)
 				return
 			}
 			continue
@@ -589,11 +581,14 @@ func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
+				slog.Warn("session stream-JSON read error", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "error", err)
 				ms.mu.Lock()
 				if ms.info.Error == "" && !ms.info.ExitRecorded {
 					ms.info.Error = err.Error()
 				}
 				ms.mu.Unlock()
+			} else {
+				slog.Info("session stream-JSON pipe closed", "session_id", ms.info.SessionID, "provider", ms.info.Provider)
 			}
 			return
 		}
@@ -654,8 +649,10 @@ func (s *Supervisor) waitLoop(ms *managedSession) {
 		if ms.info.Error == "" {
 			ms.info.Error = err.Error()
 		}
+		slog.Warn("session process failed", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "exit_code", exitCode, "error", err)
 	} else {
 		ms.info.State = SessionStateStopped
+		slog.Info("session process exited", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "exit_code", exitCode)
 	}
 	ms.cancel()
 	ms.mu.Unlock()
@@ -673,9 +670,11 @@ func (s *Supervisor) Stop(sessionID string, force bool) error {
 
 	ms.mu.Lock()
 	if ms.info.State == SessionStateStopped || ms.info.State == SessionStateFailed {
+		slog.Debug("stop called on already-terminated session", "session_id", sessionID, "state", ms.info.State)
 		ms.mu.Unlock()
 		return nil
 	}
+	slog.Info("stopping session process", "session_id", sessionID, "provider", ms.info.Provider, "force", force, "pid", ms.info.ProcessID)
 	if ms.recovered {
 		ms.info.State = SessionStateStopping
 		ms.forceStop = force

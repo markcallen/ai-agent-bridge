@@ -37,6 +37,7 @@ func newServerStartCmd() *cobra.Command {
 		listenAddr string
 		serverSANs []string
 		configPath string
+		verbose    bool
 	)
 
 	cmd := &cobra.Command{
@@ -57,6 +58,7 @@ auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
 				ListenAddr: listenAddr,
 				ServerSANs: serverSANs,
 				ConfigPath: configPath,
+				Verbose:    verbose,
 			}
 
 			if listenAddr != "" {
@@ -87,6 +89,7 @@ auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
 	cmd.Flags().StringVar(&listenAddr, "listen", "", "TCP address for secure mode (e.g. 10.0.0.1:9445 or 0.0.0.0:9445)")
 	cmd.Flags().StringSliceVar(&serverSANs, "san", nil, "additional server cert SANs (DNS names or IPs)")
 	cmd.Flags().StringVar(&configPath, "config", "", "path to YAML config file (providers declared here are registered at startup)")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "enable Info-level logging (session lifecycle events)")
 
 	return cmd
 }
