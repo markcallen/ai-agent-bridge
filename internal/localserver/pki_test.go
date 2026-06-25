@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -254,16 +255,23 @@ func TestEnsurePKI_StepCAHappyPath(t *testing.T) {
 	mat, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg)
 	require.NoError(t, err)
 
-	// ca-bundle.crt should contain the root cert content.
+	// ca-bundle.crt should start with the Step CA root, followed by the local CA.
 	bundle, err := os.ReadFile(mat.CABundlePath)
 	require.NoError(t, err)
-	assert.Equal(t, "fake-root-cert", string(bundle))
+	assert.True(t, strings.HasPrefix(string(bundle), "fake-root-cert"), "bundle should start with Step CA root")
+	assert.Contains(t, string(bundle), "BEGIN CERTIFICATE", "bundle should also contain local CA cert")
 
 	// Server cert and key files should exist (written by the fake step script).
 	_, err = os.Stat(mat.ServerCertPath)
 	assert.NoError(t, err, "server cert should exist")
 	_, err = os.Stat(mat.ServerKeyPath)
 	assert.NoError(t, err, "server key should exist")
+
+	// Local-client cert and key must exist so CLI probing works in Step CA mode.
+	_, err = os.Stat(mat.LocalClientCert)
+	assert.NoError(t, err, "local-client cert should exist")
+	_, err = os.Stat(mat.LocalClientKey)
+	assert.NoError(t, err, "local-client key should exist")
 
 	// JWT keypair should be auto-generated locally even in Step CA mode.
 	_, err = os.Stat(mat.JWTSigningPub)
@@ -290,7 +298,8 @@ func TestEnsurePKI_StepCAIdempotent(t *testing.T) {
 	mat2, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg)
 	require.NoError(t, err)
 	bundle, _ := os.ReadFile(mat2.CABundlePath)
-	assert.Equal(t, "fake-root-cert", string(bundle), "bundle should not be overwritten on second call")
+	assert.True(t, strings.HasPrefix(string(bundle), "fake-root-cert"), "bundle should start with original Step CA root, not overwritten")
+	assert.NotContains(t, string(bundle), "changed-root", "bundle should not reflect the overwritten root file")
 }
 
 // TestIssueClientCertViaOIDC_HappyPath exercises the full OIDC enrollment path

@@ -226,7 +226,10 @@ func (s *BridgeServer) AttachSession(req *bridgev1.AttachSessionRequest, stream 
 	}
 	s.logger.Info("session attached", "session_id", req.SessionId, "client_id", clientID, "replay_chunks", len(state.Replay), "replay_gap", state.ReplayGap)
 	defer func() {
-		_ = s.supervisor.Detach(req.SessionId, clientID)
+		wasWriter, _ := s.supervisor.Detach(req.SessionId, clientID)
+		if wasWriter {
+			s.supervisor.NotifyWriterReleased(req.SessionId, clientID)
+		}
 		s.logger.Info("session detached", "session_id", req.SessionId, "client_id", clientID)
 	}()
 
@@ -444,6 +447,9 @@ func (s *BridgeServer) ClaimWriter(ctx context.Context, req *bridgev1.ClaimWrite
 	if err != nil {
 		return nil, mapBridgeError(err, "claim writer")
 	}
+	if result.PreviousWriterClientID != "" {
+		s.supervisor.NotifyWriterReleased(req.SessionId, result.PreviousWriterClientID)
+	}
 	s.supervisor.NotifyWriterClaimed(req.SessionId, clientID)
 	return &bridgev1.ClaimWriterResponse{
 		Claimed:                true,
@@ -575,10 +581,12 @@ func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *brid
 		ev.Payload = nil
 	case bridge.ChunkTypeWriterClaimed:
 		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED
-		ev.Payload = chunk.Payload
+		ev.WriterClientId = string(chunk.Payload)
+		ev.Payload = nil
 	case bridge.ChunkTypeWriterReleased:
 		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED
-		ev.Payload = chunk.Payload
+		ev.WriterClientId = string(chunk.Payload)
+		ev.Payload = nil
 	}
 	return ev
 }

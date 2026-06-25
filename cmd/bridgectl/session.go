@@ -104,7 +104,7 @@ func newSessionAttachCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&observeOnly, "observe", false, "attach as read-only observer (no input)")
 	cmd.Flags().BoolVar(&takeOver, "take-over", false, "forcibly claim the writer slot from the current active writer")
-	cmd.Flags().BoolVar(&release, "release", false, "release the writer slot (demote to observer)")
+	cmd.Flags().BoolVar(&release, "release", false, "release the active writer slot (releases whichever client the server reports as active)")
 	return cmd
 }
 
@@ -292,8 +292,9 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool) er
 	return nil
 }
 
-// releaseWriter sends a ReleaseWriter RPC for sessionID, using the client's
-// own client-id. This is a fire-and-forget command: it doesn't attach a stream.
+// releaseWriter sends a ReleaseWriter RPC for sessionID. It reads the session's
+// active writer from GetSession and releases that client id. This is a
+// fire-and-forget command: it doesn't attach a stream.
 func releaseWriter(sessionID string) error {
 	client, err := connectClient("", 10*time.Second)
 	if err != nil {

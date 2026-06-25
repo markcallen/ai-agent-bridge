@@ -205,7 +205,37 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	mat.ServerKeyPath = serverKey
 	logger.Info("obtained server cert from Step CA", "cert", serverCert)
 
-	// 3. Generate JWT keypair locally (same as auto-PKI path).
+	// 3. Generate a local CA for CLI/local-client credentials.
+	// The server cert comes from Step CA; this small CA signs only the local
+	// management cert so operators can use bridgectl locally against a secure server.
+	localCACert, localCAKey, err := pki.InitCA("ai-agent-bridge-local", certsDir)
+	if err != nil {
+		return nil, fmt.Errorf("init local CA for Step CA mode: %w", err)
+	}
+	mat.CACertPath = localCACert
+	mat.CAKeyPath = localCAKey
+	logger.Info("generated local CA for CLI credentials", "cert", localCACert)
+
+	localCA, localKey, err := pki.LoadCA(localCACert, localCAKey)
+	if err != nil {
+		return nil, fmt.Errorf("load local CA: %w", err)
+	}
+
+	clientCert, clientKey, err := pki.IssueCert(localCA, localKey, pki.CertTypeClient, "local-client", nil, certsDir)
+	if err != nil {
+		return nil, fmt.Errorf("issue local-client cert: %w", err)
+	}
+	mat.LocalClientCert = clientCert
+	mat.LocalClientKey = clientKey
+	logger.Info("generated local-client cert", "cert", clientCert)
+
+	// Append the local CA to the trust bundle so the server accepts local-client.
+	if err := pki.AppendBundle(bundlePath, localCACert); err != nil {
+		return nil, fmt.Errorf("append local CA to bundle: %w", err)
+	}
+	logger.Info("appended local CA to trust bundle", "bundle", bundlePath)
+
+	// 4. Generate JWT keypair locally (same as auto-PKI path).
 	pubPath, privPath, err := pki.GenerateJWTKeypair(certsDir, "jwt-signing")
 	if err != nil {
 		return nil, fmt.Errorf("generate JWT keypair: %w", err)

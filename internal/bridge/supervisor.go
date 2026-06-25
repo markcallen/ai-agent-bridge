@@ -947,6 +947,17 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64, role At
 		ms.observers = make(map[string]*observerEntry)
 	}
 
+	// If the same clientID is already attached, close its stale channel before
+	// registering the new one so the previous goroutine drains cleanly.
+	if prev, exists := ms.observers[clientID]; exists {
+		slog.Warn("client re-attaching with same id, closing stale channel", "session_id", sessionID, "client_id", clientID)
+		close(prev.ch)
+		delete(ms.observers, clientID)
+		if ms.info.ActiveWriterClientID == clientID {
+			ms.info.ActiveWriterClientID = ""
+		}
+	}
+
 	// Build the live channel. If the read loop already finished, hand the caller
 	// a pre-closed channel so it drains immediately.
 	var liveCh chan OutputChunk
@@ -996,7 +1007,10 @@ func (s *Supervisor) countObservers(ms *managedSession) int {
 	return n
 }
 
-func (s *Supervisor) Detach(sessionID, clientID string) error {
+// Detach removes clientID from the session's observer set. It returns true if
+// the detaching client held the active-writer slot (so the server can broadcast
+// a WRITER_RELEASED event), and any error.
+func (s *Supervisor) Detach(sessionID, clientID string) (wasWriter bool, err error) {
 	s.mu.RLock()
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -1006,17 +1020,17 @@ func (s *Supervisor) Detach(sessionID, clientID string) error {
 		_, inHistory := s.history[sessionID]
 		s.histMu.RUnlock()
 		if inHistory {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+		return false, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	if ms.recovered {
-		return nil
+		return false, nil
 	}
 	if _, present := ms.observers[clientID]; !present {
-		return ErrClientMismatch
+		return false, ErrClientMismatch
 	}
 	delete(ms.observers, clientID)
 
@@ -1025,12 +1039,13 @@ func (s *Supervisor) Detach(sessionID, clientID string) error {
 		ms.info.ActiveWriterClientID = ""
 		ms.info.Attached = false
 		ms.info.AttachedClientID = ""
+		wasWriter = true
 	}
 	ms.info.ObserverCount = s.countObservers(ms)
 	if len(ms.observers) == 0 && ms.info.State == SessionStateAttached {
 		ms.info.State = SessionStateRunning
 	}
-	return nil
+	return wasWriter, nil
 }
 
 func (s *Supervisor) Get(sessionID string) (*SessionInfo, error) {

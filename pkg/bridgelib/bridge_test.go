@@ -73,7 +73,7 @@ func TestBridgeLifecycle(t *testing.T) {
 	if len(b.List("project-a")) != 1 {
 		t.Fatal("List(project-a) was empty")
 	}
-	if err := b.supervisor.Detach("session-a", "client-a"); err != nil {
+	if _, err := b.supervisor.Detach("session-a", "client-a"); err != nil {
 		t.Fatalf("Detach: %v", err)
 	}
 	if err := b.Stop("session-a", true); err != nil {
