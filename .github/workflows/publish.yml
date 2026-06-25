@@ -358,9 +358,10 @@ jobs:
         run: |
           if git ls-remote --exit-code origin refs/heads/gh-pages >/dev/null 2>&1; then
             git fetch origin gh-pages
-            mkdir -p dist/gh-pages/apt/pool/main
-            git archive origin/gh-pages -- apt/pool/main/ \
-              | tar -x -C dist/gh-pages/ 2>/dev/null || true
+            if git ls-tree origin/gh-pages -- apt/pool/main/ | grep -q .; then
+              mkdir -p dist/gh-pages/apt/pool/main
+              git archive origin/gh-pages -- apt/pool/main/ | tar -x -C dist/gh-pages/
+            fi
           fi
 
       - name: Build apt repository
