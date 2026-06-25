@@ -354,6 +354,16 @@ jobs:
           gpg --batch --import /tmp/apt-signing.key
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
+      - name: Restore existing apt pool from gh-pages
+        run: |
+          if git ls-remote --exit-code origin refs/heads/gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages
+            if git ls-tree origin/gh-pages -- apt/pool/main/ | grep -q .; then
+              mkdir -p dist/gh-pages/apt/pool/main
+              git archive origin/gh-pages -- apt/pool/main/ | tar -x -C dist/gh-pages/
+            fi
+          fi
+
       - name: Build apt repository
         env:
           GPG_PASSPHRASE: ${{ secrets.APT_REPO_GPG_PASSPHRASE }}
