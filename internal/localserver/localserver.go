@@ -171,6 +171,17 @@ type Config struct {
 	// verification in explicit-cert mode. Populated from auth.jwt_public_keys
 	// in the config file.
 	JWTPublicKeys map[string]string
+
+	// StepCAURL enables Step CA integration. When set, auto-PKI generation is
+	// skipped and server certificates are obtained from the Step CA instance
+	// instead. The `step` CLI must be on PATH.
+	StepCAURL string
+	// StepCARootPath is the path to the Step CA root certificate. Required
+	// when StepCAURL is set.
+	StepCARootPath string
+	// StepCAOIDCProvider is the OIDC issuer URL configured as a Step CA
+	// provisioner. Used by `bridgectl server issue-client --oidc-provider`.
+	StepCAOIDCProvider string
 }
 
 // Start launches a local bridge gRPC server. In local mode (default) it
@@ -436,10 +447,18 @@ func Start(cfg Config) (*Server, error) {
 				ServerKeyPath:  cfg.TLSKeyPath,
 			}
 		} else {
-			// Auto-generate PKI material if not present.
+			// Auto-generate PKI material if not present, or delegate to Step CA.
 			sans := buildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
+			var stepCA *StepCAConfig
+			if cfg.StepCAURL != "" {
+				stepCA = &StepCAConfig{
+					URL:             cfg.StepCAURL,
+					RootPath:        cfg.StepCARootPath,
+					OIDCProviderURL: cfg.StepCAOIDCProvider,
+				}
+			}
 			var pkiErr error
-			mat, pkiErr = EnsurePKI(stateDir, sans, logger)
+			mat, pkiErr = EnsurePKI(stateDir, sans, logger, stepCA)
 			if pkiErr != nil {
 				sup.Close()
 				if store != nil {

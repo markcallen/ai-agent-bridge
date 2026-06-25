@@ -34,13 +34,15 @@ func newServerCmd() *cobra.Command {
 
 func newServerStartCmd() *cobra.Command {
 	var (
-		listenAddr string
-		serverSANs []string
-		configPath string
-		dbPath     string
-		globalRPS  float64
-		logLevel   string
-		logFormat  string
+		listenAddr     string
+		serverSANs     []string
+		configPath     string
+		dbPath         string
+		globalRPS      float64
+		logLevel       string
+		logFormat      string
+		stepCAURL      string
+		stepCARootPath string
 	)
 
 	cmd := &cobra.Command{
@@ -50,8 +52,13 @@ func newServerStartCmd() *cobra.Command {
 socket with no authentication. Use --listen to bind to a TCP address
 with mTLS + JWT for remote access (e.g. over a WireGuard VPN).
 
-In secure mode, PKI material (CA, server cert, JWT keypair) is
-auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
+Tier 1 (default): PKI material (CA, server cert, JWT keypair) is
+auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.
+
+Tier 2 (optional): Pass --step-ca-url and --step-ca-root to delegate
+certificate issuance to a Step CA instance instead of auto-generating.
+The 'step' CLI must be on PATH. Suitable for teams with existing OIDC
+infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if localserver.IsServerRunning("") {
 				return fmt.Errorf("server already running")
@@ -81,11 +88,13 @@ auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
 			}
 
 			cfg := localserver.Config{
-				ListenAddr: listenAddr,
-				ServerSANs: serverSANs,
-				ConfigPath: configPath,
-				DBPath:     dbPath,
-				Logger:     logger,
+				ListenAddr:     listenAddr,
+				ServerSANs:     serverSANs,
+				ConfigPath:     configPath,
+				DBPath:         dbPath,
+				Logger:         logger,
+				StepCAURL:      stepCAURL,
+				StepCARootPath: stepCARootPath,
 			}
 			if globalRPS > 0 {
 				cfg.RateLimits.GlobalRPS = globalRPS
@@ -119,6 +128,8 @@ auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
 	cmd.Flags().Float64Var(&globalRPS, "rate-limit-global-rps", 0, "override global RPS rate limit (default 100)")
 	cmd.Flags().StringVar(&logLevel, "log-level", "", "log level: debug, info, warn, error (default warn; info when --listen is set)")
 	cmd.Flags().StringVar(&logFormat, "log-format", "text", "log format: text or json")
+	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA URL for Tier-2 PKI (e.g. https://step-ca.internal:443); requires --step-ca-root")
+	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to the Step CA root certificate (required with --step-ca-url)")
 
 	return cmd
 }
@@ -225,7 +236,12 @@ func newServerStopCmd() *cobra.Command {
 }
 
 func newServerIssueClientCmd() *cobra.Command {
-	var clientName string
+	var (
+		clientName     string
+		oidcProvider   string
+		stepCAURL      string
+		stepCARootPath string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "issue-client",
@@ -234,12 +250,19 @@ func newServerIssueClientCmd() *cobra.Command {
 Each client gets its own signing key so credentials can be rotated or
 revoked independently. The remote machine needs these files:
 
-  1. CA bundle      (ca-bundle.crt)   — to verify the server
-  2. Client cert    (<name>.crt)      — to authenticate to the server
-  3. Client key     (<name>.key)      — private key for the cert
+  1. CA bundle       (ca-bundle.crt)   — to verify the server
+  2. Client cert     (<name>.crt)      — to authenticate to the server
+  3. Client key      (<name>.key)      — private key for the cert
   4. JWT signing key (jwt-signing.key) — per-client key to mint tokens
 
-Copy these files to the remote machine and use them with the Go SDK.`,
+Copy these files to the remote machine and use them with the Go SDK.
+
+Tier 1 (default): The certificate is signed by the local auto-generated CA.
+Run 'bridgectl server start --listen' first to generate PKI.
+
+Tier 2 (Step CA + OIDC): Pass --oidc-provider, --step-ca-url, and
+--step-ca-root to enrol via an OIDC login flow. A browser window will open
+for interactive authentication. The 'step' CLI must be on PATH.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clientName == "" {
 				return fmt.Errorf("--name is required")
@@ -248,9 +271,23 @@ Copy these files to the remote machine and use them with the Go SDK.`,
 			stateDir := localserver.StateDir()
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-			certPath, keyPath, err := localserver.IssueClientCert(stateDir, clientName, logger)
-			if err != nil {
-				return err
+			var certPath, keyPath string
+			var issueErr error
+
+			if oidcProvider != "" {
+				// Tier 2: obtain cert from Step CA via OIDC.
+				stepCfg := &localserver.StepCAConfig{
+					URL:             stepCAURL,
+					RootPath:        stepCARootPath,
+					OIDCProviderURL: oidcProvider,
+				}
+				certPath, keyPath, issueErr = localserver.IssueClientCertViaOIDC(stateDir, clientName, stepCfg, logger)
+			} else {
+				// Tier 1: sign with local auto-generated CA.
+				certPath, keyPath, issueErr = localserver.IssueClientCert(stateDir, clientName, logger)
+			}
+			if issueErr != nil {
+				return issueErr
 			}
 
 			mat := localserver.LoadPKIMaterial(stateDir)
@@ -291,6 +328,9 @@ Copy these files to the remote machine and use them with the Go SDK.`,
 
 	cmd.Flags().StringVar(&clientName, "name", "", "client name (used as cert CN and filenames)")
 	_ = cmd.MarkFlagRequired("name")
+	cmd.Flags().StringVar(&oidcProvider, "oidc-provider", "", "OIDC issuer URL for Step CA enrollment (e.g. https://accounts.google.com); enables Tier-2 flow")
+	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA server URL (required with --oidc-provider)")
+	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to Step CA root certificate (required with --oidc-provider)")
 
 	return cmd
 }

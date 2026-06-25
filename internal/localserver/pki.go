@@ -2,8 +2,10 @@ package localserver
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 
@@ -12,6 +14,21 @@ import (
 
 // safeNameRe matches a simple filename component: alphanumeric, hyphens, underscores, dots.
 var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+// StepCAConfig holds optional Step CA integration settings. When URL is set,
+// EnsurePKI delegates certificate issuance to the Step CA instance instead of
+// generating a self-signed CA. The `step` CLI must be on PATH.
+type StepCAConfig struct {
+	// URL is the Step CA server URL (e.g. "https://step-ca.internal:443").
+	URL string
+	// RootPath is the path to the Step CA root certificate used to verify
+	// the CA server's TLS connection.
+	RootPath string
+	// OIDCProviderURL is the OIDC issuer URL configured as a Step CA
+	// provisioner (e.g. "https://accounts.google.com"). Used by
+	// IssueClientCertViaOIDC to select the correct provisioner.
+	OIDCProviderURL string
+}
 
 // PKIMaterial holds resolved paths to all PKI files needed for secure mode.
 type PKIMaterial struct {
@@ -48,30 +65,44 @@ func LoadPKIMaterial(stateDir string) *PKIMaterial {
 	}
 }
 
-// EnsurePKI ensures that all PKI material exists in stateDir/certs/. If the
-// CA certificate is missing, the entire set is generated from scratch:
+// EnsurePKI ensures that all PKI material exists in stateDir/certs/.
+//
+// When stepCA is nil (default), the entire set is auto-generated:
 //   - CA cert/key (ECDSA P-384, 10-year validity)
 //   - Server cert/key with the provided SANs (90-day validity)
 //   - Local-client cert/key for CLI's own connections
 //   - CA trust bundle
 //   - Ed25519 JWT signing keypair
 //
-// If the CA already exists, this is a no-op and returns existing paths.
-func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger) (*PKIMaterial, error) {
+// When stepCA is non-nil, auto-generation is skipped. Instead, the Step CA
+// root is copied to ca-bundle.crt and the server certificate is obtained from
+// Step CA via the `step` CLI. The JWT keypair is still generated locally.
+//
+// If the CA bundle already exists, this is a no-op and returns existing paths.
+func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig) (*PKIMaterial, error) {
 	mat := LoadPKIMaterial(stateDir)
 	certsDir := CertsDir(stateDir)
 
-	// Use ca.crt as sentinel — if it exists, assume the full set does.
-	if _, err := os.Stat(mat.CACertPath); err == nil {
+	// Use ca-bundle.crt as sentinel — it is produced by both auto-PKI and
+	// Step CA paths, so checking it covers both cases.
+	if _, err := os.Stat(mat.CABundlePath); err == nil {
 		logger.Info("PKI material already exists", "dir", certsDir)
 		return mat, nil
 	}
 
-	logger.Info("generating PKI material", "dir", certsDir)
-
 	if err := os.MkdirAll(certsDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create certs dir: %w", err)
 	}
+
+	if stepCA != nil && stepCA.URL != "" {
+		return ensurePKIStepCA(stateDir, serverSANs, logger, stepCA, mat, certsDir)
+	}
+	return ensurePKIAutoGen(stateDir, serverSANs, logger, mat, certsDir)
+}
+
+// ensurePKIAutoGen generates a self-signed CA and all derived material.
+func ensurePKIAutoGen(stateDir string, serverSANs []string, logger *slog.Logger, mat *PKIMaterial, certsDir string) (*PKIMaterial, error) {
+	logger.Info("generating PKI material", "dir", certsDir)
 
 	// 1. Generate CA.
 	caCertPath, caKeyPath, err := pki.InitCA("ai-agent-bridge", certsDir)
@@ -115,6 +146,66 @@ func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger) (*PKIM
 	logger.Info("built CA bundle", "path", bundlePath)
 
 	// 5. Generate Ed25519 JWT signing keypair.
+	pubPath, privPath, err := pki.GenerateJWTKeypair(certsDir, "jwt-signing")
+	if err != nil {
+		return nil, fmt.Errorf("generate JWT keypair: %w", err)
+	}
+	mat.JWTSigningPub = pubPath
+	mat.JWTSigningKey = privPath
+	logger.Info("generated JWT signing keypair", "pub", pubPath)
+
+	return mat, nil
+}
+
+// ensurePKIStepCA uses the Step CA CLI to obtain a server certificate.
+// The Step CA root cert is copied to ca-bundle.crt; JWT material is generated
+// locally as in auto-PKI mode (tokens are still validated per-client).
+func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, mat *PKIMaterial, certsDir string) (*PKIMaterial, error) {
+	logger.Info("using Step CA for PKI", "url", stepCA.URL)
+
+	// 1. Copy Step CA root cert to ca-bundle.crt so clients can verify the server.
+	if stepCA.RootPath == "" {
+		return nil, fmt.Errorf("step-ca-root is required when --step-ca-url is set")
+	}
+	bundlePath := filepath.Join(certsDir, "ca-bundle.crt")
+	if err := copyFile(stepCA.RootPath, bundlePath); err != nil {
+		return nil, fmt.Errorf("copy Step CA root to ca-bundle: %w", err)
+	}
+	mat.CABundlePath = bundlePath
+	// In Step CA mode there is no local CA key — leave mat.CACertPath and
+	// mat.CAKeyPath empty; they are only used by IssueClientCert (auto-PKI path).
+	mat.CACertPath = bundlePath
+	logger.Info("copied Step CA root", "bundle", bundlePath)
+
+	// 2. Obtain server certificate from Step CA via `step ca certificate`.
+	sans := serverSANs
+	if len(sans) == 0 {
+		sans = []string{"server"}
+	}
+	serverCert := filepath.Join(certsDir, "server.crt")
+	serverKey := filepath.Join(certsDir, "server.key")
+
+	stepArgs := []string{
+		"ca", "certificate",
+		sans[0],
+		serverCert,
+		serverKey,
+		"--ca-url", stepCA.URL,
+		"--root", stepCA.RootPath,
+		"--not-after", "2160h", // 90 days
+		"--force",
+	}
+	for _, san := range sans[1:] {
+		stepArgs = append(stepArgs, "--san", san)
+	}
+	if err := runStep(stepArgs, logger); err != nil {
+		return nil, fmt.Errorf("obtain server cert from Step CA: %w", err)
+	}
+	mat.ServerCertPath = serverCert
+	mat.ServerKeyPath = serverKey
+	logger.Info("obtained server cert from Step CA", "cert", serverCert)
+
+	// 3. Generate JWT keypair locally (same as auto-PKI path).
 	pubPath, privPath, err := pki.GenerateJWTKeypair(certsDir, "jwt-signing")
 	if err != nil {
 		return nil, fmt.Errorf("generate JWT keypair: %w", err)
@@ -172,4 +263,105 @@ func IssueClientCert(stateDir, clientName string, logger *slog.Logger) (certPath
 
 	logger.Info("issued client credentials", "name", clientName, "cert", certPath, "jwt_key", jwtKeyPath)
 	return certPath, keyPath, nil
+}
+
+// IssueClientCertViaOIDC obtains a short-lived client certificate from Step CA
+// using the OIDC provisioner. It opens a browser for the OIDC login flow and
+// waits for Step CA to issue the certificate. The `step` CLI must be on PATH.
+//
+// The cert and key are written to stateDir/certs/clients/<clientName>/ (same
+// layout as IssueClientCert) so the same SDK configuration works for both
+// auto-PKI and Step CA clients.
+func IssueClientCertViaOIDC(stateDir, clientName string, stepCA *StepCAConfig, logger *slog.Logger) (certPath, keyPath string, err error) {
+	if !safeNameRe.MatchString(clientName) {
+		return "", "", fmt.Errorf("invalid client name %q: must be alphanumeric with hyphens, underscores, or dots", clientName)
+	}
+	if stepCA == nil || stepCA.URL == "" {
+		return "", "", fmt.Errorf("--step-ca-url is required for OIDC enrollment")
+	}
+	if stepCA.OIDCProviderURL == "" {
+		return "", "", fmt.Errorf("--oidc-provider is required for OIDC enrollment")
+	}
+	if stepCA.RootPath == "" {
+		return "", "", fmt.Errorf("--step-ca-root is required for OIDC enrollment")
+	}
+
+	outDir := filepath.Join(CertsDir(stateDir), "clients", clientName)
+	if err := os.MkdirAll(outDir, 0o700); err != nil {
+		return "", "", fmt.Errorf("create client dir: %w", err)
+	}
+
+	certPath = filepath.Join(outDir, clientName+".crt")
+	keyPath = filepath.Join(outDir, clientName+".key")
+
+	stepArgs := []string{
+		"ca", "certificate",
+		clientName,
+		certPath,
+		keyPath,
+		"--provisioner", stepCA.OIDCProviderURL,
+		"--ca-url", stepCA.URL,
+		"--root", stepCA.RootPath,
+		"--not-after", "24h",
+		"--force",
+	}
+	logger.Info("starting OIDC enrollment via Step CA", "name", clientName, "oidc_provider", stepCA.OIDCProviderURL)
+	if err := runStep(stepArgs, logger); err != nil {
+		return "", "", fmt.Errorf("obtain client cert via OIDC: %w", err)
+	}
+
+	// Generate a per-client JWT keypair (same as auto-PKI path).
+	jwtPubPath, jwtKeyPath, err := pki.GenerateJWTKeypair(outDir, "jwt-signing")
+	if err != nil {
+		return "", "", fmt.Errorf("generate client JWT keypair: %w", err)
+	}
+
+	// Register the client's public key server-side.
+	serverJWTDir := filepath.Join(CertsDir(stateDir), "jwt-clients")
+	if err := os.MkdirAll(serverJWTDir, 0o700); err != nil {
+		return "", "", fmt.Errorf("create jwt-clients dir: %w", err)
+	}
+	pubData, err := os.ReadFile(jwtPubPath)
+	if err != nil {
+		return "", "", fmt.Errorf("read client JWT public key: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(serverJWTDir, clientName+".pub"), pubData, 0o644); err != nil {
+		return "", "", fmt.Errorf("write client JWT public key: %w", err)
+	}
+
+	logger.Info("issued OIDC client credentials", "name", clientName, "cert", certPath, "jwt_key", jwtKeyPath)
+	return certPath, keyPath, nil
+}
+
+// runStep executes the `step` CLI with the given arguments, inheriting stderr
+// and stdout (Step CA prints login URLs and status to stdout).
+func runStep(args []string, logger *slog.Logger) error {
+	stepBin, err := exec.LookPath("step")
+	if err != nil {
+		return fmt.Errorf("'step' CLI not found on PATH — install it from https://smallstep.com/cli/: %w", err)
+	}
+	logger.Debug("running step CLI", "args", args)
+	cmd := exec.Command(stepBin, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+// copyFile copies src to dst, creating dst with mode 0o644.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	if closeErr := out.Close(); closeErr != nil && copyErr == nil {
+		return closeErr
+	}
+	return copyErr
 }
