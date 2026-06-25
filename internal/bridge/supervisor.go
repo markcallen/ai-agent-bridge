@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"regexp"
@@ -23,8 +24,23 @@ import (
 // escape sequences) so they can be stripped from PTY output when needed.
 var ansiEscape = regexp.MustCompile(`\x1b(?:\[[0-9;?=<>]*[a-zA-Z~]|[@-Z\x5c-_])`)
 
+// AttachRole controls whether the attaching client can send input (Writer) or
+// is read-only (Observer).
+type AttachRole int
+
+const (
+	// AttachRoleWriter requests the active-writer slot. Fails with
+	// ErrWriterConflict when another client already holds the slot.
+	AttachRoleWriter AttachRole = iota
+	// AttachRoleObserver attaches read-only; WriteInput / Resize are rejected.
+	AttachRoleObserver
+)
+
+// AttachState is returned by Supervisor.Attach and holds the replay buffer,
+// live output channel, and session metadata for the attaching client.
 type AttachState struct {
 	ClientID     string
+	Role         AttachRole
 	Replay       []OutputChunk
 	Live         <-chan OutputChunk
 	ReplayGap    bool
@@ -34,6 +50,12 @@ type AttachState struct {
 	ExitCode     int
 	Cols         uint32
 	Rows         uint32
+}
+
+// observerEntry holds the live channel for a single attached client.
+type observerEntry struct {
+	ch   chan OutputChunk
+	role AttachRole
 }
 
 // SupervisorOption configures optional Supervisor behaviour.
@@ -81,9 +103,12 @@ type managedSession struct {
 
 	stripANSI bool // strip ANSI escape codes from PTY output before forwarding
 
-	attachedClient string
-	live           chan OutputChunk
-	liveClosed     bool // set by closeLive; Attach returns a pre-closed channel when true
+	// Multi-observer state. All fields below are protected by ms.mu.
+	//
+	// observers holds all currently attached clients keyed by clientID.
+	// The writer (if any) is always in observers too — activeWriter names it.
+	observers  map[string]*observerEntry
+	liveClosed bool // set by closeLive; new observers receive a pre-closed channel
 }
 
 func NewSupervisor(registry *Registry, policy Policy, outputBufSize int, idleTimeout time.Duration, opts ...SupervisorOption) *Supervisor {
@@ -595,23 +620,25 @@ func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
 	}
 }
 
-// closeLive closes the managed session's live channel exactly once. It
-// acquires ms.mu, reads and nils ms.live, then closes the old reference
-// outside the lock. This must only be called from readLoop or
-// readLoopStreamJSON — i.e. after all sends to the channel are complete.
+// closeLive marks the session output as exhausted and closes every observer
+// channel. Must only be called from readLoop or readLoopStreamJSON — after all
+// sends to observer channels are complete.
+// The observers map is kept intact so deferred Detach calls (from AttachSession
+// goroutines draining their channels) can still clean up session state.
 func (s *Supervisor) closeLive(ms *managedSession) {
 	ms.mu.Lock()
-	live := ms.live
-	ms.live = nil
 	ms.liveClosed = true
+	obs := make(map[string]*observerEntry, len(ms.observers))
+	maps.Copy(obs, ms.observers)
 	ms.mu.Unlock()
-	if live != nil {
-		close(live)
+	for _, entry := range obs {
+		close(entry.ch)
 	}
 }
 
 // appendChunk adds a new chunk with the given type to the session buffer and
-// notifies any attached live client.
+// fans it out to all attached observers. Chunks for slow observers are dropped
+// with a warning; the observer remains attached.
 func (s *Supervisor) appendChunk(ms *managedSession, payload []byte, ctype ChunkType) {
 	chunk := ms.buf.AppendTyped(payload, ctype)
 	s.persistChunk(ms.info.SessionID, chunk)
@@ -619,11 +646,61 @@ func (s *Supervisor) appendChunk(ms *managedSession, payload []byte, ctype Chunk
 	ms.info.OldestSeq = ms.buf.OldestSeq()
 	ms.info.LastSeq = ms.buf.LastSeq()
 	ms.lastActivity = time.Now()
-	live := ms.live
+	// Snapshot the observer map so we don't hold the lock during channel sends.
+	obs := make(map[string]*observerEntry, len(ms.observers))
+	maps.Copy(obs, ms.observers)
 	ms.mu.Unlock()
-	if live != nil {
-		live <- chunk
+
+	for clientID, entry := range obs {
+		select {
+		case entry.ch <- chunk:
+		default:
+			slog.Warn("observer channel full, dropping chunk", "session_id", ms.info.SessionID, "client_id", clientID)
+		}
 	}
+}
+
+// fanoutControlEvent broadcasts a control chunk to all current observers
+// without appending it to the replay buffer or persisting it.
+func (s *Supervisor) fanoutControlEvent(ms *managedSession, ctype ChunkType, payload []byte) {
+	chunk := OutputChunk{Type: ctype, Payload: payload}
+	ms.mu.Lock()
+	obs := make(map[string]*observerEntry, len(ms.observers))
+	maps.Copy(obs, ms.observers)
+	ms.mu.Unlock()
+
+	for clientID, entry := range obs {
+		select {
+		case entry.ch <- chunk:
+		default:
+			slog.Warn("observer channel full, dropping control event", "session_id", ms.info.SessionID, "client_id", clientID, "type", ctype)
+		}
+	}
+}
+
+// NotifyWriterClaimed broadcasts a ChunkTypeWriterClaimed control event to all
+// observers of sessionID so they learn immediately which client now owns the
+// writer role. The payload is the claimant clientID.
+func (s *Supervisor) NotifyWriterClaimed(sessionID, claimantClientID string) {
+	s.mu.RLock()
+	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return
+	}
+	s.fanoutControlEvent(ms, ChunkTypeWriterClaimed, []byte(claimantClientID))
+}
+
+// NotifyWriterReleased broadcasts a ChunkTypeWriterReleased control event to
+// all observers of sessionID. The payload is the releasing clientID.
+func (s *Supervisor) NotifyWriterReleased(sessionID, releasingClientID string) {
+	s.mu.RLock()
+	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return
+	}
+	s.fanoutControlEvent(ms, ChunkTypeWriterReleased, []byte(releasingClientID))
 }
 
 func (s *Supervisor) waitLoop(ms *managedSession) {
@@ -766,17 +843,13 @@ func (s *Supervisor) WriteInput(sessionID, clientID string, data []byte) (int, e
 		ms.mu.Unlock()
 		return 0, ErrSessionRecoveryUnavailable
 	}
-	if ms.attachedClient == "" {
+	if ms.info.ActiveWriterClientID == "" {
 		ms.mu.Unlock()
 		return 0, ErrClientNotAttached
 	}
-	if ms.attachedClient != clientID {
+	if ms.info.ActiveWriterClientID != clientID {
 		ms.mu.Unlock()
 		return 0, ErrClientMismatch
-	}
-	if ms.recovered {
-		ms.mu.Unlock()
-		return 0, ErrSessionRecoveryUnavailable
 	}
 	ms.lastActivity = time.Now()
 	streamJSON := ms.streamJSON
@@ -804,17 +877,13 @@ func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error
 		ms.mu.Unlock()
 		return ErrSessionRecoveryUnavailable
 	}
-	if ms.attachedClient == "" {
+	if ms.info.ActiveWriterClientID == "" {
 		ms.mu.Unlock()
 		return ErrClientNotAttached
 	}
-	if ms.attachedClient != clientID {
+	if ms.info.ActiveWriterClientID != clientID {
 		ms.mu.Unlock()
 		return ErrClientMismatch
-	}
-	if ms.recovered {
-		ms.mu.Unlock()
-		return ErrSessionRecoveryUnavailable
 	}
 	ms.info.Cols = cols
 	ms.info.Rows = rows
@@ -828,7 +897,14 @@ func (s *Supervisor) Resize(sessionID, clientID string, cols, rows uint32) error
 	return pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 }
 
-func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*AttachState, error) {
+// Attach connects clientID to the session. role controls whether the client
+// attaches as a writer (can send input) or observer (read-only).
+//
+// Writers: only one writer is allowed at a time. Returns ErrWriterConflict if
+// another client already holds the writer slot.
+//
+// Observers: unlimited. Observers always succeed unless the session is not found.
+func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64, role AttachRole) (*AttachState, error) {
 	s.mu.RLock()
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -843,6 +919,7 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*Attac
 
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+
 	if ms.recovered {
 		oldest := ms.buf.OldestSeq()
 		last := ms.buf.LastSeq()
@@ -850,6 +927,7 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*Attac
 		close(closed)
 		return &AttachState{
 			ClientID:     clientID,
+			Role:         AttachRoleObserver,
 			Replay:       ms.buf.After(afterSeq),
 			Live:         closed,
 			ReplayGap:    oldest > 0 && afterSeq > 0 && afterSeq < oldest-1,
@@ -861,32 +939,50 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*Attac
 			Rows:         ms.info.Rows,
 		}, nil
 	}
-	if ms.attachedClient != "" {
-		return nil, ErrSessionAlreadyAttached
-	}
-	ms.attachedClient = clientID
-	ms.info.Attached = true
-	ms.info.AttachedClientID = clientID
-	ms.info.State = SessionStateAttached
-	ms.lastActivity = time.Now()
 
-	// If the read loop already finished before Attach was called, ms.live is nil
-	// and liveClosed is true. Return a pre-closed channel so callers drain
-	// immediately instead of blocking forever.
-	if ms.liveClosed {
-		closed := make(chan OutputChunk)
-		close(closed)
-		ms.live = closed
-	} else {
-		ms.live = make(chan OutputChunk, 128)
+	// Enforce single-writer constraint.
+	if role == AttachRoleWriter && ms.info.ActiveWriterClientID != "" {
+		return nil, ErrWriterConflict
 	}
+
+	if ms.observers == nil {
+		ms.observers = make(map[string]*observerEntry)
+	}
+
+	// Close and evict any stale channel from a prior attach with the same client_id
+	// to avoid leaking goroutines that are draining the old channel.
+	if existing, ok := ms.observers[clientID]; ok {
+		close(existing.ch)
+		delete(ms.observers, clientID)
+	}
+
+	// Build the live channel. If the read loop already finished, hand the caller
+	// a pre-closed channel so it drains immediately.
+	var liveCh chan OutputChunk
+	if ms.liveClosed {
+		liveCh = make(chan OutputChunk)
+		close(liveCh)
+	} else {
+		liveCh = make(chan OutputChunk, 128)
+		ms.observers[clientID] = &observerEntry{ch: liveCh, role: role}
+	}
+
+	if role == AttachRoleWriter {
+		ms.info.ActiveWriterClientID = clientID
+		ms.info.Attached = true
+		ms.info.AttachedClientID = clientID
+		ms.info.State = SessionStateAttached
+	}
+	ms.info.ObserverCount = s.countObservers(ms)
+	ms.lastActivity = time.Now()
 
 	oldest := ms.buf.OldestSeq()
 	last := ms.buf.LastSeq()
 	return &AttachState{
 		ClientID:     clientID,
+		Role:         role,
 		Replay:       ms.buf.After(afterSeq),
-		Live:         ms.live,
+		Live:         liveCh,
 		ReplayGap:    oldest > 0 && afterSeq > 0 && afterSeq < oldest-1,
 		OldestSeq:    oldest,
 		LastSeq:      last,
@@ -895,6 +991,18 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64) (*Attac
 		Cols:         ms.info.Cols,
 		Rows:         ms.info.Rows,
 	}, nil
+}
+
+// countObservers returns the number of read-only observers in ms.observers.
+// Must be called with ms.mu held.
+func (s *Supervisor) countObservers(ms *managedSession) int {
+	n := 0
+	for _, entry := range ms.observers {
+		if entry.role == AttachRoleObserver {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *Supervisor) Detach(sessionID, clientID string) error {
@@ -916,14 +1024,19 @@ func (s *Supervisor) Detach(sessionID, clientID string) error {
 	if ms.recovered {
 		return nil
 	}
-	if ms.attachedClient != clientID {
+	if _, present := ms.observers[clientID]; !present {
 		return ErrClientMismatch
 	}
-	ms.attachedClient = ""
-	ms.live = nil
-	ms.info.Attached = false
-	ms.info.AttachedClientID = ""
-	if ms.info.State == SessionStateAttached {
+	delete(ms.observers, clientID)
+
+	// If the detaching client held the writer slot, clear it.
+	if ms.info.ActiveWriterClientID == clientID {
+		ms.info.ActiveWriterClientID = ""
+		ms.info.Attached = false
+		ms.info.AttachedClientID = ""
+	}
+	ms.info.ObserverCount = s.countObservers(ms)
+	if len(ms.observers) == 0 && ms.info.State == SessionStateAttached {
 		ms.info.State = SessionStateRunning
 	}
 	return nil
@@ -988,6 +1101,94 @@ func (s *Supervisor) Close() {
 	for _, id := range ids {
 		_ = s.Stop(id, true)
 	}
+}
+
+// ClaimWriterResult is returned by ClaimWriter.
+type ClaimWriterResult struct {
+	// PreviousWriterClientID is set when force evicted an existing writer.
+	PreviousWriterClientID string
+}
+
+// ClaimWriter promotes clientID to the active-writer slot. If force is true
+// and another client holds the slot, that client is evicted (its channel is
+// not closed here; the server must send them a WRITER_RELEASED event). Returns
+// ErrWriterConflict when force is false and the slot is taken.
+func (s *Supervisor) ClaimWriter(sessionID, clientID string, force bool) (*ClaimWriterResult, error) {
+	s.mu.RLock()
+	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	if ms.recovered {
+		return nil, ErrSessionRecoveryUnavailable
+	}
+
+	// Idempotent: caller already holds the slot.
+	if ms.info.ActiveWriterClientID == clientID {
+		return &ClaimWriterResult{}, nil
+	}
+
+	prevWriter := ms.info.ActiveWriterClientID
+	if prevWriter != "" && !force {
+		return nil, ErrWriterConflict
+	}
+
+	// Ensure the claimant is already observing (has a live channel).
+	if _, present := ms.observers[clientID]; !present {
+		return nil, fmt.Errorf("%w: client %q must be attached before claiming writer", ErrClientNotAttached, clientID)
+	}
+
+	// Downgrade the previous writer to observer in the observers map (keep their channel).
+	if prevEntry, prev := ms.observers[prevWriter]; prev {
+		prevEntry.role = AttachRoleObserver
+	}
+
+	ms.observers[clientID].role = AttachRoleWriter
+	ms.info.ActiveWriterClientID = clientID
+	ms.info.Attached = true
+	ms.info.AttachedClientID = clientID
+	if ms.info.State == SessionStateRunning {
+		ms.info.State = SessionStateAttached
+	}
+	ms.info.ObserverCount = s.countObservers(ms)
+	return &ClaimWriterResult{PreviousWriterClientID: prevWriter}, nil
+}
+
+// ReleaseWriter demotes clientID from the active-writer slot to observer.
+// Returns ErrClientMismatch if clientID does not currently hold the slot.
+func (s *Supervisor) ReleaseWriter(sessionID, clientID string) error {
+	s.mu.RLock()
+	ms, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+	}
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	if ms.recovered {
+		return nil
+	}
+	if ms.info.ActiveWriterClientID != clientID {
+		return ErrClientMismatch
+	}
+
+	// Downgrade to observer.
+	if entry, present := ms.observers[clientID]; present {
+		entry.role = AttachRoleObserver
+	}
+	ms.info.ActiveWriterClientID = ""
+	ms.info.Attached = false
+	ms.info.AttachedClientID = ""
+	ms.info.ObserverCount = s.countObservers(ms)
+	if len(ms.observers) == 0 && ms.info.State == SessionStateAttached {
+		ms.info.State = SessionStateRunning
+	}
+	return nil
 }
 
 func (ms *managedSession) snapshotInfo() SessionInfo {

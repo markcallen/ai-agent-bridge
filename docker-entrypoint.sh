@@ -218,4 +218,4 @@ fs.writeFileSync(configPath, configToml);
 EOF'
 
 echo "==> Starting bridge as non-root user..."
-exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec ai-agent-bridge --config $BRIDGE_CONFIG"
+exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec bridgectl server start --config $BRIDGE_CONFIG"

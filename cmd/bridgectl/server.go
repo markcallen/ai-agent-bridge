@@ -37,7 +37,10 @@ func newServerStartCmd() *cobra.Command {
 		listenAddr string
 		serverSANs []string
 		configPath string
-		verbose    bool
+		dbPath     string
+		globalRPS  float64
+		logLevel   string
+		logFormat  string
 	)
 
 	cmd := &cobra.Command{
@@ -54,15 +57,38 @@ auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
 				return fmt.Errorf("server already running")
 			}
 
+			// Build logger from --log-level and --log-format.
+			level := slog.LevelWarn
+			switch strings.ToLower(logLevel) {
+			case "debug":
+				level = slog.LevelDebug
+			case "info":
+				level = slog.LevelInfo
+			case "warn", "warning":
+				level = slog.LevelWarn
+			case "error":
+				level = slog.LevelError
+			}
+			// Secure mode and explicit log-level both default to info-level output.
+			if listenAddr != "" && logLevel == "" {
+				level = slog.LevelInfo
+			}
+			var logger *slog.Logger
+			if logFormat == "json" {
+				logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+			} else {
+				logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+			}
+
 			cfg := localserver.Config{
 				ListenAddr: listenAddr,
 				ServerSANs: serverSANs,
 				ConfigPath: configPath,
-				Verbose:    verbose,
+				DBPath:     dbPath,
+				Logger:     logger,
 			}
-
-			if listenAddr != "" {
-				cfg.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+			if globalRPS > 0 {
+				cfg.RateLimits.GlobalRPS = globalRPS
 			}
 
 			srv, err := localserver.Start(cfg)
@@ -88,8 +114,11 @@ auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
 
 	cmd.Flags().StringVar(&listenAddr, "listen", "", "TCP address for secure mode (e.g. 10.0.0.1:9445 or 0.0.0.0:9445)")
 	cmd.Flags().StringSliceVar(&serverSANs, "san", nil, "additional server cert SANs (DNS names or IPs)")
-	cmd.Flags().StringVar(&configPath, "config", "", "path to YAML config file (providers declared here are registered at startup)")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "enable Info-level logging (session lifecycle events)")
+	cmd.Flags().StringVar(&configPath, "config", "", "path to YAML config file (merged with flag values; flags take precedence)")
+	cmd.Flags().StringVar(&dbPath, "db-path", "", "path to BoltDB session store for persistence across restarts")
+	cmd.Flags().Float64Var(&globalRPS, "rate-limit-global-rps", 0, "override global RPS rate limit (default 100)")
+	cmd.Flags().StringVar(&logLevel, "log-level", "", "log level: debug, info, warn, error (default warn; info when --listen is set)")
+	cmd.Flags().StringVar(&logFormat, "log-format", "text", "log format: text or json")
 
 	return cmd
 }

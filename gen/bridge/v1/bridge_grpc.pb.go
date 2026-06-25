@@ -26,6 +26,8 @@ const (
 	BridgeService_AttachSession_FullMethodName = "/bridge.v1.BridgeService/AttachSession"
 	BridgeService_WriteInput_FullMethodName    = "/bridge.v1.BridgeService/WriteInput"
 	BridgeService_ResizeSession_FullMethodName = "/bridge.v1.BridgeService/ResizeSession"
+	BridgeService_ClaimWriter_FullMethodName   = "/bridge.v1.BridgeService/ClaimWriter"
+	BridgeService_ReleaseWriter_FullMethodName = "/bridge.v1.BridgeService/ReleaseWriter"
 	BridgeService_Health_FullMethodName        = "/bridge.v1.BridgeService/Health"
 	BridgeService_ListProviders_FullMethodName = "/bridge.v1.BridgeService/ListProviders"
 )
@@ -41,6 +43,13 @@ type BridgeServiceClient interface {
 	AttachSession(ctx context.Context, in *AttachSessionRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[AttachSessionEvent], error)
 	WriteInput(ctx context.Context, in *WriteInputRequest, opts ...grpc.CallOption) (*WriteInputResponse, error)
 	ResizeSession(ctx context.Context, in *ResizeSessionRequest, opts ...grpc.CallOption) (*ResizeSessionResponse, error)
+	// ClaimWriter promotes the caller from OBSERVER to WRITER, taking the active
+	// writer slot. Returns ErrWriterConflict (ALREADY_EXISTS) when another client
+	// already holds the slot.
+	ClaimWriter(ctx context.Context, in *ClaimWriterRequest, opts ...grpc.CallOption) (*ClaimWriterResponse, error)
+	// ReleaseWriter demotes the caller from WRITER to OBSERVER, freeing the slot
+	// so another client can claim it.
+	ReleaseWriter(ctx context.Context, in *ReleaseWriterRequest, opts ...grpc.CallOption) (*ReleaseWriterResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 	ListProviders(ctx context.Context, in *ListProvidersRequest, opts ...grpc.CallOption) (*ListProvidersResponse, error)
 }
@@ -132,6 +141,26 @@ func (c *bridgeServiceClient) ResizeSession(ctx context.Context, in *ResizeSessi
 	return out, nil
 }
 
+func (c *bridgeServiceClient) ClaimWriter(ctx context.Context, in *ClaimWriterRequest, opts ...grpc.CallOption) (*ClaimWriterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClaimWriterResponse)
+	err := c.cc.Invoke(ctx, BridgeService_ClaimWriter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *bridgeServiceClient) ReleaseWriter(ctx context.Context, in *ReleaseWriterRequest, opts ...grpc.CallOption) (*ReleaseWriterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReleaseWriterResponse)
+	err := c.cc.Invoke(ctx, BridgeService_ReleaseWriter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *bridgeServiceClient) Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HealthResponse)
@@ -163,6 +192,13 @@ type BridgeServiceServer interface {
 	AttachSession(*AttachSessionRequest, grpc.ServerStreamingServer[AttachSessionEvent]) error
 	WriteInput(context.Context, *WriteInputRequest) (*WriteInputResponse, error)
 	ResizeSession(context.Context, *ResizeSessionRequest) (*ResizeSessionResponse, error)
+	// ClaimWriter promotes the caller from OBSERVER to WRITER, taking the active
+	// writer slot. Returns ErrWriterConflict (ALREADY_EXISTS) when another client
+	// already holds the slot.
+	ClaimWriter(context.Context, *ClaimWriterRequest) (*ClaimWriterResponse, error)
+	// ReleaseWriter demotes the caller from WRITER to OBSERVER, freeing the slot
+	// so another client can claim it.
+	ReleaseWriter(context.Context, *ReleaseWriterRequest) (*ReleaseWriterResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	ListProviders(context.Context, *ListProvidersRequest) (*ListProvidersResponse, error)
 	mustEmbedUnimplementedBridgeServiceServer()
@@ -195,6 +231,12 @@ func (UnimplementedBridgeServiceServer) WriteInput(context.Context, *WriteInputR
 }
 func (UnimplementedBridgeServiceServer) ResizeSession(context.Context, *ResizeSessionRequest) (*ResizeSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResizeSession not implemented")
+}
+func (UnimplementedBridgeServiceServer) ClaimWriter(context.Context, *ClaimWriterRequest) (*ClaimWriterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClaimWriter not implemented")
+}
+func (UnimplementedBridgeServiceServer) ReleaseWriter(context.Context, *ReleaseWriterRequest) (*ReleaseWriterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleaseWriter not implemented")
 }
 func (UnimplementedBridgeServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
@@ -342,6 +384,42 @@ func _BridgeService_ResizeSession_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BridgeService_ClaimWriter_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClaimWriterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BridgeServiceServer).ClaimWriter(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BridgeService_ClaimWriter_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BridgeServiceServer).ClaimWriter(ctx, req.(*ClaimWriterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _BridgeService_ReleaseWriter_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseWriterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BridgeServiceServer).ReleaseWriter(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BridgeService_ReleaseWriter_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BridgeServiceServer).ReleaseWriter(ctx, req.(*ReleaseWriterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _BridgeService_Health_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HealthRequest)
 	if err := dec(in); err != nil {
@@ -408,6 +486,14 @@ var BridgeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResizeSession",
 			Handler:    _BridgeService_ResizeSession_Handler,
+		},
+		{
+			MethodName: "ClaimWriter",
+			Handler:    _BridgeService_ClaimWriter_Handler,
+		},
+		{
+			MethodName: "ReleaseWriter",
+			Handler:    _BridgeService_ReleaseWriter_Handler,
 		},
 		{
 			MethodName: "Health",

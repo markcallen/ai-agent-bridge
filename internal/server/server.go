@@ -215,8 +215,12 @@ func (s *BridgeServer) AttachSession(req *bridgev1.AttachSessionRequest, stream 
 	if clientID == "" {
 		clientID = generateID()
 	}
-	s.logger.Info("attaching to session", "session_id", req.SessionId, "client_id", clientID, "after_seq", req.AfterSeq)
-	state, err := s.supervisor.Attach(req.SessionId, clientID, req.AfterSeq)
+	role := bridge.AttachRoleWriter
+	if req.Role == bridgev1.AttachRole_ATTACH_ROLE_OBSERVER {
+		role = bridge.AttachRoleObserver
+	}
+	s.logger.Info("attaching to session", "session_id", req.SessionId, "client_id", clientID, "after_seq", req.AfterSeq, "role", role)
+	state, err := s.supervisor.Attach(req.SessionId, clientID, req.AfterSeq, role)
 	if err != nil {
 		s.logger.Warn("attach session failed", "session_id", req.SessionId, "client_id", clientID, "error", err)
 		return mapBridgeError(err, "attach session")
@@ -288,10 +292,13 @@ func (s *BridgeServer) AttachSession(req *bridgev1.AttachSessionRequest, stream 
 				}
 				return nil
 			}
-			if chunk.Seq <= lastSeq {
-				continue
+			isControl := chunk.Type == bridge.ChunkTypeWriterClaimed || chunk.Type == bridge.ChunkTypeWriterReleased
+			if !isControl {
+				if chunk.Seq <= lastSeq {
+					continue
+				}
+				lastSeq = chunk.Seq
 			}
-			lastSeq = chunk.Seq
 			if err := stream.Send(chunkToProto(req.SessionId, chunk, false)); err != nil {
 				return err
 			}
@@ -384,7 +391,7 @@ func mapBridgeError(err error, op string) error {
 		return status.Errorf(codes.InvalidArgument, "%s: %v", op, err)
 	case errors.Is(err, bridge.ErrSessionNotFound):
 		return status.Errorf(codes.NotFound, "%s: %v", op, err)
-	case errors.Is(err, bridge.ErrSessionAlreadyExists):
+	case errors.Is(err, bridge.ErrSessionAlreadyExists), errors.Is(err, bridge.ErrWriterConflict):
 		return status.Errorf(codes.AlreadyExists, "%s: %v", op, err)
 	case errors.Is(err, bridge.ErrSessionAlreadyAttached), errors.Is(err, bridge.ErrInputTooLarge):
 		return status.Errorf(codes.ResourceExhausted, "%s: %v", op, err)
@@ -416,6 +423,65 @@ func (s *BridgeServer) Health(ctx context.Context, req *bridgev1.HealthRequest) 
 	}, nil
 }
 
+func (s *BridgeServer) ClaimWriter(ctx context.Context, req *bridgev1.ClaimWriterRequest) (*bridgev1.ClaimWriterResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+	claims, err := mustClaims(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUIDField("session_id", req.SessionId); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeSession(claims, req.SessionId); err != nil {
+		return nil, err
+	}
+	clientID := req.ClientId
+	if clientID == "" {
+		return nil, status.Error(codes.InvalidArgument, "client_id is required")
+	}
+	result, err := s.supervisor.ClaimWriter(req.SessionId, clientID, req.Force)
+	if err != nil {
+		return nil, mapBridgeError(err, "claim writer")
+	}
+	// Notify the evicted writer before announcing the new one so observers see
+	// a consistent released→claimed sequence.
+	if result.PreviousWriterClientID != "" {
+		s.supervisor.NotifyWriterReleased(req.SessionId, result.PreviousWriterClientID)
+	}
+	s.supervisor.NotifyWriterClaimed(req.SessionId, clientID)
+	return &bridgev1.ClaimWriterResponse{
+		Claimed:                true,
+		PreviousWriterClientId: result.PreviousWriterClientID,
+	}, nil
+}
+
+func (s *BridgeServer) ReleaseWriter(ctx context.Context, req *bridgev1.ReleaseWriterRequest) (*bridgev1.ReleaseWriterResponse, error) {
+	if !s.globalRL.allow("global") {
+		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
+	}
+	claims, err := mustClaims(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateUUIDField("session_id", req.SessionId); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeSession(claims, req.SessionId); err != nil {
+		return nil, err
+	}
+	clientID := req.ClientId
+	if clientID == "" {
+		return nil, status.Error(codes.InvalidArgument, "client_id is required")
+	}
+	if err := s.supervisor.ReleaseWriter(req.SessionId, clientID); err != nil {
+		return nil, mapBridgeError(err, "release writer")
+	}
+	s.supervisor.NotifyWriterReleased(req.SessionId, clientID)
+	return &bridgev1.ReleaseWriterResponse{Released: true}, nil
+}
+
 func (s *BridgeServer) ListProviders(ctx context.Context, req *bridgev1.ListProvidersRequest) (*bridgev1.ListProvidersResponse, error) {
 	ids := s.registry.List()
 	results := s.registry.HealthAll(ctx)
@@ -437,20 +503,22 @@ func (s *BridgeServer) ListProviders(ctx context.Context, req *bridgev1.ListProv
 
 func sessionInfoToProto(info *bridge.SessionInfo) *bridgev1.GetSessionResponse {
 	resp := &bridgev1.GetSessionResponse{
-		SessionId:        info.SessionID,
-		ProjectId:        info.ProjectID,
-		Provider:         info.Provider,
-		Status:           mapState(info.State),
-		CreatedAt:        timestamppb.New(info.CreatedAt),
-		Error:            info.Error,
-		Attached:         info.Attached,
-		AttachedClientId: info.AttachedClientID,
-		ExitRecorded:     info.ExitRecorded,
-		ExitCode:         int32(info.ExitCode),
-		OldestSeq:        info.OldestSeq,
-		LastSeq:          info.LastSeq,
-		Cols:             info.Cols,
-		Rows:             info.Rows,
+		SessionId:            info.SessionID,
+		ProjectId:            info.ProjectID,
+		Provider:             info.Provider,
+		Status:               mapState(info.State),
+		CreatedAt:            timestamppb.New(info.CreatedAt),
+		Error:                info.Error,
+		Attached:             info.Attached,
+		AttachedClientId:     info.AttachedClientID,
+		ExitRecorded:         info.ExitRecorded,
+		ExitCode:             int32(info.ExitCode),
+		OldestSeq:            info.OldestSeq,
+		LastSeq:              info.LastSeq,
+		Cols:                 info.Cols,
+		Rows:                 info.Rows,
+		ActiveWriterClientId: info.ActiveWriterClientID,
+		ObserverCount:        int32(info.ObserverCount),
 	}
 	if !info.StoppedAt.IsZero() {
 		resp.StoppedAt = timestamppb.New(info.StoppedAt)
@@ -506,9 +574,18 @@ func chunkToProto(sessionID string, chunk bridge.OutputChunk, replay bool) *brid
 		Payload:   chunk.Payload,
 		Replay:    replay,
 	}
-	if chunk.Type == bridge.ChunkTypeThinking {
+	switch chunk.Type {
+	case bridge.ChunkTypeThinking:
 		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_THINKING
 		ev.ThinkingText = string(chunk.Payload)
+		ev.Payload = nil
+	case bridge.ChunkTypeWriterClaimed:
+		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED
+		ev.WriterClientId = string(chunk.Payload)
+		ev.Payload = nil
+	case bridge.ChunkTypeWriterReleased:
+		ev.Type = bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED
+		ev.WriterClientId = string(chunk.Payload)
 		ev.Payload = nil
 	}
 	return ev

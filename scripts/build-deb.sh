@@ -33,7 +33,6 @@ mkdir -p "$OUTPUT_DIR"
 
 mkdir -p "$ROOT_DIR/bin"
 LDFLAGS="-X main.version=${VERSION}"
-GOARCH="$ARCH" go build -ldflags "$LDFLAGS" -o "$ROOT_DIR/bin/ai-agent-bridge" ./cmd/bridge
 GOARCH="$ARCH" go build -ldflags "$LDFLAGS" -o "$ROOT_DIR/bin/ai-agent-bridge-ca" ./cmd/bridge-ca
 GOARCH="$ARCH" go build -ldflags "$LDFLAGS" -o "$ROOT_DIR/bin/bridgectl" ./cmd/bridgectl
 
@@ -44,18 +43,17 @@ mkdir -p \
   "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime" \
   "$PKG_ROOT/usr/share/doc/ai-agent-bridge/examples" \
   "$PKG_ROOT/etc/ai-agent-bridge" \
-  "$PKG_ROOT/lib/systemd/system"
+  "$PKG_ROOT/usr/lib/systemd/user"
 
 # Binaries
-install -m 0755 "$ROOT_DIR/bin/ai-agent-bridge"    "$PKG_ROOT/usr/bin/ai-agent-bridge"
 install -m 0755 "$ROOT_DIR/bin/ai-agent-bridge-ca" "$PKG_ROOT/usr/bin/ai-agent-bridge-ca"
 install -m 0755 "$ROOT_DIR/bin/bridgectl" "$PKG_ROOT/usr/bin/bridgectl"
 
-# Default daemon config and systemd unit
+# Default config and systemd user unit
 install -m 0644 "$ROOT_DIR/packaging/bridge.yaml" \
   "$PKG_ROOT/etc/ai-agent-bridge/bridge.yaml"
-install -m 0644 "$ROOT_DIR/packaging/ai-agent-bridge.service" \
-  "$PKG_ROOT/lib/systemd/system/ai-agent-bridge.service"
+install -m 0644 "$ROOT_DIR/packaging/bridge.user.service" \
+  "$PKG_ROOT/usr/lib/systemd/user/bridge.service"
 
 # Provider runtime install helper
 install -m 0755 "$ROOT_DIR/packaging/install-provider-runtime" \
@@ -81,10 +79,11 @@ Section: admin
 Priority: optional
 Architecture: $ARCH
 Maintainer: Mark Callen <opensource@markcallen.com>
-Depends: adduser, ca-certificates
-Description: AI Agent Bridge daemon
- Standalone gRPC daemon and SDK bridge for supervising AI agent subprocesses.
- This package installs the bridge binaries, a default config, and a systemd unit.
+Depends: ca-certificates
+Description: AI Agent Bridge
+ gRPC server and SDK bridge for supervising AI agent subprocesses inside a
+ login session. Installs bridgectl, a default config, and a systemd user unit.
+ Enable with: systemctl --user enable --now bridge
 EOF
 
 dpkg-deb --build --root-owner-group "$PKG_ROOT" "$OUTPUT_DIR/${PACKAGE_NAME}_${VERSION}_${ARCH}.deb"

@@ -1,26 +1,35 @@
 # bridge-example.yaml — example ai-agent-bridge configuration profile.
 #
 # Copy this file to /etc/ai-agent-bridge/bridge.yaml, uncomment the providers
-# you want to enable, and supply credentials via
-# /etc/ai-agent-bridge/agents.env (root:root 0600).
+# you want to enable, and supply credentials via your shell environment or a
+# ~/.config/ai-agent-bridge/agents.env file sourced by the user service.
 #
 # This profile:
-#   - binds to 127.0.0.1:9445 (localhost only)
-#   - enables persistence under /var/lib/bridge
+#   - binds to 127.0.0.1:9445 in SECURE mode (mTLS + JWT via auto-generated PKI)
+#   - persistence is disabled by default; uncomment db_path to enable it
 #   - resolves provider CLIs from /opt/ai-agent-bridge (the provider runtime root)
-#   - keeps TLS and JWT disabled (localhost-only — add mTLS+JWT for remote access)
 #
-# SECURITY: do not expose this service over the network without configuring
-# tls.ca_bundle, tls.cert, tls.key, and auth.jwt_public_keys.
+# SECURITY MODES:
+#   - No server.listen (unix socket): local-only, no authentication required.
+#   - server.listen set (TCP): always uses mTLS + JWT. When tls.ca_bundle/cert/key
+#     are empty the server auto-generates PKI material in ~/.ai-agent-bridge/certs/
+#     on first start. Supply explicit paths only when integrating with an external CA
+#     (e.g. Step CA). Do not expose the TCP port to the public internet; use
+#     WireGuard or Tailscale for remote access.
 
 server:
   listen: "127.0.0.1:9445"
 
+# TLS: leave empty to use auto-generated PKI (self-signed CA + server cert).
+# Set all three paths when using an external CA such as Step CA.
 tls:
   ca_bundle: ""
   cert: ""
   key: ""
 
+# JWT: leave jwt_public_keys empty when using auto-PKI (the server issues its
+# own client tokens). Add entries when consumer projects bring their own Ed25519
+# signing keys (e.g. prd-manager or ndara-orchestrator).
 auth:
   jwt_public_keys: []
   jwt_audience: "bridge"
@@ -50,7 +59,8 @@ rate_limits:
   send_input_per_session_burst: 20
 
 persistence:
-  db_path: "/var/lib/bridge/sessions.db"
+  # db_path: "/home/youruser/.ai-agent-bridge/sessions.db"
+  # Use an absolute path; ~ is not expanded. Omit to disable persistence.
 
 runtime:
   provider_root: "/opt/ai-agent-bridge"

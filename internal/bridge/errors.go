@@ -14,4 +14,7 @@ var (
 	ErrProviderUnavailable        = errors.New("provider unavailable")
 	ErrSessionLimitReached        = errors.New("session limit reached")
 	ErrInputTooLarge              = errors.New("input too large")
+	// ErrWriterConflict is returned by ClaimWriter when another client already
+	// holds the active-writer slot and force was not requested.
+	ErrWriterConflict = errors.New("session already has an active writer")
 )

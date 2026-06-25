@@ -201,3 +201,228 @@ func TestMapBridgeErrorAndState(t *testing.T) {
 		t.Fatalf("mapBridgeError text=%q want op prefix", errText.Error())
 	}
 }
+
+func newServerWithSupervisor(t *testing.T) (*BridgeServer, *bridge.Supervisor) {
+	t.Helper()
+	registry := bridge.NewRegistry()
+	if err := registry.Register(&serverTestProvider{id: "cat"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	sup := bridge.NewSupervisor(registry, bridge.DefaultPolicy(), 1024*1024, time.Minute)
+	t.Cleanup(func() { sup.Close() })
+	s := New(sup, registry, slog.Default(), RateLimitConfig{}, "test", nil)
+	return s, sup
+}
+
+func startServerSession(t *testing.T, s *BridgeServer, sessionID string) {
+	t.Helper()
+	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "proj"})
+	_, err := s.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId: "proj",
+		SessionId: sessionID,
+		RepoPath:  t.TempDir(),
+		Provider:  "cat",
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+}
+
+const (
+	testClaimSessionID   = "05877c43-ef0f-4841-95cb-377e7be1a2a0"
+	testReleaseSessionID = "2ba8d806-cbff-4827-8b0a-6ec6a80b07a4"
+)
+
+func TestClaimWriterRPC(t *testing.T) {
+	s, sup := newServerWithSupervisor(t)
+	startServerSession(t, s, testClaimSessionID)
+
+	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "proj"})
+
+	// Use the supervisor directly to establish writer state (AttachSession is streaming).
+	if _, err := sup.Attach(testClaimSessionID, "old-writer", 0, bridge.AttachRoleWriter); err != nil {
+		t.Fatalf("Attach old-writer: %v", err)
+	}
+	if _, err := sup.Attach(testClaimSessionID, "new-client", 0, bridge.AttachRoleObserver); err != nil {
+		t.Fatalf("Attach new-client observer: %v", err)
+	}
+
+	// Force-claim the writer slot via the server RPC.
+	resp, err := s.ClaimWriter(ctx, &bridgev1.ClaimWriterRequest{
+		SessionId: testClaimSessionID,
+		ClientId:  "new-client",
+		Force:     true,
+	})
+	if err != nil {
+		t.Fatalf("ClaimWriter: %v", err)
+	}
+	if resp.GetPreviousWriterClientId() != "old-writer" {
+		t.Errorf("PreviousWriterClientId=%q want old-writer", resp.GetPreviousWriterClientId())
+	}
+
+	// ClaimWriter on unknown session returns NotFound.
+	_, err = s.ClaimWriter(ctx, &bridgev1.ClaimWriterRequest{
+		SessionId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		ClientId:  "some-client",
+		Force:     false,
+	})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("ClaimWriter unknown session code=%v want NotFound", status.Code(err))
+	}
+}
+
+func TestReleaseWriterRPC(t *testing.T) {
+	s, sup := newServerWithSupervisor(t)
+	startServerSession(t, s, testReleaseSessionID)
+
+	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "proj"})
+
+	if _, err := sup.Attach(testReleaseSessionID, "the-writer", 0, bridge.AttachRoleWriter); err != nil {
+		t.Fatalf("Attach writer: %v", err)
+	}
+
+	// Release via server RPC.
+	if _, err := s.ReleaseWriter(ctx, &bridgev1.ReleaseWriterRequest{
+		SessionId: testReleaseSessionID,
+		ClientId:  "the-writer",
+	}); err != nil {
+		t.Fatalf("ReleaseWriter: %v", err)
+	}
+
+	info, err := sup.Get(testReleaseSessionID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if info.ActiveWriterClientID != "" {
+		t.Errorf("ActiveWriterClientID=%q want empty after release", info.ActiveWriterClientID)
+	}
+
+	// ReleaseWriter on unknown session returns NotFound.
+	_, err = s.ReleaseWriter(ctx, &bridgev1.ReleaseWriterRequest{
+		SessionId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		ClientId:  "some-client",
+	})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("ReleaseWriter unknown session code=%v want NotFound", status.Code(err))
+	}
+}
+
+func TestMapBridgeErrorWriterConflict(t *testing.T) {
+	got := status.Code(mapBridgeError(bridge.ErrWriterConflict, "attach"))
+	if got != codes.AlreadyExists {
+		t.Fatalf("ErrWriterConflict code=%v want AlreadyExists", got)
+	}
+}
+
+func TestStopWriteResizeRPCs(t *testing.T) {
+	s, sup := newServerWithSupervisor(t)
+	const sid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	startServerSession(t, s, sid)
+
+	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "proj"})
+
+	if _, err := sup.Attach(sid, "cli", 0, bridge.AttachRoleWriter); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+
+	// WriteInput happy path.
+	if _, err := s.WriteInput(ctx, &bridgev1.WriteInputRequest{
+		SessionId: sid,
+		ClientId:  "cli",
+		Data:      []byte("hello"),
+	}); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+
+	// ResizeSession happy path.
+	if _, err := s.ResizeSession(ctx, &bridgev1.ResizeSessionRequest{
+		SessionId: sid,
+		ClientId:  "cli",
+		Cols:      100,
+		Rows:      40,
+	}); err != nil {
+		t.Fatalf("ResizeSession: %v", err)
+	}
+
+	// ResizeSession invalid (zero cols).
+	_, err := s.ResizeSession(ctx, &bridgev1.ResizeSessionRequest{
+		SessionId: sid,
+		ClientId:  "cli",
+		Cols:      0,
+		Rows:      40,
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("ResizeSession zero cols code=%v want InvalidArgument", status.Code(err))
+	}
+
+	// GetSession happy path.
+	resp, err := s.GetSession(ctx, &bridgev1.GetSessionRequest{SessionId: sid})
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if resp.GetSessionId() != sid {
+		t.Errorf("GetSession id=%q want %q", resp.GetSessionId(), sid)
+	}
+
+	// StopSession happy path.
+	if _, err := s.StopSession(ctx, &bridgev1.StopSessionRequest{SessionId: sid}); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+}
+
+func TestGenerateID(t *testing.T) {
+	id1 := generateID()
+	id2 := generateID()
+	if id1 == "" || id2 == "" {
+		t.Fatal("generateID returned empty string")
+	}
+	if id1 == id2 {
+		t.Fatal("generateID returned duplicate IDs")
+	}
+}
+
+func TestValidateFieldEdgeCases(t *testing.T) {
+	// validateStringField: too long
+	if err := validateStringField("f", strings.Repeat("x", 300), 256, false); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("too-long string code=%v want InvalidArgument", status.Code(err))
+	}
+	// validateStringField: invalid UTF-8
+	if err := validateStringField("f", "\xff\xfe", 256, false); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("invalid utf8 code=%v want InvalidArgument", status.Code(err))
+	}
+	// validateStringField: control char disallowed
+	if err := validateStringField("f", "foo\x01bar", 256, false); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("control char code=%v want InvalidArgument", status.Code(err))
+	}
+	// validateStringField: whitespace control allowed
+	if err := validateStringField("f", "foo\nbar", 256, true); err != nil {
+		t.Fatalf("whitespace control disallowed: %v", err)
+	}
+	// validateByteField: empty
+	if err := validateByteField("d", []byte{}, 10); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("empty bytes code=%v want InvalidArgument", status.Code(err))
+	}
+	// validateByteField: too large
+	if err := validateByteField("d", make([]byte, 20), 10); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("too-large bytes code=%v want InvalidArgument", status.Code(err))
+	}
+}
+
+func TestMapStateAllVariants(t *testing.T) {
+	cases := []struct {
+		in  bridge.SessionState
+		out bridgev1.SessionStatus
+	}{
+		{bridge.SessionStateStarting, bridgev1.SessionStatus_SESSION_STATUS_STARTING},
+		{bridge.SessionStateRunning, bridgev1.SessionStatus_SESSION_STATUS_RUNNING},
+		{bridge.SessionStateAttached, bridgev1.SessionStatus_SESSION_STATUS_ATTACHED},
+		{bridge.SessionStateStopping, bridgev1.SessionStatus_SESSION_STATUS_STOPPING},
+		{bridge.SessionStateStopped, bridgev1.SessionStatus_SESSION_STATUS_STOPPED},
+	}
+	for _, tc := range cases {
+		got := mapState(tc.in)
+		if got != tc.out {
+			t.Errorf("mapState(%v)=%v want %v", tc.in, got, tc.out)
+		}
+	}
+}

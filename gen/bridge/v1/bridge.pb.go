@@ -83,6 +83,61 @@ func (SessionStatus) EnumDescriptor() ([]byte, []int) {
 	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{0}
 }
 
+// AttachRole controls whether the connecting client can send input to the
+// session (WRITER) or only observe the output stream (OBSERVER).
+type AttachRole int32
+
+const (
+	AttachRole_ATTACH_ROLE_UNSPECIFIED AttachRole = 0
+	// ATTACH_ROLE_WRITER requests the active-writer slot. The server rejects the
+	// attach with ALREADY_EXISTS when another client already holds the slot.
+	AttachRole_ATTACH_ROLE_WRITER AttachRole = 1
+	// ATTACH_ROLE_OBSERVER attaches read-only. The client receives all output
+	// events but WriteInput / ResizeSession calls are rejected.
+	AttachRole_ATTACH_ROLE_OBSERVER AttachRole = 2
+)
+
+// Enum value maps for AttachRole.
+var (
+	AttachRole_name = map[int32]string{
+		0: "ATTACH_ROLE_UNSPECIFIED",
+		1: "ATTACH_ROLE_WRITER",
+		2: "ATTACH_ROLE_OBSERVER",
+	}
+	AttachRole_value = map[string]int32{
+		"ATTACH_ROLE_UNSPECIFIED": 0,
+		"ATTACH_ROLE_WRITER":      1,
+		"ATTACH_ROLE_OBSERVER":    2,
+	}
+)
+
+func (x AttachRole) Enum() *AttachRole {
+	p := new(AttachRole)
+	*p = x
+	return p
+}
+
+func (x AttachRole) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AttachRole) Descriptor() protoreflect.EnumDescriptor {
+	return file_bridge_v1_bridge_proto_enumTypes[1].Descriptor()
+}
+
+func (AttachRole) Type() protoreflect.EnumType {
+	return &file_bridge_v1_bridge_proto_enumTypes[1]
+}
+
+func (x AttachRole) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AttachRole.Descriptor instead.
+func (AttachRole) EnumDescriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{1}
+}
+
 type AttachEventType int32
 
 const (
@@ -95,6 +150,12 @@ const (
 	// ATTACH_EVENT_TYPE_THINKING carries a thinking block emitted by an agent
 	// before its final response. Only emitted by stream-JSON providers (issue #1).
 	AttachEventType_ATTACH_EVENT_TYPE_THINKING AttachEventType = 6
+	// ATTACH_EVENT_TYPE_WRITER_CLAIMED is sent to all observers when a client
+	// claims the active-writer slot.
+	AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED AttachEventType = 7
+	// ATTACH_EVENT_TYPE_WRITER_RELEASED is sent to all observers when the active
+	// writer releases the slot.
+	AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED AttachEventType = 8
 )
 
 // Enum value maps for AttachEventType.
@@ -107,15 +168,19 @@ var (
 		4: "ATTACH_EVENT_TYPE_SESSION_EXIT",
 		5: "ATTACH_EVENT_TYPE_ERROR",
 		6: "ATTACH_EVENT_TYPE_THINKING",
+		7: "ATTACH_EVENT_TYPE_WRITER_CLAIMED",
+		8: "ATTACH_EVENT_TYPE_WRITER_RELEASED",
 	}
 	AttachEventType_value = map[string]int32{
-		"ATTACH_EVENT_TYPE_UNSPECIFIED":  0,
-		"ATTACH_EVENT_TYPE_ATTACHED":     1,
-		"ATTACH_EVENT_TYPE_OUTPUT":       2,
-		"ATTACH_EVENT_TYPE_REPLAY_GAP":   3,
-		"ATTACH_EVENT_TYPE_SESSION_EXIT": 4,
-		"ATTACH_EVENT_TYPE_ERROR":        5,
-		"ATTACH_EVENT_TYPE_THINKING":     6,
+		"ATTACH_EVENT_TYPE_UNSPECIFIED":     0,
+		"ATTACH_EVENT_TYPE_ATTACHED":        1,
+		"ATTACH_EVENT_TYPE_OUTPUT":          2,
+		"ATTACH_EVENT_TYPE_REPLAY_GAP":      3,
+		"ATTACH_EVENT_TYPE_SESSION_EXIT":    4,
+		"ATTACH_EVENT_TYPE_ERROR":           5,
+		"ATTACH_EVENT_TYPE_THINKING":        6,
+		"ATTACH_EVENT_TYPE_WRITER_CLAIMED":  7,
+		"ATTACH_EVENT_TYPE_WRITER_RELEASED": 8,
 	}
 )
 
@@ -130,11 +195,11 @@ func (x AttachEventType) String() string {
 }
 
 func (AttachEventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_bridge_v1_bridge_proto_enumTypes[1].Descriptor()
+	return file_bridge_v1_bridge_proto_enumTypes[2].Descriptor()
 }
 
 func (AttachEventType) Type() protoreflect.EnumType {
-	return &file_bridge_v1_bridge_proto_enumTypes[1]
+	return &file_bridge_v1_bridge_proto_enumTypes[2]
 }
 
 func (x AttachEventType) Number() protoreflect.EnumNumber {
@@ -143,7 +208,7 @@ func (x AttachEventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AttachEventType.Descriptor instead.
 func (AttachEventType) EnumDescriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{1}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{2}
 }
 
 type StartSessionRequest struct {
@@ -455,8 +520,13 @@ type GetSessionResponse struct {
 	LastSeq          uint64                 `protobuf:"varint,13,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
 	Cols             uint32                 `protobuf:"varint,14,opt,name=cols,proto3" json:"cols,omitempty"`
 	Rows             uint32                 `protobuf:"varint,15,opt,name=rows,proto3" json:"rows,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// active_writer_client_id is the client currently holding the writer slot,
+	// or empty when no writer is attached.
+	ActiveWriterClientId string `protobuf:"bytes,16,opt,name=active_writer_client_id,json=activeWriterClientId,proto3" json:"active_writer_client_id,omitempty"`
+	// observer_count is the number of read-only observers currently attached.
+	ObserverCount int32 `protobuf:"varint,17,opt,name=observer_count,json=observerCount,proto3" json:"observer_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetSessionResponse) Reset() {
@@ -594,6 +664,20 @@ func (x *GetSessionResponse) GetRows() uint32 {
 	return 0
 }
 
+func (x *GetSessionResponse) GetActiveWriterClientId() string {
+	if x != nil {
+		return x.ActiveWriterClientId
+	}
+	return ""
+}
+
+func (x *GetSessionResponse) GetObserverCount() int32 {
+	if x != nil {
+		return x.ObserverCount
+	}
+	return 0
+}
+
 type ListSessionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId     string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
@@ -683,10 +767,13 @@ func (x *ListSessionsResponse) GetSessions() []*GetSessionResponse {
 }
 
 type AttachSessionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	AfterSeq      uint64                 `protobuf:"varint,2,opt,name=after_seq,json=afterSeq,proto3" json:"after_seq,omitempty"`
-	ClientId      string                 `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	AfterSeq  uint64                 `protobuf:"varint,2,opt,name=after_seq,json=afterSeq,proto3" json:"after_seq,omitempty"`
+	ClientId  string                 `protobuf:"bytes,3,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// role controls whether this client attaches as a writer or observer.
+	// Defaults to ATTACH_ROLE_WRITER for backwards compatibility.
+	Role          AttachRole `protobuf:"varint,4,opt,name=role,proto3,enum=bridge.v1.AttachRole" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -742,6 +829,13 @@ func (x *AttachSessionRequest) GetClientId() string {
 	return ""
 }
 
+func (x *AttachSessionRequest) GetRole() AttachRole {
+	if x != nil {
+		return x.Role
+	}
+	return AttachRole_ATTACH_ROLE_UNSPECIFIED
+}
+
 type AttachSessionEvent struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	Type         AttachEventType        `protobuf:"varint,1,opt,name=type,proto3,enum=bridge.v1.AttachEventType" json:"type,omitempty"`
@@ -758,9 +852,12 @@ type AttachSessionEvent struct {
 	Cols         uint32                 `protobuf:"varint,12,opt,name=cols,proto3" json:"cols,omitempty"`
 	Rows         uint32                 `protobuf:"varint,13,opt,name=rows,proto3" json:"rows,omitempty"`
 	// thinking_text is set when type == ATTACH_EVENT_TYPE_THINKING (issue #1).
-	ThinkingText  string `protobuf:"bytes,14,opt,name=thinking_text,json=thinkingText,proto3" json:"thinking_text,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ThinkingText string `protobuf:"bytes,14,opt,name=thinking_text,json=thinkingText,proto3" json:"thinking_text,omitempty"`
+	// writer_client_id is set on WRITER_CLAIMED / WRITER_RELEASED events to
+	// identify which client claimed or released the writer slot.
+	WriterClientId string `protobuf:"bytes,15,opt,name=writer_client_id,json=writerClientId,proto3" json:"writer_client_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AttachSessionEvent) Reset() {
@@ -887,6 +984,13 @@ func (x *AttachSessionEvent) GetRows() uint32 {
 func (x *AttachSessionEvent) GetThinkingText() string {
 	if x != nil {
 		return x.ThinkingText
+	}
+	return ""
+}
+
+func (x *AttachSessionEvent) GetWriterClientId() string {
+	if x != nil {
+		return x.WriterClientId
 	}
 	return ""
 }
@@ -1115,6 +1219,219 @@ func (x *ResizeSessionResponse) GetApplied() bool {
 	return false
 }
 
+type ClaimWriterRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ClientId  string                 `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// force, when true, evicts the current writer rather than returning
+	// ALREADY_EXISTS. The evicted writer receives a WRITER_RELEASED event.
+	Force         bool `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClaimWriterRequest) Reset() {
+	*x = ClaimWriterRequest{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClaimWriterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClaimWriterRequest) ProtoMessage() {}
+
+func (x *ClaimWriterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClaimWriterRequest.ProtoReflect.Descriptor instead.
+func (*ClaimWriterRequest) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ClaimWriterRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ClaimWriterRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *ClaimWriterRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+type ClaimWriterResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// claimed is true when the caller now holds the writer slot.
+	Claimed bool `protobuf:"varint,1,opt,name=claimed,proto3" json:"claimed,omitempty"`
+	// previous_writer_client_id is set when force evicted another writer.
+	PreviousWriterClientId string `protobuf:"bytes,2,opt,name=previous_writer_client_id,json=previousWriterClientId,proto3" json:"previous_writer_client_id,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *ClaimWriterResponse) Reset() {
+	*x = ClaimWriterResponse{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClaimWriterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClaimWriterResponse) ProtoMessage() {}
+
+func (x *ClaimWriterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClaimWriterResponse.ProtoReflect.Descriptor instead.
+func (*ClaimWriterResponse) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ClaimWriterResponse) GetClaimed() bool {
+	if x != nil {
+		return x.Claimed
+	}
+	return false
+}
+
+func (x *ClaimWriterResponse) GetPreviousWriterClientId() string {
+	if x != nil {
+		return x.PreviousWriterClientId
+	}
+	return ""
+}
+
+type ReleaseWriterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ClientId      string                 `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseWriterRequest) Reset() {
+	*x = ReleaseWriterRequest{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseWriterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseWriterRequest) ProtoMessage() {}
+
+func (x *ReleaseWriterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseWriterRequest.ProtoReflect.Descriptor instead.
+func (*ReleaseWriterRequest) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ReleaseWriterRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ReleaseWriterRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+type ReleaseWriterResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// released is true when the caller successfully released the writer slot.
+	Released      bool `protobuf:"varint,1,opt,name=released,proto3" json:"released,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseWriterResponse) Reset() {
+	*x = ReleaseWriterResponse{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseWriterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseWriterResponse) ProtoMessage() {}
+
+func (x *ReleaseWriterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseWriterResponse.ProtoReflect.Descriptor instead.
+func (*ReleaseWriterResponse) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ReleaseWriterResponse) GetReleased() bool {
+	if x != nil {
+		return x.Released
+	}
+	return false
+}
+
 type HealthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1123,7 +1440,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[14]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1135,7 +1452,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[14]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1148,7 +1465,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{14}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{18}
 }
 
 type HealthResponse struct {
@@ -1166,7 +1483,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[15]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1178,7 +1495,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[15]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1191,7 +1508,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{15}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *HealthResponse) GetStatus() string {
@@ -1226,7 +1543,7 @@ type ProviderHealth struct {
 
 func (x *ProviderHealth) Reset() {
 	*x = ProviderHealth{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[16]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1238,7 +1555,7 @@ func (x *ProviderHealth) String() string {
 func (*ProviderHealth) ProtoMessage() {}
 
 func (x *ProviderHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[16]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1251,7 +1568,7 @@ func (x *ProviderHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProviderHealth.ProtoReflect.Descriptor instead.
 func (*ProviderHealth) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{16}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ProviderHealth) GetProvider() string {
@@ -1283,7 +1600,7 @@ type ListProvidersRequest struct {
 
 func (x *ListProvidersRequest) Reset() {
 	*x = ListProvidersRequest{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[17]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1295,7 +1612,7 @@ func (x *ListProvidersRequest) String() string {
 func (*ListProvidersRequest) ProtoMessage() {}
 
 func (x *ListProvidersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[17]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1308,7 +1625,7 @@ func (x *ListProvidersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProvidersRequest.ProtoReflect.Descriptor instead.
 func (*ListProvidersRequest) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{17}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{21}
 }
 
 type ListProvidersResponse struct {
@@ -1320,7 +1637,7 @@ type ListProvidersResponse struct {
 
 func (x *ListProvidersResponse) Reset() {
 	*x = ListProvidersResponse{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[18]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1332,7 +1649,7 @@ func (x *ListProvidersResponse) String() string {
 func (*ListProvidersResponse) ProtoMessage() {}
 
 func (x *ListProvidersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[18]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1345,7 +1662,7 @@ func (x *ListProvidersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProvidersResponse.ProtoReflect.Descriptor instead.
 func (*ListProvidersResponse) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{18}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ListProvidersResponse) GetProviders() []*ProviderInfo {
@@ -1367,7 +1684,7 @@ type ProviderInfo struct {
 
 func (x *ProviderInfo) Reset() {
 	*x = ProviderInfo{}
-	mi := &file_bridge_v1_bridge_proto_msgTypes[19]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1379,7 +1696,7 @@ func (x *ProviderInfo) String() string {
 func (*ProviderInfo) ProtoMessage() {}
 
 func (x *ProviderInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_bridge_v1_bridge_proto_msgTypes[19]
+	mi := &file_bridge_v1_bridge_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1392,7 +1709,7 @@ func (x *ProviderInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProviderInfo.ProtoReflect.Descriptor instead.
 func (*ProviderInfo) Descriptor() ([]byte, []int) {
-	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{19}
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ProviderInfo) GetProvider() string {
@@ -1456,7 +1773,7 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.bridge.v1.SessionStatusR\x06status\"2\n" +
 	"\x11GetSessionRequest\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\x9a\x04\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"\xf8\x04\n" +
 	"\x12GetSessionResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1d\n" +
@@ -1478,17 +1795,20 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"oldest_seq\x18\f \x01(\x04R\toldestSeq\x12\x19\n" +
 	"\blast_seq\x18\r \x01(\x04R\alastSeq\x12\x12\n" +
 	"\x04cols\x18\x0e \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\x0f \x01(\rR\x04rows\"4\n" +
+	"\x04rows\x18\x0f \x01(\rR\x04rows\x125\n" +
+	"\x17active_writer_client_id\x18\x10 \x01(\tR\x14activeWriterClientId\x12%\n" +
+	"\x0eobserver_count\x18\x11 \x01(\x05R\robserverCount\"4\n" +
 	"\x13ListSessionsRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\"Q\n" +
 	"\x14ListSessionsResponse\x129\n" +
-	"\bsessions\x18\x01 \x03(\v2\x1d.bridge.v1.GetSessionResponseR\bsessions\"o\n" +
+	"\bsessions\x18\x01 \x03(\v2\x1d.bridge.v1.GetSessionResponseR\bsessions\"\x9a\x01\n" +
 	"\x14AttachSessionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
 	"\tafter_seq\x18\x02 \x01(\x04R\bafterSeq\x12\x1b\n" +
-	"\tclient_id\x18\x03 \x01(\tR\bclientId\"\xc0\x03\n" +
+	"\tclient_id\x18\x03 \x01(\tR\bclientId\x12)\n" +
+	"\x04role\x18\x04 \x01(\x0e2\x15.bridge.v1.AttachRoleR\x04role\"\xea\x03\n" +
 	"\x12AttachSessionEvent\x12.\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x1a.bridge.v1.AttachEventTypeR\x04type\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x128\n" +
@@ -1506,7 +1826,8 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x05error\x18\v \x01(\tR\x05error\x12\x12\n" +
 	"\x04cols\x18\f \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\r \x01(\rR\x04rows\x12#\n" +
-	"\rthinking_text\x18\x0e \x01(\tR\fthinkingText\"c\n" +
+	"\rthinking_text\x18\x0e \x01(\tR\fthinkingText\x12(\n" +
+	"\x10writer_client_id\x18\x0f \x01(\tR\x0ewriterClientId\"c\n" +
 	"\x11WriteInputRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
@@ -1522,7 +1843,21 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x04cols\x18\x03 \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x04 \x01(\rR\x04rows\"1\n" +
 	"\x15ResizeSessionResponse\x12\x18\n" +
-	"\aapplied\x18\x01 \x01(\bR\aapplied\"\x0f\n" +
+	"\aapplied\x18\x01 \x01(\bR\aapplied\"f\n" +
+	"\x12ClaimWriterRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x14\n" +
+	"\x05force\x18\x03 \x01(\bR\x05force\"j\n" +
+	"\x13ClaimWriterResponse\x12\x18\n" +
+	"\aclaimed\x18\x01 \x01(\bR\aclaimed\x129\n" +
+	"\x19previous_writer_client_id\x18\x02 \x01(\tR\x16previousWriterClientId\"R\n" +
+	"\x14ReleaseWriterRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\"3\n" +
+	"\x15ReleaseWriterResponse\x12\x1a\n" +
+	"\breleased\x18\x01 \x01(\bR\breleased\"\x0f\n" +
 	"\rHealthRequest\"\x8f\x01\n" +
 	"\x0eHealthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x127\n" +
@@ -1547,7 +1882,12 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x17SESSION_STATUS_ATTACHED\x10\x03\x12\x1b\n" +
 	"\x17SESSION_STATUS_STOPPING\x10\x04\x12\x1a\n" +
 	"\x16SESSION_STATUS_STOPPED\x10\x05\x12\x19\n" +
-	"\x15SESSION_STATUS_FAILED\x10\x06*\xf5\x01\n" +
+	"\x15SESSION_STATUS_FAILED\x10\x06*[\n" +
+	"\n" +
+	"AttachRole\x12\x1b\n" +
+	"\x17ATTACH_ROLE_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12ATTACH_ROLE_WRITER\x10\x01\x12\x18\n" +
+	"\x14ATTACH_ROLE_OBSERVER\x10\x02*\xc2\x02\n" +
 	"\x0fAttachEventType\x12!\n" +
 	"\x1dATTACH_EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aATTACH_EVENT_TYPE_ATTACHED\x10\x01\x12\x1c\n" +
@@ -1555,7 +1895,9 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x1cATTACH_EVENT_TYPE_REPLAY_GAP\x10\x03\x12\"\n" +
 	"\x1eATTACH_EVENT_TYPE_SESSION_EXIT\x10\x04\x12\x1b\n" +
 	"\x17ATTACH_EVENT_TYPE_ERROR\x10\x05\x12\x1e\n" +
-	"\x1aATTACH_EVENT_TYPE_THINKING\x10\x062\xcf\x05\n" +
+	"\x1aATTACH_EVENT_TYPE_THINKING\x10\x06\x12$\n" +
+	" ATTACH_EVENT_TYPE_WRITER_CLAIMED\x10\a\x12%\n" +
+	"!ATTACH_EVENT_TYPE_WRITER_RELEASED\x10\b2\xf1\x06\n" +
 	"\rBridgeService\x12O\n" +
 	"\fStartSession\x12\x1e.bridge.v1.StartSessionRequest\x1a\x1f.bridge.v1.StartSessionResponse\x12L\n" +
 	"\vStopSession\x12\x1d.bridge.v1.StopSessionRequest\x1a\x1e.bridge.v1.StopSessionResponse\x12I\n" +
@@ -1565,7 +1907,9 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\rAttachSession\x12\x1f.bridge.v1.AttachSessionRequest\x1a\x1d.bridge.v1.AttachSessionEvent0\x01\x12I\n" +
 	"\n" +
 	"WriteInput\x12\x1c.bridge.v1.WriteInputRequest\x1a\x1d.bridge.v1.WriteInputResponse\x12R\n" +
-	"\rResizeSession\x12\x1f.bridge.v1.ResizeSessionRequest\x1a .bridge.v1.ResizeSessionResponse\x12=\n" +
+	"\rResizeSession\x12\x1f.bridge.v1.ResizeSessionRequest\x1a .bridge.v1.ResizeSessionResponse\x12L\n" +
+	"\vClaimWriter\x12\x1d.bridge.v1.ClaimWriterRequest\x1a\x1e.bridge.v1.ClaimWriterResponse\x12R\n" +
+	"\rReleaseWriter\x12\x1f.bridge.v1.ReleaseWriterRequest\x1a .bridge.v1.ReleaseWriterResponse\x12=\n" +
 	"\x06Health\x12\x18.bridge.v1.HealthRequest\x1a\x19.bridge.v1.HealthResponse\x12R\n" +
 	"\rListProviders\x12\x1f.bridge.v1.ListProvidersRequest\x1a .bridge.v1.ListProvidersResponseB>Z<github.com/markcallen/ai-agent-bridge/gen/bridge/v1;bridgev1b\x06proto3"
 
@@ -1581,70 +1925,80 @@ func file_bridge_v1_bridge_proto_rawDescGZIP() []byte {
 	return file_bridge_v1_bridge_proto_rawDescData
 }
 
-var file_bridge_v1_bridge_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_bridge_v1_bridge_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_bridge_v1_bridge_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_bridge_v1_bridge_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_bridge_v1_bridge_proto_goTypes = []any{
 	(SessionStatus)(0),            // 0: bridge.v1.SessionStatus
-	(AttachEventType)(0),          // 1: bridge.v1.AttachEventType
-	(*StartSessionRequest)(nil),   // 2: bridge.v1.StartSessionRequest
-	(*StartSessionResponse)(nil),  // 3: bridge.v1.StartSessionResponse
-	(*StopSessionRequest)(nil),    // 4: bridge.v1.StopSessionRequest
-	(*StopSessionResponse)(nil),   // 5: bridge.v1.StopSessionResponse
-	(*GetSessionRequest)(nil),     // 6: bridge.v1.GetSessionRequest
-	(*GetSessionResponse)(nil),    // 7: bridge.v1.GetSessionResponse
-	(*ListSessionsRequest)(nil),   // 8: bridge.v1.ListSessionsRequest
-	(*ListSessionsResponse)(nil),  // 9: bridge.v1.ListSessionsResponse
-	(*AttachSessionRequest)(nil),  // 10: bridge.v1.AttachSessionRequest
-	(*AttachSessionEvent)(nil),    // 11: bridge.v1.AttachSessionEvent
-	(*WriteInputRequest)(nil),     // 12: bridge.v1.WriteInputRequest
-	(*WriteInputResponse)(nil),    // 13: bridge.v1.WriteInputResponse
-	(*ResizeSessionRequest)(nil),  // 14: bridge.v1.ResizeSessionRequest
-	(*ResizeSessionResponse)(nil), // 15: bridge.v1.ResizeSessionResponse
-	(*HealthRequest)(nil),         // 16: bridge.v1.HealthRequest
-	(*HealthResponse)(nil),        // 17: bridge.v1.HealthResponse
-	(*ProviderHealth)(nil),        // 18: bridge.v1.ProviderHealth
-	(*ListProvidersRequest)(nil),  // 19: bridge.v1.ListProvidersRequest
-	(*ListProvidersResponse)(nil), // 20: bridge.v1.ListProvidersResponse
-	(*ProviderInfo)(nil),          // 21: bridge.v1.ProviderInfo
-	nil,                           // 22: bridge.v1.StartSessionRequest.AgentOptsEntry
-	(*timestamppb.Timestamp)(nil), // 23: google.protobuf.Timestamp
+	(AttachRole)(0),               // 1: bridge.v1.AttachRole
+	(AttachEventType)(0),          // 2: bridge.v1.AttachEventType
+	(*StartSessionRequest)(nil),   // 3: bridge.v1.StartSessionRequest
+	(*StartSessionResponse)(nil),  // 4: bridge.v1.StartSessionResponse
+	(*StopSessionRequest)(nil),    // 5: bridge.v1.StopSessionRequest
+	(*StopSessionResponse)(nil),   // 6: bridge.v1.StopSessionResponse
+	(*GetSessionRequest)(nil),     // 7: bridge.v1.GetSessionRequest
+	(*GetSessionResponse)(nil),    // 8: bridge.v1.GetSessionResponse
+	(*ListSessionsRequest)(nil),   // 9: bridge.v1.ListSessionsRequest
+	(*ListSessionsResponse)(nil),  // 10: bridge.v1.ListSessionsResponse
+	(*AttachSessionRequest)(nil),  // 11: bridge.v1.AttachSessionRequest
+	(*AttachSessionEvent)(nil),    // 12: bridge.v1.AttachSessionEvent
+	(*WriteInputRequest)(nil),     // 13: bridge.v1.WriteInputRequest
+	(*WriteInputResponse)(nil),    // 14: bridge.v1.WriteInputResponse
+	(*ResizeSessionRequest)(nil),  // 15: bridge.v1.ResizeSessionRequest
+	(*ResizeSessionResponse)(nil), // 16: bridge.v1.ResizeSessionResponse
+	(*ClaimWriterRequest)(nil),    // 17: bridge.v1.ClaimWriterRequest
+	(*ClaimWriterResponse)(nil),   // 18: bridge.v1.ClaimWriterResponse
+	(*ReleaseWriterRequest)(nil),  // 19: bridge.v1.ReleaseWriterRequest
+	(*ReleaseWriterResponse)(nil), // 20: bridge.v1.ReleaseWriterResponse
+	(*HealthRequest)(nil),         // 21: bridge.v1.HealthRequest
+	(*HealthResponse)(nil),        // 22: bridge.v1.HealthResponse
+	(*ProviderHealth)(nil),        // 23: bridge.v1.ProviderHealth
+	(*ListProvidersRequest)(nil),  // 24: bridge.v1.ListProvidersRequest
+	(*ListProvidersResponse)(nil), // 25: bridge.v1.ListProvidersResponse
+	(*ProviderInfo)(nil),          // 26: bridge.v1.ProviderInfo
+	nil,                           // 27: bridge.v1.StartSessionRequest.AgentOptsEntry
+	(*timestamppb.Timestamp)(nil), // 28: google.protobuf.Timestamp
 }
 var file_bridge_v1_bridge_proto_depIdxs = []int32{
-	22, // 0: bridge.v1.StartSessionRequest.agent_opts:type_name -> bridge.v1.StartSessionRequest.AgentOptsEntry
+	27, // 0: bridge.v1.StartSessionRequest.agent_opts:type_name -> bridge.v1.StartSessionRequest.AgentOptsEntry
 	0,  // 1: bridge.v1.StartSessionResponse.status:type_name -> bridge.v1.SessionStatus
-	23, // 2: bridge.v1.StartSessionResponse.created_at:type_name -> google.protobuf.Timestamp
+	28, // 2: bridge.v1.StartSessionResponse.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 3: bridge.v1.StopSessionResponse.status:type_name -> bridge.v1.SessionStatus
 	0,  // 4: bridge.v1.GetSessionResponse.status:type_name -> bridge.v1.SessionStatus
-	23, // 5: bridge.v1.GetSessionResponse.created_at:type_name -> google.protobuf.Timestamp
-	23, // 6: bridge.v1.GetSessionResponse.stopped_at:type_name -> google.protobuf.Timestamp
-	7,  // 7: bridge.v1.ListSessionsResponse.sessions:type_name -> bridge.v1.GetSessionResponse
-	1,  // 8: bridge.v1.AttachSessionEvent.type:type_name -> bridge.v1.AttachEventType
-	23, // 9: bridge.v1.AttachSessionEvent.timestamp:type_name -> google.protobuf.Timestamp
-	18, // 10: bridge.v1.HealthResponse.providers:type_name -> bridge.v1.ProviderHealth
-	21, // 11: bridge.v1.ListProvidersResponse.providers:type_name -> bridge.v1.ProviderInfo
-	2,  // 12: bridge.v1.BridgeService.StartSession:input_type -> bridge.v1.StartSessionRequest
-	4,  // 13: bridge.v1.BridgeService.StopSession:input_type -> bridge.v1.StopSessionRequest
-	6,  // 14: bridge.v1.BridgeService.GetSession:input_type -> bridge.v1.GetSessionRequest
-	8,  // 15: bridge.v1.BridgeService.ListSessions:input_type -> bridge.v1.ListSessionsRequest
-	10, // 16: bridge.v1.BridgeService.AttachSession:input_type -> bridge.v1.AttachSessionRequest
-	12, // 17: bridge.v1.BridgeService.WriteInput:input_type -> bridge.v1.WriteInputRequest
-	14, // 18: bridge.v1.BridgeService.ResizeSession:input_type -> bridge.v1.ResizeSessionRequest
-	16, // 19: bridge.v1.BridgeService.Health:input_type -> bridge.v1.HealthRequest
-	19, // 20: bridge.v1.BridgeService.ListProviders:input_type -> bridge.v1.ListProvidersRequest
-	3,  // 21: bridge.v1.BridgeService.StartSession:output_type -> bridge.v1.StartSessionResponse
-	5,  // 22: bridge.v1.BridgeService.StopSession:output_type -> bridge.v1.StopSessionResponse
-	7,  // 23: bridge.v1.BridgeService.GetSession:output_type -> bridge.v1.GetSessionResponse
-	9,  // 24: bridge.v1.BridgeService.ListSessions:output_type -> bridge.v1.ListSessionsResponse
-	11, // 25: bridge.v1.BridgeService.AttachSession:output_type -> bridge.v1.AttachSessionEvent
-	13, // 26: bridge.v1.BridgeService.WriteInput:output_type -> bridge.v1.WriteInputResponse
-	15, // 27: bridge.v1.BridgeService.ResizeSession:output_type -> bridge.v1.ResizeSessionResponse
-	17, // 28: bridge.v1.BridgeService.Health:output_type -> bridge.v1.HealthResponse
-	20, // 29: bridge.v1.BridgeService.ListProviders:output_type -> bridge.v1.ListProvidersResponse
-	21, // [21:30] is the sub-list for method output_type
-	12, // [12:21] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	28, // 5: bridge.v1.GetSessionResponse.created_at:type_name -> google.protobuf.Timestamp
+	28, // 6: bridge.v1.GetSessionResponse.stopped_at:type_name -> google.protobuf.Timestamp
+	8,  // 7: bridge.v1.ListSessionsResponse.sessions:type_name -> bridge.v1.GetSessionResponse
+	1,  // 8: bridge.v1.AttachSessionRequest.role:type_name -> bridge.v1.AttachRole
+	2,  // 9: bridge.v1.AttachSessionEvent.type:type_name -> bridge.v1.AttachEventType
+	28, // 10: bridge.v1.AttachSessionEvent.timestamp:type_name -> google.protobuf.Timestamp
+	23, // 11: bridge.v1.HealthResponse.providers:type_name -> bridge.v1.ProviderHealth
+	26, // 12: bridge.v1.ListProvidersResponse.providers:type_name -> bridge.v1.ProviderInfo
+	3,  // 13: bridge.v1.BridgeService.StartSession:input_type -> bridge.v1.StartSessionRequest
+	5,  // 14: bridge.v1.BridgeService.StopSession:input_type -> bridge.v1.StopSessionRequest
+	7,  // 15: bridge.v1.BridgeService.GetSession:input_type -> bridge.v1.GetSessionRequest
+	9,  // 16: bridge.v1.BridgeService.ListSessions:input_type -> bridge.v1.ListSessionsRequest
+	11, // 17: bridge.v1.BridgeService.AttachSession:input_type -> bridge.v1.AttachSessionRequest
+	13, // 18: bridge.v1.BridgeService.WriteInput:input_type -> bridge.v1.WriteInputRequest
+	15, // 19: bridge.v1.BridgeService.ResizeSession:input_type -> bridge.v1.ResizeSessionRequest
+	17, // 20: bridge.v1.BridgeService.ClaimWriter:input_type -> bridge.v1.ClaimWriterRequest
+	19, // 21: bridge.v1.BridgeService.ReleaseWriter:input_type -> bridge.v1.ReleaseWriterRequest
+	21, // 22: bridge.v1.BridgeService.Health:input_type -> bridge.v1.HealthRequest
+	24, // 23: bridge.v1.BridgeService.ListProviders:input_type -> bridge.v1.ListProvidersRequest
+	4,  // 24: bridge.v1.BridgeService.StartSession:output_type -> bridge.v1.StartSessionResponse
+	6,  // 25: bridge.v1.BridgeService.StopSession:output_type -> bridge.v1.StopSessionResponse
+	8,  // 26: bridge.v1.BridgeService.GetSession:output_type -> bridge.v1.GetSessionResponse
+	10, // 27: bridge.v1.BridgeService.ListSessions:output_type -> bridge.v1.ListSessionsResponse
+	12, // 28: bridge.v1.BridgeService.AttachSession:output_type -> bridge.v1.AttachSessionEvent
+	14, // 29: bridge.v1.BridgeService.WriteInput:output_type -> bridge.v1.WriteInputResponse
+	16, // 30: bridge.v1.BridgeService.ResizeSession:output_type -> bridge.v1.ResizeSessionResponse
+	18, // 31: bridge.v1.BridgeService.ClaimWriter:output_type -> bridge.v1.ClaimWriterResponse
+	20, // 32: bridge.v1.BridgeService.ReleaseWriter:output_type -> bridge.v1.ReleaseWriterResponse
+	22, // 33: bridge.v1.BridgeService.Health:output_type -> bridge.v1.HealthResponse
+	25, // 34: bridge.v1.BridgeService.ListProviders:output_type -> bridge.v1.ListProvidersResponse
+	24, // [24:35] is the sub-list for method output_type
+	13, // [13:24] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_bridge_v1_bridge_proto_init() }
@@ -1657,8 +2011,8 @@ func file_bridge_v1_bridge_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_bridge_v1_bridge_proto_rawDesc), len(file_bridge_v1_bridge_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   21,
+			NumEnums:      3,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
