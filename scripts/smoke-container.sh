@@ -32,7 +32,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-go build -o "$HEALTHCHECK_BIN" "$ROOT_DIR/e2e/cmd/plain-healthcheck"
+GOOS=linux GOARCH=amd64 go build -o "$HEALTHCHECK_BIN" "$ROOT_DIR/e2e/cmd/plain-healthcheck"
 
 docker run -d \
   --name "$CONTAINER" \
