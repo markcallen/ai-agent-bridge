@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Usage: smoke-container.sh <image>
-# Pulls the given image, starts it with the CI smoke config (no TLS, no auth),
-# and verifies the health endpoint responds.
+# Pulls the given image, starts it with the CI smoke config (auto-PKI mTLS,
+# smoke provider) and verifies the health endpoint responds from inside the
+# container using the auto-generated certs.
 #
 # Example:
 #   ./scripts/smoke-container.sh ghcr.io/markcallen/ai-agent-bridge:v1.2.3
@@ -35,16 +36,18 @@ go build -o "$HEALTHCHECK_BIN" "$ROOT_DIR/e2e/cmd/plain-healthcheck"
 
 docker run -d \
   --name "$CONTAINER" \
-  -p 9445 \
   -e BRIDGE_CONFIG=/app/config/bridge-ci-smoke.yaml \
   -v "$ROOT_DIR/config/bridge-ci-smoke.yaml:/app/config/bridge-ci-smoke.yaml:ro" \
   -v "$HEALTHCHECK_BIN:/usr/local/bin/plain-healthcheck:ro" \
   "$IMAGE"
 
-MAPPED_PORT="$(docker inspect "$CONTAINER" --format '{{(index (index .NetworkSettings.Ports "9445/tcp") 0).HostPort}}')"
-
+# Run the healthcheck inside the container so it can auto-discover the bridge
+# server using the state dir and auto-generated mTLS certs. The bridge starts
+# in secure mode (auto-PKI mTLS+JWT) when server.listen is set in the config,
+# so plain TCP from outside the container is not sufficient.
 for _ in $(seq 1 30); do
-  if "$HEALTHCHECK_BIN" -target "127.0.0.1:$MAPPED_PORT" >/dev/null 2>&1; then
+  if docker exec -u bridge -e HOME=/home/bridge "$CONTAINER" \
+       /usr/local/bin/plain-healthcheck >/dev/null 2>&1; then
     echo "CONTAINER SMOKE PASSED: image=$IMAGE"
     exit 0
   fi
