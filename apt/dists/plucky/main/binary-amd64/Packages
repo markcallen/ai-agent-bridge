@@ -1,13 +1,13 @@
 Package: ai-agent-bridge
-Version: 0.7.2
+Version: 0.7.3
 Architecture: amd64
 Maintainer: Mark Callen <opensource@markcallen.com>
 Depends: ca-certificates
-Filename: pool/main/ai-agent-bridge_0.7.2_amd64.deb
-Size: 11609152
-MD5sum: b217a4d0a385dd12a3b95868246bc4cf
-SHA1: 86bca72ed4352cad57c85ce7af358987951ae979
-SHA256: 27059563f67b4d023c8ad7e01fff26f6b7d555b1269ecd152c416cf38c28bbd2
+Filename: pool/main/ai-agent-bridge_0.7.3_amd64.deb
+Size: 11609344
+MD5sum: 92a28d50530d7066c0478cba1a66ef91
+SHA1: 7d5b7ddf59624e9c072dbb457371f2acd0efb518
+SHA256: 940b2cf37c2413dd9b290f5c7a21e5c8bc997026f4770ffe35188083c195445f
 Section: admin
 Priority: optional
 Description: AI Agent Bridge
