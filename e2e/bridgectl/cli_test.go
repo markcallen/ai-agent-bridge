@@ -1021,6 +1021,353 @@ func TestOIDCMissingNameFlag(t *testing.T) {
 		"error should mention the missing --name flag")
 }
 
+// --- Writer slot release tests (Section 4 of test plan) ---
+
+// startEchoSession creates a session using the echo provider and waits for it
+// to reach the running state. It returns the session ID.
+func startEchoSession(t *testing.T, ctx context.Context, client *bridgeclient.Client, repoDir string) string {
+	t.Helper()
+	sessionID := uuid.NewString()
+	_, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId:   "test",
+		SessionId:   sessionID,
+		RepoPath:    repoDir,
+		Provider:    "echo",
+		InitialCols: 80,
+		InitialRows: 24,
+	})
+	require.NoError(t, err)
+	// Wait for session to be running.
+	time.Sleep(500 * time.Millisecond)
+	return sessionID
+}
+
+// attachAndCollectEvents attaches to a session and collects events in the
+// background. Returns the stream, a channel that signals when ATTACHED is
+// received, and a function to retrieve collected events.
+func attachAndCollectEvents(
+	t *testing.T,
+	ctx context.Context,
+	client *bridgeclient.Client,
+	sessionID, clientID string,
+	role bridgev1.AttachRole,
+) (stream *bridgeclient.OutputStream, attached <-chan struct{}, getEvents func() []*bridgev1.AttachSessionEvent, cancel context.CancelFunc) {
+	t.Helper()
+	recvCtx, recvCancel := context.WithCancel(ctx)
+
+	stream, err := client.AttachSession(recvCtx, &bridgev1.AttachSessionRequest{
+		SessionId: sessionID,
+		ClientId:  clientID,
+		AfterSeq:  0,
+		Role:      role,
+	})
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var events []*bridgev1.AttachSessionEvent
+	attachedCh := make(chan struct{}, 1)
+
+	go func() {
+		_ = stream.RecvAll(recvCtx, func(ev *bridgev1.AttachSessionEvent) error {
+			mu.Lock()
+			events = append(events, ev)
+			mu.Unlock()
+			if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED {
+				select {
+				case attachedCh <- struct{}{}:
+				default:
+				}
+			}
+			return nil
+		})
+	}()
+
+	return stream, attachedCh, func() []*bridgev1.AttachSessionEvent {
+		mu.Lock()
+		defer mu.Unlock()
+		cp := make([]*bridgev1.AttachSessionEvent, len(events))
+		copy(cp, events)
+		return cp
+	}, recvCancel
+}
+
+// waitForAttach blocks until the attached channel fires or a timeout expires.
+func waitForAttach(t *testing.T, attached <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-attached:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for attach event")
+	}
+}
+
+// hasEventType returns true if the event slice contains an event of the given type.
+func hasEventType(events []*bridgev1.AttachSessionEvent, typ bridgev1.AttachEventType) bool {
+	for _, ev := range events {
+		if ev.Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
+// TestWriterReleasedOnDisconnect verifies that when the active writer
+// disconnects, observers receive a WRITER_RELEASED event.
+func TestWriterReleasedOnDisconnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+	repoDir := t.TempDir()
+
+	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	target := srv.Target()
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer ctxCancel()
+
+	// Create two clients sharing the same gRPC connection.
+	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+	client.SetProject("test")
+
+	sessionID := startEchoSession(t, ctx, client, repoDir)
+
+	// Client A: attach as writer.
+	writerID := uuid.NewString()
+	_, writerAttached, _, writerCancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, writerID,
+		bridgev1.AttachRole_ATTACH_ROLE_WRITER,
+	)
+	waitForAttach(t, writerAttached)
+
+	// Client B: attach as observer.
+	observerID := uuid.NewString()
+	_, observerAttached, getObserverEvents, observerCancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, observerID,
+		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
+	)
+	defer observerCancel()
+	waitForAttach(t, observerAttached)
+
+	// Writer disconnects — cancel its stream context.
+	writerCancel()
+	// Give the server time to broadcast the WRITER_RELEASED event.
+	time.Sleep(500 * time.Millisecond)
+
+	// Observer should have received WRITER_RELEASED.
+	events := getObserverEvents()
+	assert.True(t, hasEventType(events, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
+		"observer should receive WRITER_RELEASED when writer disconnects; got events: %v", eventTypes(events))
+
+	// Verify the WRITER_RELEASED event identifies the disconnected writer.
+	for _, ev := range events {
+		if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED {
+			assert.Equal(t, writerID, ev.WriterClientId,
+				"WRITER_RELEASED should identify the disconnected writer")
+		}
+	}
+
+	// Cleanup.
+	_, _ = client.StopSession(ctx, &bridgev1.StopSessionRequest{
+		SessionId: sessionID, Force: true,
+	})
+}
+
+// TestWriterEvictionBroadcastsEvents verifies that force-claiming the writer
+// slot broadcasts WRITER_RELEASED (for the evicted writer) and WRITER_CLAIMED
+// (for the new writer) to all observers.
+func TestWriterEvictionBroadcastsEvents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+	repoDir := t.TempDir()
+
+	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	target := srv.Target()
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer ctxCancel()
+
+	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+	client.SetProject("test")
+
+	sessionID := startEchoSession(t, ctx, client, repoDir)
+
+	// Client A: attach as writer.
+	writerAID := uuid.NewString()
+	_, writerAAttached, getWriterAEvents, writerACancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, writerAID,
+		bridgev1.AttachRole_ATTACH_ROLE_WRITER,
+	)
+	defer writerACancel()
+	waitForAttach(t, writerAAttached)
+
+	// Client B: attach as observer.
+	observerID := uuid.NewString()
+	_, observerAttached, getObserverEvents, observerCancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, observerID,
+		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
+	)
+	defer observerCancel()
+	waitForAttach(t, observerAttached)
+
+	// Client C: attach as observer first (ClaimWriter requires an attached client).
+	claimantID := uuid.NewString()
+	_, claimantAttached, _, claimantCancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, claimantID,
+		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
+	)
+	defer claimantCancel()
+	waitForAttach(t, claimantAttached)
+
+	// Client C: force-claim the writer slot, evicting Client A.
+	claimResp, err := client.ClaimWriter(ctx, &bridgev1.ClaimWriterRequest{
+		SessionId: sessionID,
+		ClientId:  claimantID,
+		Force:     true,
+	})
+	require.NoError(t, err)
+	assert.True(t, claimResp.Claimed, "force claim should succeed")
+	assert.Equal(t, writerAID, claimResp.PreviousWriterClientId,
+		"should report the evicted writer")
+
+	// Give the server time to broadcast events.
+	time.Sleep(500 * time.Millisecond)
+
+	// Observer (Client B) should see both WRITER_RELEASED and WRITER_CLAIMED.
+	obsEvents := getObserverEvents()
+	assert.True(t, hasEventType(obsEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
+		"observer should receive WRITER_RELEASED for the evicted writer; got: %v", eventTypes(obsEvents))
+	assert.True(t, hasEventType(obsEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED),
+		"observer should receive WRITER_CLAIMED for the new writer; got: %v", eventTypes(obsEvents))
+
+	// Verify the event payloads identify the correct clients.
+	for _, ev := range obsEvents {
+		switch ev.Type {
+		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED:
+			assert.Equal(t, writerAID, ev.WriterClientId,
+				"WRITER_RELEASED should identify the evicted writer")
+		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED:
+			assert.Equal(t, claimantID, ev.WriterClientId,
+				"WRITER_CLAIMED should identify the new writer")
+		}
+	}
+
+	// Client A (evicted writer, now observer) should also see the events.
+	writerAEvents := getWriterAEvents()
+	assert.True(t, hasEventType(writerAEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
+		"evicted writer should receive WRITER_RELEASED; got: %v", eventTypes(writerAEvents))
+	assert.True(t, hasEventType(writerAEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED),
+		"evicted writer should receive WRITER_CLAIMED; got: %v", eventTypes(writerAEvents))
+
+	// Cleanup.
+	_, _ = client.StopSession(ctx, &bridgev1.StopSessionRequest{
+		SessionId: sessionID, Force: true,
+	})
+}
+
+// TestObserverClaimsWriterAfterRelease verifies that an observer can claim the
+// writer slot after it is voluntarily released, and then write input.
+func TestObserverClaimsWriterAfterRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+	repoDir := t.TempDir()
+
+	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	target := srv.Target()
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer ctxCancel()
+
+	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+	client.SetProject("test")
+
+	sessionID := startEchoSession(t, ctx, client, repoDir)
+
+	// Client A: attach as writer.
+	writerAID := uuid.NewString()
+	_, writerAAttached, _, writerACancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, writerAID,
+		bridgev1.AttachRole_ATTACH_ROLE_WRITER,
+	)
+	defer writerACancel()
+	waitForAttach(t, writerAAttached)
+
+	// Client B: attach as observer.
+	observerID := uuid.NewString()
+	observerStream, observerAttached, getObserverEvents, observerCancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, observerID,
+		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
+	)
+	defer observerCancel()
+	waitForAttach(t, observerAttached)
+
+	// Client A: voluntarily release the writer slot.
+	releaseResp, err := client.ReleaseWriter(ctx, &bridgev1.ReleaseWriterRequest{
+		SessionId: sessionID,
+		ClientId:  writerAID,
+	})
+	require.NoError(t, err)
+	assert.True(t, releaseResp.Released, "release should succeed")
+
+	// Give the server time to broadcast WRITER_RELEASED.
+	time.Sleep(300 * time.Millisecond)
+
+	// Observer should have received the release notification.
+	events := getObserverEvents()
+	assert.True(t, hasEventType(events, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
+		"observer should see WRITER_RELEASED after voluntary release; got: %v", eventTypes(events))
+
+	// Client B (observer): claim the now-vacant writer slot (force=false).
+	claimResp, err := client.ClaimWriter(ctx, &bridgev1.ClaimWriterRequest{
+		SessionId: sessionID,
+		ClientId:  observerID,
+		Force:     false,
+	})
+	require.NoError(t, err, "non-force claim should succeed when slot is vacant")
+	assert.True(t, claimResp.Claimed)
+
+	// Client B should now be able to write input.
+	_, err = client.WriteInput(ctx, &bridgev1.WriteInputRequest{
+		SessionId: sessionID,
+		ClientId:  observerStream.ClientID(),
+		Data:      []byte("OBSERVER_NOW_WRITER\n"),
+	})
+	require.NoError(t, err, "promoted observer should be able to write input")
+
+	// Cleanup.
+	_, _ = client.StopSession(ctx, &bridgev1.StopSessionRequest{
+		SessionId: sessionID, Force: true,
+	})
+}
+
+// eventTypes returns a slice of event type names for diagnostic output.
+func eventTypes(events []*bridgev1.AttachSessionEvent) []string {
+	names := make([]string, len(events))
+	for i, ev := range events {
+		names[i] = ev.Type.String()
+	}
+	return names
+}
+
 // --- Secure mode tests ---
 
 // secureClient creates a bridgeclient connected to a secure-mode server

@@ -195,7 +195,7 @@ They do NOT require a running Step CA instance.
 
 ## Section 4: Writer Slot Release Notification
 
-- [ ] **4.1 — WRITER_RELEASED on writer disconnect**
+- [x] **4.1 — WRITER_RELEASED on writer disconnect** *(completed — macOS desktop, e2e test added)*
   - Steps:
     1. Start server (local or secure mode)
     2. Start an echo session
@@ -205,26 +205,29 @@ They do NOT require a running Step CA instance.
     6. Client B: verify `WRITER_RELEASED` event received
   - Expected: observer receives the event promptly after writer disconnects
   - Platforms: Docker (via e2e test), Linux desktop, macOS desktop
+  - E2E: `TestWriterReleasedOnDisconnect` — verifies observer receives WRITER_RELEASED with correct writer_client_id when writer disconnects
 
-- [ ] **4.2 — Writer eviction via ClaimWriter broadcasts notification**
+- [x] **4.2 — Writer eviction via ClaimWriter broadcasts notification** *(completed — macOS desktop, e2e test added)*
   - Steps:
     1. Start server, start echo session
     2. Client A: attach as writer
     3. Client B: attach as observer
-    4. Client C: call `ClaimWriter(force=true)` to evict Client A
+    4. Client C: attach as observer, then `ClaimWriter(force=true)` to evict Client A
     5. Client B: verify `WRITER_CLAIMED` event received with Client C's ID
     6. Client A: verify it receives notification of eviction
   - Expected: all parties notified of writer change
   - Platforms: Docker (via e2e test), Linux desktop, macOS desktop
+  - E2E: `TestWriterEvictionBroadcastsEvents` — 3 clients; verifies observer and evicted writer both receive WRITER_RELEASED + WRITER_CLAIMED with correct client IDs
 
-- [ ] **4.3 — Observer can claim writer after release**
+- [x] **4.3 — Observer can claim writer after release** *(completed — macOS desktop, e2e test added)*
   - Steps:
     1. Start server, start echo session
-    2. Client A: attach as writer, then release (ReleaseWriter or disconnect)
+    2. Client A: attach as writer, then release (ReleaseWriter)
     3. Client B (observer): call `ClaimWriter(force=false)`
     4. Client B: verify it can now `WriteInput` successfully
   - Expected: observer transitions to writer cleanly
   - Platforms: Docker (via e2e test), Linux desktop, macOS desktop
+  - E2E: `TestObserverClaimsWriterAfterRelease` — writer releases voluntarily, observer claims with force=false, then writes input successfully
 
 ---
 
@@ -554,7 +557,7 @@ and defer containerized testing.
 | 1. Unit tests & coverage | 1.1–1.3 | yes | yes | yes | future | **done** (all pass, 77.9% coverage, macOS verified) |
 | 2. Tier-1 auto-PKI | 2.1–2.4 | partial | yes | yes | future | **done** (e2e tests added, macOS verified) |
 | 3. Step CA flag validation | 3.1–3.4 | yes | yes | yes | future | **done** (e2e tests added, macOS verified) |
-| 4. Writer slot release | 4.1–4.3 | yes | yes | yes | future | pending |
+| 4. Writer slot release | 4.1–4.3 | yes | yes | yes | future | **done** (e2e tests added, macOS verified) |
 | 5. Re-attachment & terminal | 5.1–5.2 | partial | yes | yes | future | pending |
 | 6. Tier-2 Step CA | 6.1–6.3 | future | manual | manual | future | pending (needs Step CA) |
 | 7. OIDC enrollment | 7.1–7.3 | future | manual | manual | future | pending (needs Step CA + OIDC) |
