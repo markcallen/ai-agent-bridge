@@ -1368,6 +1368,140 @@ func eventTypes(events []*bridgev1.AttachSessionEvent) []string {
 	return names
 }
 
+// --- Re-attachment and terminal tests (Section 5 of test plan) ---
+
+// TestSameClientIDReattachment verifies that when a client re-attaches with the
+// same clientID, the stale channel is closed and the new attachment works. This
+// exercises the re-attachment safety code that prevents goroutine leaks.
+//
+// The re-attachment path triggers when the same clientID attaches while an
+// existing observer entry is still present. The writer conflict check runs
+// first, so a realistic reconnect re-attaches as observer and then reclaims
+// the writer slot.
+func TestSameClientIDReattachment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+	repoDir := t.TempDir()
+
+	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	target := srv.Target()
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer ctxCancel()
+
+	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+	client.SetProject("test")
+
+	sessionID := startEchoSession(t, ctx, client, repoDir)
+
+	// First attachment as observer with a fixed clientID.
+	fixedClientID := "reattach-test-client"
+	_, firstAttached, _, firstCancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, fixedClientID,
+		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
+	)
+	waitForAttach(t, firstAttached)
+
+	// Second attachment with the SAME clientID as observer — the server
+	// closes the stale channel and registers the new one.
+	_, secondAttached, getSecondEvents, secondCancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, fixedClientID,
+		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
+	)
+	waitForAttach(t, secondAttached)
+
+	// The first stream's context is still live, but the server closed its
+	// channel. Cancel it to clean up the goroutine.
+	firstCancel()
+
+	// The second attachment should be functional — verify it received the
+	// ATTACHED event.
+	events := getSecondEvents()
+	assert.True(t, hasEventType(events, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED),
+		"re-attached stream should receive ATTACHED event")
+
+	secondCancel()
+
+	// Cleanup.
+	_, _ = client.StopSession(ctx, &bridgev1.StopSessionRequest{
+		SessionId: sessionID, Force: true,
+	})
+}
+
+// TestReattachmentAsObserverThenClaimWriter verifies that a client can
+// re-attach as observer after being a writer, and then reclaim the writer slot.
+func TestReattachmentAsObserverThenClaimWriter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+	repoDir := t.TempDir()
+
+	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	target := srv.Target()
+	ctx, ctxCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer ctxCancel()
+
+	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+	client.SetProject("test")
+
+	sessionID := startEchoSession(t, ctx, client, repoDir)
+
+	clientID := "role-switch-client"
+
+	// Attach as writer.
+	_, writerAttached, _, writerCancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, clientID,
+		bridgev1.AttachRole_ATTACH_ROLE_WRITER,
+	)
+	waitForAttach(t, writerAttached)
+
+	// Re-attach the same clientID as observer. The server closes the stale
+	// writer channel and re-registers as observer.
+	_, observerAttached, _, observerCancel := attachAndCollectEvents(
+		t, ctx, client, sessionID, clientID,
+		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
+	)
+	waitForAttach(t, observerAttached)
+	writerCancel() // clean up old stream goroutine
+
+	// The writer slot should now be vacant since re-attach cleared it.
+	// Claim it back with force=false (should succeed on an empty slot).
+	claimResp, err := client.ClaimWriter(ctx, &bridgev1.ClaimWriterRequest{
+		SessionId: sessionID,
+		ClientId:  clientID,
+		Force:     false,
+	})
+	require.NoError(t, err, "claim should succeed when writer slot is vacant")
+	assert.True(t, claimResp.Claimed)
+
+	// Verify we can write input as the reclaimed writer.
+	_, err = client.WriteInput(ctx, &bridgev1.WriteInputRequest{
+		SessionId: sessionID,
+		ClientId:  clientID,
+		Data:      []byte("RECLAIMED\n"),
+	})
+	require.NoError(t, err, "write should succeed after reclaiming writer slot")
+
+	observerCancel()
+	_, _ = client.StopSession(ctx, &bridgev1.StopSessionRequest{
+		SessionId: sessionID, Force: true,
+	})
+}
+
 // --- Secure mode tests ---
 
 // secureClient creates a bridgeclient connected to a secure-mode server
