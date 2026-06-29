@@ -833,6 +833,194 @@ func TestClientNameValidation(t *testing.T) {
 	}
 }
 
+// --- Step CA flag validation tests (Section 3 of test plan) ---
+
+// TestStepCAMissingRoot verifies that starting a server with --step-ca-url
+// but without --step-ca-root returns a clear error.
+func TestStepCAMissingRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	_, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+		StepCAURL:  "https://ca.example.com",
+		// StepCARootPath intentionally omitted
+	})
+	require.Error(t, err, "should fail when --step-ca-root is missing")
+	assert.Contains(t, err.Error(), "step-ca-root is required",
+		"error should mention the missing flag")
+}
+
+// TestStepCANonexistentRoot verifies that a nonexistent --step-ca-root path
+// produces a clear error about the missing file.
+func TestStepCANonexistentRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	_, err := localserver.Start(localserver.Config{
+		StateDir:       stateDir,
+		ListenAddr:     "127.0.0.1:0",
+		ServerSANs:     []string{"127.0.0.1"},
+		StepCAURL:      "https://ca.example.com",
+		StepCARootPath: "/nonexistent/root.crt",
+	})
+	require.Error(t, err, "should fail when root cert file does not exist")
+	assert.Contains(t, err.Error(), "copy Step CA root",
+		"error should mention the copy failure")
+}
+
+// TestStepCAMissingStepCLI verifies that when `step` is not on PATH,
+// the server returns a clear error with an install link.
+func TestStepCAMissingStepCLI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	// Create a dummy root cert file so the copy step succeeds.
+	dummyRoot := filepath.Join(t.TempDir(), "root.crt")
+	require.NoError(t, os.WriteFile(dummyRoot, []byte("dummy-cert"), 0o644))
+
+	// Remove step from PATH so exec.LookPath fails.
+	t.Setenv("PATH", t.TempDir())
+
+	_, err := localserver.Start(localserver.Config{
+		StateDir:       stateDir,
+		ListenAddr:     "127.0.0.1:0",
+		ServerSANs:     []string{"127.0.0.1"},
+		StepCAURL:      "https://ca.example.com",
+		StepCARootPath: dummyRoot,
+	})
+	require.Error(t, err, "should fail when step CLI is not on PATH")
+	assert.Contains(t, err.Error(), "step",
+		"error should mention the step CLI")
+	assert.Contains(t, err.Error(), "smallstep.com/cli",
+		"error should include the install URL")
+}
+
+// TestOIDCFlagValidation verifies that IssueClientCertViaOIDC rejects
+// incomplete flag combinations with clear error messages.
+func TestOIDCFlagValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	tests := []struct {
+		name    string
+		client  string
+		stepCA  *localserver.StepCAConfig
+		wantErr string
+	}{
+		{
+			name:    "missing step-ca-url",
+			client:  "alice",
+			stepCA:  nil,
+			wantErr: "step-ca-url",
+		},
+		{
+			name:   "missing oidc-provider",
+			client: "alice",
+			stepCA: &localserver.StepCAConfig{
+				URL:      "https://ca.example.com",
+				RootPath: "/tmp/root.crt",
+			},
+			wantErr: "oidc-provider",
+		},
+		{
+			name:   "missing step-ca-root",
+			client: "alice",
+			stepCA: &localserver.StepCAConfig{
+				URL:             "https://ca.example.com",
+				OIDCProviderURL: "https://accounts.google.com",
+			},
+			wantErr: "step-ca-root",
+		},
+		{
+			name:   "invalid client name",
+			client: "../escape",
+			stepCA: &localserver.StepCAConfig{
+				URL:             "https://ca.example.com",
+				RootPath:        "/tmp/root.crt",
+				OIDCProviderURL: "https://accounts.google.com",
+			},
+			wantErr: "invalid client name",
+		},
+		{
+			name:   "step CLI not on PATH",
+			client: "bob",
+			stepCA: &localserver.StepCAConfig{
+				URL:             "https://ca.example.com",
+				RootPath:        "/tmp/root.crt",
+				OIDCProviderURL: "https://accounts.google.com",
+			},
+			wantErr: "step",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Ensure step is not on PATH for the last test case.
+			if tc.name == "step CLI not on PATH" {
+				t.Setenv("PATH", t.TempDir())
+			}
+			_, _, err := localserver.IssueClientCertViaOIDC(stateDir, tc.client, tc.stepCA, logger)
+			require.Error(t, err, "should fail for case: %s", tc.name)
+			assert.Contains(t, err.Error(), tc.wantErr,
+				"error for %q should mention %q", tc.name, tc.wantErr)
+		})
+	}
+}
+
+// TestOIDCMissingNameFlag verifies that the CLI rejects issue-client --oidc-provider
+// when --name is not provided (Cobra flag validation).
+func TestOIDCMissingNameFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	cmd := exec.Command(cliBinary, "server", "issue-client",
+		"--oidc-provider", "https://accounts.google.com",
+		"--step-ca-url", "https://ca.example.com",
+		"--step-ca-root", "/tmp/root.crt",
+	)
+	cmd.Env = append(os.Environ(), "AI_AGENT_BRIDGE_STATE_DIR="+stateDir)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	require.Error(t, err, "should fail when --name is missing")
+	assert.Contains(t, stderr.String(), "name",
+		"error should mention the missing --name flag")
+}
+
 // --- Secure mode tests ---
 
 // secureClient creates a bridgeclient connected to a secure-mode server

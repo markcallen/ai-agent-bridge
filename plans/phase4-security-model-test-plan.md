@@ -157,17 +157,19 @@ These tests verify that the default (no Step CA) path is unchanged.
 These tests verify error handling when Step CA flags are used incorrectly.
 They do NOT require a running Step CA instance.
 
-- [ ] **3.1 — Missing --step-ca-root when --step-ca-url is set**
+- [x] **3.1 — Missing --step-ca-root when --step-ca-url is set** *(completed — macOS desktop, e2e test added)*
   - Command: `bridgectl server start --listen 127.0.0.1:0 --step-ca-url https://ca.example.com`
   - Expected: error message indicating `--step-ca-root` is required
   - Platforms: Docker, Linux desktop, macOS desktop
+  - E2E: `TestStepCAMissingRoot` — verifies `localserver.Start()` returns error containing "step-ca-root is required"
 
-- [ ] **3.2 — Nonexistent --step-ca-root path**
+- [x] **3.2 — Nonexistent --step-ca-root path** *(completed — macOS desktop, e2e test added)*
   - Command: `bridgectl server start --listen 127.0.0.1:0 --step-ca-url https://ca.example.com --step-ca-root /nonexistent/root.crt`
   - Expected: error about missing root certificate file
   - Platforms: Docker, Linux desktop, macOS desktop
+  - E2E: `TestStepCANonexistentRoot` — verifies error contains "copy Step CA root"
 
-- [ ] **3.3 — step CLI not on PATH**
+- [x] **3.3 — step CLI not on PATH** *(completed — macOS desktop, e2e test added)*
   - Steps:
     1. Ensure `step` is not installed (or remove from PATH)
     2. Create a dummy root cert: `echo "dummy" > /tmp/root.crt`
@@ -176,8 +178,9 @@ They do NOT require a running Step CA instance.
     https://smallstep.com/cli/
   - Platforms: Docker, Linux desktop, macOS desktop
   - Docker: covered by `TestEnsurePKI_StepCASkipsAutoGen` unit test
+  - E2E: `TestStepCAMissingStepCLI` — creates dummy root, sets PATH to empty dir, verifies error mentions "step" and "smallstep.com/cli"
 
-- [ ] **3.4 — OIDC flag validation (missing combos)**
+- [x] **3.4 — OIDC flag validation (missing combos)** *(completed — macOS desktop, e2e tests added)*
   - Test each case:
     - `--oidc-provider https://accounts.google.com` without `--step-ca-url` → error
     - `--oidc-provider https://accounts.google.com --step-ca-url https://ca.example.com` without `--step-ca-root` → error
@@ -185,6 +188,8 @@ They do NOT require a running Step CA instance.
     - All three flags but `step` not on PATH → error with install instructions
   - Platforms: Docker, Linux desktop, macOS desktop
   - Docker: covered by `TestIssueClientCertViaOIDC_Validation` unit test
+  - E2E: `TestOIDCFlagValidation` — table-driven test covering 5 cases (missing step-ca-url, missing oidc-provider, missing step-ca-root, invalid client name, step CLI not on PATH)
+  - E2E: `TestOIDCMissingNameFlag` — runs CLI binary without --name, verifies Cobra rejects it
 
 ---
 
@@ -548,7 +553,7 @@ and defer containerized testing.
 |---|---|---|---|---|---|---|
 | 1. Unit tests & coverage | 1.1–1.3 | yes | yes | yes | future | **done** (all pass, 77.9% coverage, macOS verified) |
 | 2. Tier-1 auto-PKI | 2.1–2.4 | partial | yes | yes | future | **done** (e2e tests added, macOS verified) |
-| 3. Step CA flag validation | 3.1–3.4 | yes | yes | yes | future | pending |
+| 3. Step CA flag validation | 3.1–3.4 | yes | yes | yes | future | **done** (e2e tests added, macOS verified) |
 | 4. Writer slot release | 4.1–4.3 | yes | yes | yes | future | pending |
 | 5. Re-attachment & terminal | 5.1–5.2 | partial | yes | yes | future | pending |
 | 6. Tier-2 Step CA | 6.1–6.3 | future | manual | manual | future | pending (needs Step CA) |
