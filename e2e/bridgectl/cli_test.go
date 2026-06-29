@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -588,6 +589,248 @@ func TestSessionAttachAndInput(t *testing.T) {
 		Force:     true,
 	})
 	require.NoError(t, err)
+}
+
+// --- Tier-1 auto-PKI tests (Section 2 of test plan) ---
+
+// TestAutoPKIGeneratesAllFiles verifies that starting a secure-mode server
+// with no Step CA flags generates the full set of PKI files.
+func TestAutoPKIGeneratesAllFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err, "secure server should start")
+	defer srv.Stop()
+
+	certsDir := filepath.Join(stateDir, "certs")
+	expectedFiles := []string{
+		"ca.crt",
+		"ca.key",
+		"server.crt",
+		"server.key",
+		"local-client.crt",
+		"local-client.key",
+		"ca-bundle.crt",
+		"jwt-signing.key",
+		"jwt-signing.pub",
+	}
+	for _, name := range expectedFiles {
+		path := filepath.Join(certsDir, name)
+		_, err := os.Stat(path)
+		assert.NoError(t, err, "PKI file should exist: %s", name)
+	}
+
+	// Private keys should have restricted permissions (0600).
+	privateKeys := []string{"ca.key", "server.key", "local-client.key", "jwt-signing.key"}
+	for _, name := range privateKeys {
+		info, err := os.Stat(filepath.Join(certsDir, name))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+			"private key %s should be 0600", name)
+	}
+
+	// Health check should succeed with the auto-generated creds.
+	target, _ := localserver.DiscoverTarget(stateDir)
+	client := secureClient(t, target, stateDir)
+	defer func() { _ = client.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := client.Health(ctx)
+	require.NoError(t, err, "health check should succeed with auto-PKI creds")
+	assert.NotEmpty(t, resp.ServerInstanceId)
+}
+
+// TestAutoPKIIdempotentAcrossRestart verifies that stopping and restarting
+// a secure-mode server does not regenerate certificates.
+func TestAutoPKIIdempotentAcrossRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	// First start — generates PKI.
+	srv1, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+
+	certsDir := filepath.Join(stateDir, "certs")
+	bundlePath := filepath.Join(certsDir, "ca-bundle.crt")
+	caPath := filepath.Join(certsDir, "ca.crt")
+
+	// Record contents from first start.
+	bundle1, err := os.ReadFile(bundlePath)
+	require.NoError(t, err)
+	ca1, err := os.ReadFile(caPath)
+	require.NoError(t, err)
+
+	srv1.Stop()
+
+	// Second start — should reuse existing certs.
+	srv2, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+	defer srv2.Stop()
+
+	bundle2, err := os.ReadFile(bundlePath)
+	require.NoError(t, err)
+	ca2, err := os.ReadFile(caPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, bundle1, bundle2, "ca-bundle.crt should not be regenerated")
+	assert.Equal(t, ca1, ca2, "ca.crt should not be regenerated")
+
+	// Server should still be fully functional with the original certs.
+	target, _ := localserver.DiscoverTarget(stateDir)
+	client := secureClient(t, target, stateDir)
+	defer func() { _ = client.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := client.Health(ctx)
+	require.NoError(t, err, "health check should pass after restart with same certs")
+	assert.NotEmpty(t, resp.ServerInstanceId)
+}
+
+// TestIssuedClientCertCanConnect verifies that a client using credentials
+// from IssueClientCert can connect to and authenticate with the server.
+func TestIssuedClientCertCanConnect(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// Start and stop a server to generate PKI.
+	srv1, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+	srv1.Stop()
+
+	// Issue a client certificate. This writes the JWT public key to
+	// certs/jwt-clients/ which the server reads at startup.
+	clientName := "sdk-test"
+	certPath, keyPath, err := localserver.IssueClientCert(stateDir, clientName, logger)
+	require.NoError(t, err, "should issue client cert")
+
+	// Verify expected files were created.
+	clientDir := filepath.Join(stateDir, "certs", "clients", clientName)
+	assert.Equal(t, filepath.Join(clientDir, clientName+".crt"), certPath)
+	assert.Equal(t, filepath.Join(clientDir, clientName+".key"), keyPath)
+	_, err = os.Stat(filepath.Join(clientDir, "jwt-signing.key"))
+	require.NoError(t, err, "per-client JWT key should exist")
+	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", clientName+".pub"))
+	require.NoError(t, err, "server-side JWT pub should be registered")
+
+	// Restart server so it loads the new JWT public key.
+	srv2, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+	defer srv2.Stop()
+
+	target, _ := localserver.DiscoverTarget(stateDir)
+
+	// Connect using the issued client credentials (not local-client).
+	mat := localserver.LoadPKIMaterial(stateDir)
+	issuedClient, err := bridgeclient.New(
+		bridgeclient.WithTarget(target),
+		bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
+			CABundlePath: mat.CABundlePath,
+			CertPath:     certPath,
+			KeyPath:      keyPath,
+			ServerName:   "server",
+		}),
+		bridgeclient.WithJWT(bridgeclient.JWTConfig{
+			PrivateKeyPath: filepath.Join(clientDir, "jwt-signing.key"),
+			Issuer:         clientName,
+			Audience:       "bridge",
+		}),
+	)
+	require.NoError(t, err)
+	defer func() { _ = issuedClient.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := issuedClient.Health(ctx)
+	require.NoError(t, err, "issued client should authenticate successfully")
+	assert.NotEmpty(t, resp.ServerInstanceId)
+}
+
+// TestClientNameValidation verifies that IssueClientCert rejects invalid
+// names (path traversal, special characters) and accepts valid ones.
+func TestClientNameValidation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// Generate PKI so IssueClientCert has a CA to sign with.
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	// Invalid names should be rejected.
+	invalidNames := []struct {
+		name   string
+		reason string
+	}{
+		{"../escape", "path traversal"},
+		{"foo/bar", "slash in name"},
+		{".hidden", "leading dot"},
+		{"", "empty string"},
+		{"a b c", "spaces"},
+	}
+	for _, tc := range invalidNames {
+		_, _, err := localserver.IssueClientCert(stateDir, tc.name, logger)
+		assert.Error(t, err, "should reject %q (%s)", tc.name, tc.reason)
+	}
+
+	// Valid names should be accepted.
+	validNames := []string{"a", "valid-client_1.0", "laptop2", "dev-machine", "server.local"}
+	for _, name := range validNames {
+		_, _, err := localserver.IssueClientCert(stateDir, name, logger)
+		assert.NoError(t, err, "should accept %q", name)
+	}
 }
 
 // --- Secure mode tests ---
