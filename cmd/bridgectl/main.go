@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,12 @@ across terminal windows.`,
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		if strings.HasPrefix(err.Error(), "unknown command") {
+			fmt.Fprintln(os.Stderr)
+			if usageErr := root.Usage(); usageErr != nil {
+				fmt.Fprintln(os.Stderr, usageErr)
+			}
+		}
 		os.Exit(1)
 	}
 }
