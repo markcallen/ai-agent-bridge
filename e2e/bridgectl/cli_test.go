@@ -1683,6 +1683,112 @@ func TestStepCATier1ClientIssuance(t *testing.T) {
 	require.NoError(t, err, "server-side JWT pub key should be registered")
 }
 
+// --- OIDC client enrollment tests (Section 7 of test plan) ---
+//
+// These tests use the fake `step` CLI binary. Real OIDC enrollment requires
+// an interactive browser login, so these verify the file layout, JWT isolation,
+// and credential structure without a live Step CA + OIDC provider.
+
+// TestOIDCEnrollmentHappyPath verifies that IssueClientCertViaOIDC creates
+// the expected file layout (cert, key, JWT keypair) and registers the
+// server-side JWT public key.
+func TestOIDCEnrollmentHappyPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	fakeStepBin(t)
+	stateDir := testStateDir(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
+	require.NoError(t, os.WriteFile(rootPEM, []byte("fake-root"), 0o644))
+
+	stepCfg := &localserver.StepCAConfig{
+		URL:             "https://ca.example.internal:443",
+		RootPath:        rootPEM,
+		OIDCProviderURL: "https://accounts.google.com",
+	}
+
+	clientName := "human1"
+	certPath, keyPath, err := localserver.IssueClientCertViaOIDC(stateDir, clientName, stepCfg, logger)
+	require.NoError(t, err, "OIDC enrollment should succeed with fake step")
+
+	// Verify expected file layout.
+	clientDir := filepath.Join(stateDir, "certs", "clients", clientName)
+	assert.Equal(t, filepath.Join(clientDir, clientName+".crt"), certPath)
+	assert.Equal(t, filepath.Join(clientDir, clientName+".key"), keyPath)
+
+	// Cert and key files should exist (written by fake step).
+	_, err = os.Stat(certPath)
+	assert.NoError(t, err, "client cert should exist")
+	_, err = os.Stat(keyPath)
+	assert.NoError(t, err, "client key should exist")
+
+	// Per-client JWT keypair should be generated locally.
+	_, err = os.Stat(filepath.Join(clientDir, "jwt-signing.key"))
+	assert.NoError(t, err, "per-client JWT signing key should exist")
+
+	// Server-side JWT public key should be registered.
+	serverPub := filepath.Join(stateDir, "certs", "jwt-clients", clientName+".pub")
+	_, err = os.Stat(serverPub)
+	assert.NoError(t, err, "server-side JWT pub key should be registered")
+}
+
+// TestOIDCPerClientJWTIsolation verifies that two OIDC-enrolled clients get
+// independent JWT keypairs — each client's jwt-signing.key is unique, and each
+// has its own entry in jwt-clients/.
+func TestOIDCPerClientJWTIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	fakeStepBin(t)
+	stateDir := testStateDir(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
+	require.NoError(t, os.WriteFile(rootPEM, []byte("fake-root"), 0o644))
+
+	stepCfg := &localserver.StepCAConfig{
+		URL:             "https://ca.example.internal:443",
+		RootPath:        rootPEM,
+		OIDCProviderURL: "https://accounts.google.com",
+	}
+
+	// Enroll two clients.
+	_, _, err := localserver.IssueClientCertViaOIDC(stateDir, "human1", stepCfg, logger)
+	require.NoError(t, err)
+	_, _, err = localserver.IssueClientCertViaOIDC(stateDir, "human2", stepCfg, logger)
+	require.NoError(t, err)
+
+	// Each client should have its own JWT signing key.
+	key1, err := os.ReadFile(filepath.Join(stateDir, "certs", "clients", "human1", "jwt-signing.key"))
+	require.NoError(t, err)
+	key2, err := os.ReadFile(filepath.Join(stateDir, "certs", "clients", "human2", "jwt-signing.key"))
+	require.NoError(t, err)
+	assert.NotEqual(t, key1, key2, "each client should have a unique JWT signing key")
+
+	// Each client should have its own server-side JWT public key.
+	pub1, err := os.ReadFile(filepath.Join(stateDir, "certs", "jwt-clients", "human1.pub"))
+	require.NoError(t, err)
+	pub2, err := os.ReadFile(filepath.Join(stateDir, "certs", "jwt-clients", "human2.pub"))
+	require.NoError(t, err)
+	assert.NotEqual(t, pub1, pub2, "each client should have a unique JWT public key")
+
+	// Both public keys should be registered.
+	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", "human1.pub"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", "human2.pub"))
+	assert.NoError(t, err)
+}
+
 // --- Secure mode tests ---
 
 // secureClient creates a bridgeclient connected to a secure-mode server

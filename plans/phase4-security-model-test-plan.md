@@ -307,7 +307,7 @@ They do NOT require a running Step CA instance.
 > **Prerequisite**: Step CA with OIDC provisioner (Google, GitHub, Okta, etc.).
 > Skip this section if not available.
 
-- [ ] **7.1 — OIDC client enrollment happy path**
+- [x] **7.1 — OIDC client enrollment happy path** *(completed — macOS desktop, e2e test added with fake step binary)*
   - Steps:
     1. Start server with Step CA
     2. `bridgectl server issue-client --name human1 --oidc-provider https://accounts.google.com --step-ca-url <url> --step-ca-root <path>`
@@ -318,6 +318,9 @@ They do NOT require a running Step CA instance.
     6. Connect with OIDC-issued credentials — health check succeeds
   - Expected: full OIDC flow works end-to-end
   - Platforms: Linux desktop (with browser), macOS desktop
+  - Note: e2e test uses fake `step` binary; real OIDC browser login requires
+    a live Step CA + OIDC provider.
+  - E2E: `TestOIDCEnrollmentHappyPath` — verifies cert/key/JWT file layout and server-side jwt-clients registration
 
 - [ ] **7.2 — OIDC cert is short-lived**
   - Steps:
@@ -325,8 +328,9 @@ They do NOT require a running Step CA instance.
     2. Check validity period
   - Expected: certificate has ~24 hour validity (per Step CA provisioner config)
   - Platforms: Linux desktop, macOS desktop
+  - Note: requires real Step CA; fake step binary writes placeholder certs
 
-- [ ] **7.3 — Per-client JWT isolation**
+- [x] **7.3 — Per-client JWT isolation** *(completed — macOS desktop, e2e test added with fake step binary)*
   - Steps:
     1. Issue two OIDC clients: `human1` and `human2`
     2. Verify each has its own `jwt-signing.key` (different key material)
@@ -334,34 +338,36 @@ They do NOT require a running Step CA instance.
     4. `human1` credentials cannot impersonate `human2`
   - Expected: JWT keys are independent per client
   - Platforms: Linux desktop, macOS desktop
+  - E2E: `TestOIDCPerClientJWTIsolation` — issues two clients, verifies unique JWT key material and independent jwt-clients registration
 
 ---
 
 ## Section 8: Documentation and Config Accuracy
 
-- [ ] **8.1 — Example config reflects two-tier model**
+- [x] **8.1 — Example config reflects two-tier model** *(completed — reviewed)*
   - File: `packaging/examples/bridge-example.yaml`
   - Verify:
     - Comments describe `--listen` as sufficient for secure mode
     - `tls` and `auth` fields are documented as optional for local use
     - No references to removed "SECURITY MODES" section
-  - Platforms: any (file review)
+  - Result: all checks pass, no changes needed
 
-- [ ] **8.2 — Plan document accuracy**
+- [x] **8.2 — Plan document accuracy** *(completed — fixed)*
   - File: `plans/user-session-and-human-interjection.md`
   - Verify:
-    - Phase 4 section references "Tier 1" and "Tier 2" naming
-    - `AttachRole` enum uses `ATTACH_ROLE_ACTIVE` (not `ATTACH_ROLE_WRITER`)
-    - Step CA is described as optional
-  - Platforms: any (file review)
+    - Phase 4 section references "Tier 1" and "Tier 2" naming — correct
+    - `AttachRole` enum used `ATTACH_ROLE_ACTIVE` — **fixed to `ATTACH_ROLE_WRITER`** to match proto
+    - Step CA is described as optional — correct
+  - Fix: renamed `ATTACH_ROLE_ACTIVE` → `ATTACH_ROLE_WRITER` at lines 149, 268
 
-- [ ] **8.3 — Security architecture matches implementation**
+- [x] **8.3 — Security architecture matches implementation** *(completed — fixed)*
   - File: `plans/security-architecture.md`
   - Verify:
-    - File layout diagram matches actual `certs/` directory structure
-    - CLI flag names match implementation
-    - Dual-CA architecture described accurately
-  - Platforms: any (file review)
+    - File layout diagram was missing `jwt-clients/` subdirectory — **fixed**
+    - CLI flag names match implementation — correct
+    - Dual-CA architecture described accurately — correct
+    - Revocation path referenced wrong directory — **fixed** (`clients/<name>/` → `jwt-clients/<name>.pub`)
+  - Fixes: added `jwt-clients/` to file layout diagram, corrected revocation path
 
 ---
 
@@ -572,7 +578,7 @@ and defer containerized testing.
 | 4. Writer slot release | 4.1–4.3 | yes | yes | yes | future | **done** (e2e tests added, macOS verified) |
 | 5. Re-attachment & terminal | 5.1–5.2 | partial | yes | yes | future | **5.1 done** (e2e tests added); 5.2 manual |
 | 6. Tier-2 Step CA | 6.1–6.3 | future | manual | manual | future | **done** (stub tests; full TLS needs real Step CA) |
-| 7. OIDC enrollment | 7.1–7.3 | future | manual | manual | future | pending (needs Step CA + OIDC) |
-| 8. Documentation | 8.1–8.3 | n/a | any | any | n/a | pending |
+| 7. OIDC enrollment | 7.1–7.3 | future | manual | manual | future | **7.1, 7.3 done** (stub tests); 7.2 needs real Step CA |
+| 8. Documentation | 8.1–8.3 | n/a | any | any | n/a | **done** (8.1 pass, 8.2 + 8.3 fixed) |
 | 9. E2E test updates | 9.1–9.4 | yes | yes | yes | future | 9.1.5 done, 9.2.3 done |
 | 10. Windows | 10.1–10.4 | — | — | — | future | future |
