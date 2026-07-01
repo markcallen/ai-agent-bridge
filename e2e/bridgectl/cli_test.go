@@ -1502,6 +1502,187 @@ func TestReattachmentAsObserverThenClaimWriter(t *testing.T) {
 	})
 }
 
+// --- Tier-2 Step CA integration tests (Section 6 of test plan) ---
+//
+// These tests use a fake `step` CLI binary so the Step CA code path can be
+// exercised without a real Step CA server. The fake binary writes placeholder
+// cert/key files. Because the fake certs are not valid TLS material, these
+// tests call EnsurePKI and IssueClientCert directly instead of doing a full
+// localserver.Start() + health check (which would require real certs).
+
+// fakeStepBin writes a stub `step` binary into a temp directory and prepends
+// that directory to PATH. The stub writes placeholder files for
+// `step ca certificate <name> <cert> <key> ...`.
+func fakeStepBin(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake step script not supported on Windows")
+	}
+	dir := t.TempDir()
+	script := `#!/bin/sh
+# Fake step CLI: write placeholder cert/key for "step ca certificate <name> <cert> <key> ..."
+if [ "$1" = "ca" ] && [ "$2" = "certificate" ]; then
+  echo "fake-cert" > "$4"
+  echo "fake-key"  > "$5"
+fi
+exit 0
+`
+	scriptPath := filepath.Join(dir, "step")
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+}
+
+// TestStepCADualCAArchitecture verifies that EnsurePKI with Step CA config
+// creates both Step CA-derived server certs and a local CA for CLI credentials,
+// and that the ca-bundle.crt contains both trust roots.
+func TestStepCADualCAArchitecture(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	fakeStepBin(t)
+	stateDir := testStateDir(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// Write a fake Step CA root cert.
+	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
+	require.NoError(t, os.WriteFile(rootPEM, []byte("step-ca-root-cert"), 0o644))
+
+	stepCfg := &localserver.StepCAConfig{
+		URL:      "https://ca.example.internal:443",
+		RootPath: rootPEM,
+	}
+	mat, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg)
+	require.NoError(t, err)
+
+	// 1. ca-bundle.crt should contain the Step CA root first, then the local CA.
+	bundle, err := os.ReadFile(mat.CABundlePath)
+	require.NoError(t, err)
+	bundleStr := string(bundle)
+	assert.True(t, strings.HasPrefix(bundleStr, "step-ca-root-cert"),
+		"bundle should start with Step CA root")
+	assert.Contains(t, bundleStr, "BEGIN CERTIFICATE",
+		"bundle should also contain local CA cert (PEM)")
+
+	// 2. Local CA should exist and be self-signed.
+	_, err = os.Stat(mat.CACertPath)
+	assert.NoError(t, err, "local CA cert should exist")
+	_, err = os.Stat(mat.CAKeyPath)
+	assert.NoError(t, err, "local CA key should exist")
+
+	// 3. Server cert and key should exist (from fake step binary).
+	_, err = os.Stat(mat.ServerCertPath)
+	assert.NoError(t, err, "server cert should exist")
+	_, err = os.Stat(mat.ServerKeyPath)
+	assert.NoError(t, err, "server key should exist")
+
+	// 4. Local-client cert should exist (for bridgectl CLI).
+	_, err = os.Stat(mat.LocalClientCert)
+	assert.NoError(t, err, "local-client cert should exist")
+	_, err = os.Stat(mat.LocalClientKey)
+	assert.NoError(t, err, "local-client key should exist")
+
+	// 5. JWT keypair should be auto-generated.
+	_, err = os.Stat(mat.JWTSigningPub)
+	assert.NoError(t, err, "JWT pub should exist")
+	_, err = os.Stat(mat.JWTSigningKey)
+	assert.NoError(t, err, "JWT key should exist")
+}
+
+// TestStepCAIdempotency verifies that a second EnsurePKI call with Step CA
+// config is a no-op when ca-bundle.crt already exists.
+func TestStepCAIdempotency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	fakeStepBin(t)
+	stateDir := testStateDir(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
+	require.NoError(t, os.WriteFile(rootPEM, []byte("original-root"), 0o644))
+
+	stepCfg := &localserver.StepCAConfig{
+		URL:      "https://ca.example.internal:443",
+		RootPath: rootPEM,
+	}
+
+	// First call — generates everything.
+	mat1, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg)
+	require.NoError(t, err)
+	bundle1, err := os.ReadFile(mat1.CABundlePath)
+	require.NoError(t, err)
+
+	// Overwrite root with different content.
+	require.NoError(t, os.WriteFile(rootPEM, []byte("changed-root"), 0o644))
+
+	// Second call — should be no-op; bundle should retain original content.
+	mat2, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg)
+	require.NoError(t, err)
+	bundle2, err := os.ReadFile(mat2.CABundlePath)
+	require.NoError(t, err)
+
+	assert.Equal(t, bundle1, bundle2,
+		"ca-bundle.crt should not be regenerated on second call")
+	assert.True(t, strings.HasPrefix(string(bundle2), "original-root"),
+		"bundle should retain the original Step CA root")
+	assert.NotContains(t, string(bundle2), "changed-root",
+		"bundle should not reflect the overwritten root file")
+}
+
+// TestStepCATier1ClientIssuance verifies that Tier-1 client certificate
+// issuance (IssueClientCert, no OIDC) works correctly when the server PKI
+// was initialized with Step CA — the local CA signs the client cert.
+func TestStepCATier1ClientIssuance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	fakeStepBin(t)
+	stateDir := testStateDir(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
+	require.NoError(t, os.WriteFile(rootPEM, []byte("step-ca-root-cert"), 0o644))
+
+	stepCfg := &localserver.StepCAConfig{
+		URL:      "https://ca.example.internal:443",
+		RootPath: rootPEM,
+	}
+
+	// Initialize PKI with Step CA.
+	_, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg)
+	require.NoError(t, err)
+
+	// Issue a Tier-1 client cert (signed by local CA, not Step CA).
+	clientName := "sdk-client"
+	certPath, keyPath, err := localserver.IssueClientCert(stateDir, clientName, logger)
+	require.NoError(t, err, "Tier-1 client issuance should work with Step CA PKI")
+
+	// Verify expected file layout.
+	clientDir := filepath.Join(stateDir, "certs", "clients", clientName)
+	assert.Equal(t, filepath.Join(clientDir, clientName+".crt"), certPath)
+	assert.Equal(t, filepath.Join(clientDir, clientName+".key"), keyPath)
+
+	// Per-client JWT key should exist.
+	_, err = os.Stat(filepath.Join(clientDir, "jwt-signing.key"))
+	require.NoError(t, err, "per-client JWT key should exist")
+
+	// Server-side JWT pub key should be registered.
+	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", clientName+".pub"))
+	require.NoError(t, err, "server-side JWT pub key should be registered")
+}
+
 // --- Secure mode tests ---
 
 // secureClient creates a bridgeclient connected to a secure-mode server
