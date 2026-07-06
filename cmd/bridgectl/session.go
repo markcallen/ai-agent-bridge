@@ -257,11 +257,10 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool) er
 							return
 						}
 					}
-					data := normalizeTTYInput(buf[:n])
 					_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
 						SessionId: sessionID,
 						ClientId:  stream.ClientID(),
-						Data:      data,
+						Data:      buf[:n],
 					})
 				}
 				if readErr != nil {
