@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -63,6 +64,10 @@ func newSessionListCmd() *cobra.Command {
 				fmt.Println("No active sessions.")
 				return nil
 			}
+
+			sort.Slice(resp.Sessions, func(i, j int) bool {
+				return resp.Sessions[i].CreatedAt.AsTime().Before(resp.Sessions[j].CreatedAt.AsTime())
+			})
 
 			fmt.Printf("%-36s  %-10s  %-10s  %s\n", "SESSION ID", "PROVIDER", "STATUS", "CREATED")
 			for _, s := range resp.Sessions {
@@ -172,7 +177,7 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool) er
 		restore = func() {}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	clientID := uuid.NewString()
