@@ -57,6 +57,9 @@ func (f *fakeRPCClient) ClaimWriter(context.Context, *bridgev1.ClaimWriterReques
 func (f *fakeRPCClient) ReleaseWriter(context.Context, *bridgev1.ReleaseWriterRequest, ...grpc.CallOption) (*bridgev1.ReleaseWriterResponse, error) {
 	return nil, f.err
 }
+func (f *fakeRPCClient) RegisterJWTKey(context.Context, *bridgev1.RegisterJWTKeyRequest, ...grpc.CallOption) (*bridgev1.RegisterJWTKeyResponse, error) {
+	return nil, f.err
+}
 
 func TestClientSessionMethods(t *testing.T) {
 	c := &Client{

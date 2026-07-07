@@ -1,0 +1,81 @@
+services:
+  # Step CA initialization — runs once to bootstrap the CA, then exits.
+  #
+  # CA_DNS controls the SANs on the Step CA server certificate. To make
+  # the CA reachable from remote machines (e.g. over Tailscale), set
+  # STEP_CA_SANS to include the host's network hostname or IP:
+  #
+  #   STEP_CA_SANS=macbook.tail1234.ts.net make up-step-ca
+  #
+  step-ca-init:
+    image: smallstep/step-ca:latest
+    entrypoint: ["/bin/sh", "/scripts/init.sh"]
+    environment:
+      CA_NAME: "AI Agent Bridge Dev CA"
+      CA_DNS: "step-ca.local,localhost,${STEP_CA_SANS:-}"
+      CA_ADDRESS: ":9443"
+      PROVISIONER_PASSWORD: "${STEP_CA_PASSWORD:-step-ca-dev-password}"
+    volumes:
+      - step-ca-data:/home/step
+      - ./init.sh:/scripts/init.sh:ro
+
+  # Step CA server — long-running CA that issues certificates.
+  step-ca:
+    image: smallstep/step-ca:latest
+    volumes:
+      - step-ca-data:/home/step
+    ports:
+      - "${STEP_CA_BIND:-0.0.0.0}:9443:9443"
+    depends_on:
+      step-ca-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "step", "ca", "health", "--ca-url", "https://localhost:9443", "--root", "/home/step/certs/root_ca.crt"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      default:
+        aliases:
+          - step-ca.local
+
+  # Bridge server configured to use Step CA for PKI.
+  bridge:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      BRIDGE_CONFIG: /app/config/bridge-docker-stepca.yaml
+      BRIDGE_CN: "${BRIDGE_CN:-bridge.local}"
+      BRIDGE_SANS: "${BRIDGE_SANS:-bridge.local,localhost,127.0.0.1}"
+      BRIDGE_CLIENT_CN: dev-client
+      STEP_CA_URL: "https://step-ca.local:9443"
+      STEP_CA_ROOT: "/step-ca/shared/root_ca.crt"
+      STEP_CA_PROVISIONER_PASSWORD: "${STEP_CA_PASSWORD:-step-ca-dev-password}"
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "${BRIDGE_BIND:-0.0.0.0}:9445:9445"
+    volumes:
+      - ./certs:/app/certs
+      - ../config/bridge-docker-stepca.yaml:/app/config/bridge-docker-stepca.yaml:ro
+      - step-ca-data:/step-ca:ro
+      - ${HOME}/repos:/repos
+    depends_on:
+      step-ca:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 30s
+    networks:
+      default:
+        aliases:
+          - bridge.local
+
+volumes:
+  step-ca-data:

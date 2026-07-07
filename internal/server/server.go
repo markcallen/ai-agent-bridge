@@ -35,6 +35,11 @@ type BridgeServer struct {
 	serverInstanceID string
 	// providerFallbacks maps each provider ID to its ordered fallback list.
 	providerFallbacks map[string][]string
+	// jwtVerifier is the live JWT verifier for hot-adding keys via
+	// RegisterJWTKey. Nil in local (passthrough auth) mode.
+	jwtVerifier *auth.JWTVerifier
+	// certsDir is the certs directory for persisting enrolled JWT public keys.
+	certsDir string
 }
 
 type RateLimitConfig struct {
@@ -46,7 +51,7 @@ type RateLimitConfig struct {
 	SendInputPerSessionBurst   int
 }
 
-func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger, rl RateLimitConfig, serverInstanceID string, providerFallbacks map[string][]string) *BridgeServer {
+func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.Logger, rl RateLimitConfig, serverInstanceID string, providerFallbacks map[string][]string, jwtVerifier *auth.JWTVerifier, certsDir string) *BridgeServer {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -59,6 +64,8 @@ func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.
 		writeRL:           newKeyedLimiter(rl.SendInputPerSessionRPS, rl.SendInputPerSessionBurst),
 		serverInstanceID:  serverInstanceID,
 		providerFallbacks: providerFallbacks,
+		jwtVerifier:       jwtVerifier,
+		certsDir:          certsDir,
 	}
 }
 

@@ -28,6 +28,11 @@ type StepCAConfig struct {
 	// provisioner (e.g. "https://accounts.google.com"). Used by
 	// IssueClientCertViaOIDC to select the correct provisioner.
 	OIDCProviderURL string
+	// ProvisionerPasswordFile is the path to a file containing the JWK
+	// provisioner password. When set, it is passed as
+	// --provisioner-password-file to `step ca certificate` so the command
+	// can run non-interactively (e.g. in Docker containers without a TTY).
+	ProvisionerPasswordFile string
 }
 
 // PKIMaterial holds resolved paths to all PKI files needed for secure mode.
@@ -197,6 +202,9 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	}
 	for _, san := range sans[1:] {
 		stepArgs = append(stepArgs, "--san", san)
+	}
+	if stepCA.ProvisionerPasswordFile != "" {
+		stepArgs = append(stepArgs, "--provisioner-password-file", stepCA.ProvisionerPasswordFile)
 	}
 	if err := runStep(stepArgs, logger); err != nil {
 		return nil, fmt.Errorf("obtain server cert from Step CA: %w", err)

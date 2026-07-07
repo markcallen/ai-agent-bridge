@@ -182,6 +182,10 @@ type Config struct {
 	// StepCAOIDCProvider is the OIDC issuer URL configured as a Step CA
 	// provisioner. Used by `bridgectl server issue-client --oidc-provider`.
 	StepCAOIDCProvider string
+	// StepCAProvisionerPasswordFile is the path to a file containing the
+	// JWK provisioner password. When set, `step ca certificate` runs
+	// non-interactively (required in Docker/headless environments).
+	StepCAProvisionerPasswordFile string
 }
 
 // Start launches a local bridge gRPC server. In local mode (default) it
@@ -412,6 +416,7 @@ func Start(cfg Config) (*Server, error) {
 	// Determine server mode and build gRPC options accordingly.
 	mode := ModeLocal
 	var grpcOpts []grpc.ServerOption
+	var jwtVerifier *auth.JWTVerifier
 
 	if cfg.ListenAddr != "" {
 		// Secure mode: TCP + mTLS + JWT.
@@ -448,9 +453,10 @@ func Start(cfg Config) (*Server, error) {
 			var stepCA *StepCAConfig
 			if cfg.StepCAURL != "" {
 				stepCA = &StepCAConfig{
-					URL:             cfg.StepCAURL,
-					RootPath:        cfg.StepCARootPath,
-					OIDCProviderURL: cfg.StepCAOIDCProvider,
+					URL:                     cfg.StepCAURL,
+					RootPath:                cfg.StepCARootPath,
+					OIDCProviderURL:         cfg.StepCAOIDCProvider,
+					ProvisionerPasswordFile: cfg.StepCAProvisionerPasswordFile,
 				}
 			}
 			var pkiErr error
@@ -464,7 +470,7 @@ func Start(cfg Config) (*Server, error) {
 			}
 		}
 
-		secureOpts, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys)
+		secureOpts, verifier, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys)
 		if err != nil {
 			sup.Close()
 			if store != nil {
@@ -473,6 +479,7 @@ func Start(cfg Config) (*Server, error) {
 			return nil, fmt.Errorf("build secure gRPC options: %w", err)
 		}
 		grpcOpts = secureOpts
+		jwtVerifier = verifier
 	} else {
 		// Local mode: unix socket, anonymous passthrough auth.
 		grpcOpts = []grpc.ServerOption{
@@ -485,7 +492,7 @@ func Start(cfg Config) (*Server, error) {
 
 	providerFallbacks := cfg.ProviderFallbacks
 
-	bridgeServer := server.New(sup, registry, logger, cfg.RateLimits, instanceID, providerFallbacks)
+	bridgeServer := server.New(sup, registry, logger, cfg.RateLimits, instanceID, providerFallbacks, jwtVerifier, CertsDir(stateDir))
 	bridgev1.RegisterBridgeServiceServer(grpcServer, bridgeServer)
 
 	// Listen: TCP for secure mode, unix socket for local mode.
@@ -555,7 +562,7 @@ func Start(cfg Config) (*Server, error) {
 // buildSecureGRPCOpts returns gRPC server options for mTLS + JWT mode.
 // extraKeys maps issuer name to public key file path for JWT verification
 // when using pre-issued certificates instead of auto-PKI.
-func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string) ([]grpc.ServerOption, error) {
+func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string) ([]grpc.ServerOption, *auth.JWTVerifier, error) {
 	// TLS credentials with client cert verification.
 	tlsCfg, err := auth.ServerTLSConfig(auth.TLSConfig{
 		CABundlePath: mat.CABundlePath,
@@ -563,7 +570,7 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 		KeyPath:      mat.ServerKeyPath,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("server TLS config: %w", err)
+		return nil, nil, fmt.Errorf("server TLS config: %w", err)
 	}
 
 	// JWT verifier: load the local key plus any per-client keys.
@@ -574,7 +581,7 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 		for issuer, keyPath := range extraKeys {
 			pub, keyErr := pki.LoadEd25519PublicKey(keyPath)
 			if keyErr != nil {
-				return nil, fmt.Errorf("load JWT public key for issuer %q: %w", issuer, keyErr)
+				return nil, nil, fmt.Errorf("load JWT public key for issuer %q: %w", issuer, keyErr)
 			}
 			keys[issuer] = pub
 		}
@@ -582,7 +589,7 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 		// Auto-PKI mode: load the locally generated key as the "local" verifier.
 		localPub, keyErr := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
 		if keyErr != nil {
-			return nil, fmt.Errorf("load JWT public key: %w", keyErr)
+			return nil, nil, fmt.Errorf("load JWT public key: %w", keyErr)
 		}
 		keys["local"] = localPub
 	}
@@ -620,7 +627,7 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 			auth.StreamJWTInterceptor(verifier, logger),
 			auth.StreamAuditInterceptor(logger),
 		),
-	}, nil
+	}, verifier, nil
 }
 
 // buildServerSANs extracts the host from listenAddr and merges it with

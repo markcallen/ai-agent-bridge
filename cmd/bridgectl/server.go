@@ -34,15 +34,16 @@ func newServerCmd() *cobra.Command {
 
 func newServerStartCmd() *cobra.Command {
 	var (
-		listenAddr     string
-		serverSANs     []string
-		configPath     string
-		dbPath         string
-		globalRPS      float64
-		logLevel       string
-		logFormat      string
-		stepCAURL      string
-		stepCARootPath string
+		listenAddr                    string
+		serverSANs                    []string
+		configPath                    string
+		dbPath                        string
+		globalRPS                     float64
+		logLevel                      string
+		logFormat                     string
+		stepCAURL                     string
+		stepCARootPath                string
+		stepCAProvisionerPasswordFile string
 	)
 
 	cmd := &cobra.Command{
@@ -88,13 +89,14 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 			}
 
 			cfg := localserver.Config{
-				ListenAddr:     listenAddr,
-				ServerSANs:     serverSANs,
-				ConfigPath:     configPath,
-				DBPath:         dbPath,
-				Logger:         logger,
-				StepCAURL:      stepCAURL,
-				StepCARootPath: stepCARootPath,
+				ListenAddr:                    listenAddr,
+				ServerSANs:                    serverSANs,
+				ConfigPath:                    configPath,
+				DBPath:                        dbPath,
+				Logger:                        logger,
+				StepCAURL:                     stepCAURL,
+				StepCARootPath:                stepCARootPath,
+				StepCAProvisionerPasswordFile: stepCAProvisionerPasswordFile,
 			}
 			if globalRPS > 0 {
 				cfg.RateLimits.GlobalRPS = globalRPS
@@ -130,6 +132,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 	cmd.Flags().StringVar(&logFormat, "log-format", "text", "log format: text or json")
 	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA URL for Tier-2 PKI (e.g. https://step-ca.internal:443); requires --step-ca-root")
 	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to the Step CA root certificate (required with --step-ca-url)")
+	cmd.Flags().StringVar(&stepCAProvisionerPasswordFile, "step-ca-provisioner-password-file", "", "path to provisioner password file for non-interactive Step CA cert requests")
 
 	return cmd
 }
@@ -241,6 +244,8 @@ func newServerIssueClientCmd() *cobra.Command {
 		oidcProvider   string
 		stepCAURL      string
 		stepCARootPath string
+		bundleCreds    bool
+		deployTarget   string
 	)
 
 	cmd := &cobra.Command{
@@ -255,7 +260,8 @@ revoked independently. The remote machine needs these files:
   3. Client key      (<name>.key)      — private key for the cert
   4. JWT signing key (jwt-signing.key) — per-client key to mint tokens
 
-Copy these files to the remote machine and use them with the Go SDK.
+Use --bundle to create a .tar.gz of these files for easy transfer.
+Use --deploy <host:path> to scp the bundle to a remote machine directly.
 
 Tier 1 (default): The certificate is signed by the local auto-generated CA.
 Run 'bridgectl server start --listen' first to generate PKI.
@@ -296,11 +302,34 @@ for interactive authentication. The 'step' CLI must be on PATH.`,
 
 			fmt.Println("Client credentials issued successfully.")
 			fmt.Println()
-			fmt.Println("Copy these files to the remote machine:")
-			fmt.Printf("  CA bundle:       %s\n", mat.CABundlePath)
-			fmt.Printf("  Client cert:     %s\n", certPath)
-			fmt.Printf("  Client key:      %s\n", keyPath)
-			fmt.Printf("  JWT signing key: %s\n", clientJWTKey)
+			fmt.Println("  CA bundle:       " + mat.CABundlePath)
+			fmt.Println("  Client cert:     " + certPath)
+			fmt.Println("  Client key:      " + keyPath)
+			fmt.Println("  JWT signing key: " + clientJWTKey)
+
+			// --deploy implies --bundle.
+			if deployTarget != "" {
+				bundleCreds = true
+			}
+
+			if bundleCreds {
+				bundlePath := filepath.Join(clientDir, clientName+"-creds.tar.gz")
+				if err := localserver.BundleClientCreds(bundlePath, stateDir, clientName); err != nil {
+					return fmt.Errorf("bundle credentials: %w", err)
+				}
+				fmt.Println()
+				fmt.Println("  Credential bundle: " + bundlePath)
+
+				if deployTarget != "" {
+					fmt.Println()
+					fmt.Printf("Deploying to %s...\n", deployTarget)
+					if err := localserver.DeployBundle(bundlePath, deployTarget, logger); err != nil {
+						return fmt.Errorf("deploy credentials: %w", err)
+					}
+					fmt.Printf("Credentials deployed to %s\n", deployTarget)
+				}
+			}
+
 			fmt.Println()
 			fmt.Println("The server will accept tokens from this client on next restart.")
 			fmt.Println("If the server is already running, restart it to load the new key.")
@@ -331,6 +360,8 @@ for interactive authentication. The 'step' CLI must be on PATH.`,
 	cmd.Flags().StringVar(&oidcProvider, "oidc-provider", "", "OIDC issuer URL for Step CA enrollment (e.g. https://accounts.google.com); enables Tier-2 flow")
 	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA server URL (required with --oidc-provider)")
 	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to Step CA root certificate (required with --oidc-provider)")
+	cmd.Flags().BoolVar(&bundleCreds, "bundle", false, "create a .tar.gz bundle of client credentials for easy transfer")
+	cmd.Flags().StringVar(&deployTarget, "deploy", "", "scp credential bundle to a remote host (e.g. do-dev2:~/bridge-creds/); implies --bundle")
 
 	return cmd
 }

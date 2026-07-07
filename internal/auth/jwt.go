@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	jwt "github.com/golang-jwt/jwt/v5"
@@ -41,11 +42,14 @@ func (j *JWTIssuer) Mint(sub, projectID string) (string, error) {
 }
 
 // JWTVerifier verifies Ed25519-signed JWTs from multiple issuers.
+// After initialization, use AddKey to register new issuers at runtime.
 type JWTVerifier struct {
 	Audience string
 	MaxTTL   time.Duration
 	// Keys maps issuer name to their Ed25519 public key.
 	Keys map[string]ed25519.PublicKey
+
+	mu sync.RWMutex
 }
 
 // Verify parses and validates a JWT token string.
@@ -55,6 +59,7 @@ func (v *JWTVerifier) Verify(tokenString string) (*BridgeClaims, error) {
 		jwt.WithAudience(v.Audience),
 	)
 
+	v.mu.RLock()
 	claims := &BridgeClaims{}
 	_, err := parser.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		issuer, err := claims.GetIssuer()
@@ -67,6 +72,7 @@ func (v *JWTVerifier) Verify(tokenString string) (*BridgeClaims, error) {
 		}
 		return key, nil
 	})
+	v.mu.RUnlock()
 	if err != nil {
 		return nil, fmt.Errorf("verify jwt: %w", err)
 	}
@@ -87,4 +93,20 @@ func (v *JWTVerifier) Verify(tokenString string) (*BridgeClaims, error) {
 	}
 
 	return claims, nil
+}
+
+// AddKey registers a new issuer's Ed25519 public key at runtime.
+// If the issuer already exists, the key is replaced.
+func (v *JWTVerifier) AddKey(issuer string, pubKey ed25519.PublicKey) {
+	v.mu.Lock()
+	v.Keys[issuer] = pubKey
+	v.mu.Unlock()
+}
+
+// HasKey returns true if the given issuer has a registered public key.
+func (v *JWTVerifier) HasKey(issuer string) bool {
+	v.mu.RLock()
+	_, ok := v.Keys[issuer]
+	v.mu.RUnlock()
+	return ok
 }

@@ -7,6 +7,9 @@ BRIDGE_CONFIG="${BRIDGE_CONFIG:-/app/config/bridge.yaml}"
 BRIDGE_CN="${BRIDGE_CN:-bridge}"
 BRIDGE_SANS="${BRIDGE_SANS:-bridge,localhost,127.0.0.1}"
 BRIDGE_CLIENT_CN="${BRIDGE_CLIENT_CN:-client}"
+STEP_CA_URL="${STEP_CA_URL:-}"
+STEP_CA_ROOT="${STEP_CA_ROOT:-}"
+STEP_CA_PROVISIONER_PASSWORD="${STEP_CA_PROVISIONER_PASSWORD:-}"
 
 # Running as root — prepare directories the bridge user needs.
 mkdir -p "$CERT_DIR" "$RUNTIME_CERT_DIR"
@@ -26,34 +29,92 @@ for _vol in /repos /workspace; do
   fi
 done
 
-if [ ! -f "$CERT_DIR/ca.crt" ]; then
-  echo "==> Initializing CA..."
-  ai-agent-bridge-ca init --name ai-agent-bridge-ca --out "$CERT_DIR"
+if [ -n "$STEP_CA_URL" ] && [ -n "$STEP_CA_ROOT" ]; then
+  # Step CA mode: bridgectl handles PKI via EnsurePKI(stepCA).
+  # We only need to bootstrap the step CLI with the CA root and provisioner
+  # password so that `step ca certificate` works non-interactively.
+  echo "==> Step CA mode enabled: ${STEP_CA_URL}"
 
-  echo "==> Issuing server certificate..."
-  ai-agent-bridge-ca issue --type server --cn "$BRIDGE_CN" \
-    --san "$BRIDGE_SANS" \
-    --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
-    --out "$CERT_DIR"
+  # Wait for the Step CA root cert to be available (shared volume).
+  for i in $(seq 1 30); do
+    if [ -f "$STEP_CA_ROOT" ]; then
+      break
+    fi
+    echo "    Waiting for Step CA root cert at ${STEP_CA_ROOT}..."
+    sleep 1
+  done
+  if [ ! -f "$STEP_CA_ROOT" ]; then
+    echo "ERROR: Step CA root cert not found at ${STEP_CA_ROOT} after 30s"
+    exit 1
+  fi
 
-  echo "==> Issuing client certificate..."
-  ai-agent-bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
-    --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
-    --out "$CERT_DIR"
+  # Bootstrap the step CLI so it trusts the Step CA instance.
+  su -m -s /bin/bash bridge -c "
+    export HOME=/home/bridge
+    step ca bootstrap --ca-url '${STEP_CA_URL}' --fingerprint \$(step certificate fingerprint '${STEP_CA_ROOT}') --force 2>/dev/null || true
+  "
 
-  echo "==> Generating JWT signing keypair..."
-  ai-agent-bridge-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
+  # Write provisioner password for non-interactive cert requests.
+  if [ -n "$STEP_CA_PROVISIONER_PASSWORD" ]; then
+    STEP_PASS_FILE="/run/bridge-certs/step-provisioner-password"
+    mkdir -p "$(dirname "$STEP_PASS_FILE")"
+    echo "$STEP_CA_PROVISIONER_PASSWORD" > "$STEP_PASS_FILE"
+    chown bridge:bridge "$STEP_PASS_FILE"
+    chmod 600 "$STEP_PASS_FILE"
+  fi
 
-  echo "==> Building trust bundle..."
-  ai-agent-bridge-ca bundle --out "$CERT_DIR/ca-bundle.crt" "$CERT_DIR/ca.crt"
+  # Create a minimal dev-client cert using the Tier-1 path so the entrypoint
+  # can produce a client cert for immediate use. The server cert is handled by
+  # bridgectl server start --step-ca-url.
+  if [ ! -f "$CERT_DIR/ca.crt" ]; then
+    echo "==> Generating local CA for dev-client credentials..."
+    ai-agent-bridge-ca init --name ai-agent-bridge-ca --out "$CERT_DIR"
 
-  chmod 644 "$CERT_DIR"/*
+    echo "==> Issuing dev-client certificate..."
+    ai-agent-bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
+      --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
+      --out "$CERT_DIR"
+
+    echo "==> Generating JWT signing keypair..."
+    ai-agent-bridge-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
+
+    chmod 644 "$CERT_DIR"/*
+  fi
+else
+  # Tier-1 auto-PKI: generate everything locally.
+  if [ ! -f "$CERT_DIR/ca.crt" ]; then
+    echo "==> Initializing CA..."
+    ai-agent-bridge-ca init --name ai-agent-bridge-ca --out "$CERT_DIR"
+
+    echo "==> Issuing server certificate..."
+    ai-agent-bridge-ca issue --type server --cn "$BRIDGE_CN" \
+      --san "$BRIDGE_SANS" \
+      --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
+      --out "$CERT_DIR"
+
+    echo "==> Issuing client certificate..."
+    ai-agent-bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
+      --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
+      --out "$CERT_DIR"
+
+    echo "==> Generating JWT signing keypair..."
+    ai-agent-bridge-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
+
+    echo "==> Building trust bundle..."
+    ai-agent-bridge-ca bundle --out "$CERT_DIR/ca-bundle.crt" "$CERT_DIR/ca.crt"
+
+    chmod 644 "$CERT_DIR"/*
+  fi
 fi
 
-cp -f "$CERT_DIR"/* "$RUNTIME_CERT_DIR"/
+# Copy certs to runtime directory with proper permissions.
+mkdir -p "$RUNTIME_CERT_DIR"
+cp -f "$CERT_DIR"/* "$RUNTIME_CERT_DIR"/ 2>/dev/null || true
 chown -R bridge:bridge "$RUNTIME_CERT_DIR"
-chmod 644 "$RUNTIME_CERT_DIR"/*.crt "$RUNTIME_CERT_DIR"/*.pub
-chmod 600 "$RUNTIME_CERT_DIR"/*.key
+# Set permissions on files that exist (Step CA mode may not have all files yet).
+find "$RUNTIME_CERT_DIR" -name '*.crt' -exec chmod 644 {} + 2>/dev/null || true
+find "$RUNTIME_CERT_DIR" -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true
+find "$RUNTIME_CERT_DIR" -name '*.key' -exec chmod 600 {} + 2>/dev/null || true
 
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   echo "==> Verifying Claude API-key auth..."
@@ -218,4 +279,14 @@ fs.writeFileSync(configPath, configToml);
 EOF'
 
 echo "==> Starting bridge as non-root user..."
-exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec bridgectl server start --config $BRIDGE_CONFIG"
+BRIDGE_CMD="bridgectl server start --config $BRIDGE_CONFIG"
+if [ -n "$STEP_CA_URL" ] && [ -n "$STEP_CA_ROOT" ]; then
+  BRIDGE_CMD="$BRIDGE_CMD --step-ca-url $STEP_CA_URL --step-ca-root $STEP_CA_ROOT"
+  # Pass the provisioner password file so `step ca certificate` runs
+  # non-interactively (Docker containers have no TTY for interactive prompts).
+  STEP_PASS_FILE="/run/bridge-certs/step-provisioner-password"
+  if [ -f "$STEP_PASS_FILE" ]; then
+    BRIDGE_CMD="$BRIDGE_CMD --step-ca-provisioner-password-file $STEP_PASS_FILE"
+  fi
+fi
+exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec $BRIDGE_CMD"

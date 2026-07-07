@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/localserver"
+	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1991,4 +1993,237 @@ func TestSecureModeCleanup(t *testing.T) {
 	// Mode file should be cleaned up.
 	_, err = os.Stat(filepath.Join(stateDir, "server.mode"))
 	assert.True(t, os.IsNotExist(err), "mode file should be removed after stop")
+}
+
+// --- RegisterJWTKey enrollment tests (Section 8 of test plan) ---
+
+// TestRegisterJWTKeyEnrollment verifies the full enrollment flow:
+// 1. Start a secure server (auto-PKI)
+// 2. Connect with mTLS only (no JWT) using the local-client cert
+// 3. Generate a JWT keypair and call RegisterJWTKey
+// 4. Reconnect with mTLS + JWT using the newly registered key
+// 5. Verify an authenticated RPC succeeds
+func TestRegisterJWTKeyEnrollment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err, "secure server should start")
+	defer srv.Stop()
+
+	target, _ := localserver.DiscoverTarget(stateDir)
+	mat := localserver.LoadPKIMaterial(stateDir)
+
+	// Step 1: Connect with mTLS only — no JWT. This simulates a client
+	// that got its cert from Step CA but hasn't enrolled yet.
+	mtlsOnlyClient, err := bridgeclient.New(
+		bridgeclient.WithTarget(target),
+		bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
+			CABundlePath: mat.CABundlePath,
+			CertPath:     mat.LocalClientCert,
+			KeyPath:      mat.LocalClientKey,
+			ServerName:   "server",
+		}),
+		bridgeclient.WithTimeout(5*time.Second),
+	)
+	require.NoError(t, err)
+	defer func() { _ = mtlsOnlyClient.Close() }()
+
+	// Step 2: Generate a JWT keypair locally (like `client enroll` would).
+	keyDir := t.TempDir()
+	pubPath, privPath, err := pki.GenerateJWTKeypair(keyDir, "jwt-signing")
+	require.NoError(t, err)
+
+	pubKey, err := pki.LoadEd25519PublicKey(pubPath)
+	require.NoError(t, err)
+	pubDER, err := x509.MarshalPKIXPublicKey(pubKey)
+	require.NoError(t, err)
+
+	// Step 3: Call RegisterJWTKey — should succeed with mTLS only.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := mtlsOnlyClient.RegisterJWTKey(ctx, &bridgev1.RegisterJWTKeyRequest{
+		PublicKey: pubDER,
+		Issuer:    "enrolled-client",
+	})
+	require.NoError(t, err, "RegisterJWTKey should succeed with mTLS-only auth")
+	assert.Equal(t, "enrolled-client", resp.Issuer)
+
+	// Verify the key was persisted to disk.
+	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", "enrolled-client.pub"))
+	require.NoError(t, err, "JWT public key should be persisted to disk")
+
+	// Step 4: Connect with mTLS + JWT using the newly registered key.
+	// No server restart needed — the key was hot-added.
+	enrolledClient, err := bridgeclient.New(
+		bridgeclient.WithTarget(target),
+		bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
+			CABundlePath: mat.CABundlePath,
+			CertPath:     mat.LocalClientCert,
+			KeyPath:      mat.LocalClientKey,
+			ServerName:   "server",
+		}),
+		bridgeclient.WithJWT(bridgeclient.JWTConfig{
+			PrivateKeyPath: privPath,
+			Issuer:         "enrolled-client",
+			Audience:       "bridge",
+		}),
+		bridgeclient.WithTimeout(5*time.Second),
+	)
+	require.NoError(t, err)
+	defer func() { _ = enrolledClient.Close() }()
+
+	// Step 5: Verify an authenticated RPC works with the enrolled key.
+	enrolledClient.SetProject("test")
+	healthResp, err := enrolledClient.Health(ctx)
+	require.NoError(t, err, "Health should succeed with enrolled JWT credentials")
+	assert.NotEmpty(t, healthResp.ServerInstanceId)
+
+	// Also verify a JWT-protected RPC (ListSessions) works.
+	_, err = enrolledClient.ListSessions(ctx, &bridgev1.ListSessionsRequest{
+		ProjectId: "test",
+	})
+	require.NoError(t, err, "ListSessions should succeed with enrolled JWT credentials")
+}
+
+// TestRegisterJWTKeyInsecureClientRejected verifies that an insecure client
+// (no mTLS) cannot call RegisterJWTKey on a secure server.
+func TestRegisterJWTKeyInsecureClientRejected(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	target, _ := localserver.DiscoverTarget(stateDir)
+
+	// Try connecting without TLS — should fail at the transport level.
+	insecureClient, err := bridgeclient.New(
+		bridgeclient.WithTarget(target),
+		bridgeclient.WithTimeout(3*time.Second),
+	)
+	require.NoError(t, err, "dial should succeed (lazy connection)")
+	defer func() { _ = insecureClient.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err = insecureClient.RegisterJWTKey(ctx, &bridgev1.RegisterJWTKeyRequest{
+		PublicKey: []byte("fake"),
+		Issuer:    "attacker",
+	})
+	assert.Error(t, err, "insecure client should not be able to call RegisterJWTKey")
+}
+
+// TestRegisterJWTKeySurvivesRestart verifies that a key registered via
+// RegisterJWTKey persists across server restarts.
+func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("secure mode not supported on Windows")
+	}
+
+	stateDir := testStateDir(t)
+
+	// Start server, enroll a key, then stop.
+	srv1, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+
+	target1, _ := localserver.DiscoverTarget(stateDir)
+	mat := localserver.LoadPKIMaterial(stateDir)
+
+	// Generate and register a key.
+	keyDir := t.TempDir()
+	pubPath, privPath, err := pki.GenerateJWTKeypair(keyDir, "jwt-signing")
+	require.NoError(t, err)
+
+	pubKey, err := pki.LoadEd25519PublicKey(pubPath)
+	require.NoError(t, err)
+	pubDER, err := x509.MarshalPKIXPublicKey(pubKey)
+	require.NoError(t, err)
+
+	mtlsClient, err := bridgeclient.New(
+		bridgeclient.WithTarget(target1),
+		bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
+			CABundlePath: mat.CABundlePath,
+			CertPath:     mat.LocalClientCert,
+			KeyPath:      mat.LocalClientKey,
+			ServerName:   "server",
+		}),
+		bridgeclient.WithTimeout(5*time.Second),
+	)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	_, err = mtlsClient.RegisterJWTKey(ctx, &bridgev1.RegisterJWTKeyRequest{
+		PublicKey: pubDER,
+		Issuer:    "persist-test",
+	})
+	require.NoError(t, err)
+	_ = mtlsClient.Close()
+
+	// Stop the server.
+	srv1.Stop()
+
+	// Restart — the key should be loaded from disk.
+	srv2, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+		ServerSANs: []string{"127.0.0.1"},
+	})
+	require.NoError(t, err)
+	defer srv2.Stop()
+
+	target2, _ := localserver.DiscoverTarget(stateDir)
+
+	// Connect with the enrolled key — should work after restart.
+	enrolledClient, err := bridgeclient.New(
+		bridgeclient.WithTarget(target2),
+		bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
+			CABundlePath: mat.CABundlePath,
+			CertPath:     mat.LocalClientCert,
+			KeyPath:      mat.LocalClientKey,
+			ServerName:   "server",
+		}),
+		bridgeclient.WithJWT(bridgeclient.JWTConfig{
+			PrivateKeyPath: privPath,
+			Issuer:         "persist-test",
+			Audience:       "bridge",
+		}),
+		bridgeclient.WithTimeout(5*time.Second),
+	)
+	require.NoError(t, err)
+	defer func() { _ = enrolledClient.Close() }()
+
+	enrolledClient.SetProject("test")
+	_, err = enrolledClient.ListSessions(ctx, &bridgev1.ListSessionsRequest{
+		ProjectId: "test",
+	})
+	require.NoError(t, err, "enrolled key should survive server restart")
 }

@@ -17,6 +17,10 @@ certs/*.crt
 certs/*.pem
 certs/*.pub
 
+# Step CA local state (docker volumes handle persistence)
+step-ca/certs/
+step-ca/data/
+
 # Go
 vendor/
 *.test

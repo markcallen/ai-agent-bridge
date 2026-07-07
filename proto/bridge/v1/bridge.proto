@@ -26,6 +26,12 @@ service BridgeService {
 
   rpc Health(HealthRequest) returns (HealthResponse);
   rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+
+  // RegisterJWTKey enrolls a client's Ed25519 public key for JWT authentication.
+  // Requires a valid mTLS peer certificate; JWT auth is not required (the mTLS
+  // certificate itself authorizes the enrollment). After registration, the client
+  // can mint JWT tokens signed with the corresponding private key.
+  rpc RegisterJWTKey(RegisterJWTKeyRequest) returns (RegisterJWTKeyResponse);
 }
 
 enum SessionStatus {
@@ -234,4 +240,19 @@ message ProviderInfo {
   bool available = 2;
   string binary = 3;
   string version = 4;
+}
+
+message RegisterJWTKeyRequest {
+  // PKIX DER-encoded Ed25519 public key.
+  bytes public_key = 1;
+  // Issuer name for JWT tokens. If empty, defaults to the mTLS peer
+  // certificate's Common Name.
+  string issuer = 2;
+}
+
+message RegisterJWTKeyResponse {
+  // The issuer name that was registered (may differ from the request if
+  // the server defaulted to the mTLS CN).
+  string issuer = 1;
+  string message = 2;
 }

@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
+.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
@@ -108,6 +108,25 @@ down-local:
 
 logs-local:
 	docker compose -f docker-compose.yml -f docker-compose.local.yaml logs -f
+
+STEP_CA_COMPOSE := docker compose -f step-ca/docker-compose.step-ca.yaml
+
+up-step-ca:
+	$(STEP_CA_COMPOSE) up --build
+
+down-step-ca:
+	$(STEP_CA_COMPOSE) down
+
+logs-step-ca:
+	$(STEP_CA_COMPOSE) logs -f
+
+step-ca-health:
+	$(STEP_CA_COMPOSE) exec step-ca step ca health --ca-url https://localhost:9443 --root /home/step/certs/root_ca.crt
+
+STEP_CA_CLIENT_NAME ?= dev-client
+
+step-ca-issue-client:
+	$(STEP_CA_COMPOSE) exec bridge su -s /bin/bash bridge -c 'HOME=/home/bridge bridgectl server issue-client --name $(STEP_CA_CLIENT_NAME)'
 
 chat-example:
 	./scripts/with_env_secrets.sh go run ./examples/chat \
