@@ -98,3 +98,20 @@ Description: AI Agent Bridge
  login session. Installs bridgectl, a default config, and a systemd user unit.
  Enable with: systemctl --user enable --now bridge
 
+Package: ai-agent-bridge
+Version: 0.7.6
+Architecture: arm64
+Maintainer: Mark Callen <opensource@markcallen.com>
+Depends: ca-certificates
+Filename: pool/main/ai-agent-bridge_0.7.6_arm64.deb
+Size: 10550574
+MD5sum: 5a4cb7ebca1880448b9194efd0a785cf
+SHA1: 6944bebfb881959d67025db40a1574f1225df81e
+SHA256: 903d32bc8bedf6cb589d89df70520aa65e32b21781e252d9c736c8c53a412c04
+Section: admin
+Priority: optional
+Description: AI Agent Bridge
+ gRPC server and SDK bridge for supervising AI agent subprocesses inside a
+ login session. Installs bridgectl, a default config, and a systemd user unit.
+ Enable with: systemctl --user enable --now bridge
+
