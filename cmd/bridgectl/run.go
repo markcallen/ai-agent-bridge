@@ -98,7 +98,7 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 
 	cols, rows := currentTTYSize()
 	sessionID := uuid.NewString()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if _, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
@@ -280,7 +280,7 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 
 	sessionID := uuid.NewString()
 	clientID := uuid.NewString()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if _, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
