@@ -98,6 +98,8 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 
 	cols, rows := currentTTYSize()
 	sessionID := uuid.NewString()
+	// WithCancel (not WithTimeout): the streaming attach has no natural wall-clock
+	// limit. timeout still bounds unary RPCs (StartSession, etc.) via connectClient.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -280,6 +282,8 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 
 	sessionID := uuid.NewString()
 	clientID := uuid.NewString()
+	// WithCancel (not WithTimeout): the streaming attach has no natural wall-clock
+	// limit. timeout still bounds unary RPCs (StartSession, etc.) via connectClient.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
