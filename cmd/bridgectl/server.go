@@ -20,10 +20,17 @@ import (
 // sdNotify sends a notification to the systemd service manager via
 // $NOTIFY_SOCKET. It is a no-op when the socket is not set (i.e. when not
 // running under systemd).
+//
+// systemd uses abstract Unix domain sockets whose path begins with '@'; the
+// kernel API requires the leading '@' to be replaced with a NUL byte.
 func sdNotify(state string) {
 	socket := os.Getenv("NOTIFY_SOCKET")
 	if socket == "" {
 		return
+	}
+	// Translate abstract socket notation: '@' prefix → '\0' prefix.
+	if len(socket) > 0 && socket[0] == '@' {
+		socket = "\x00" + socket[1:]
 	}
 	addr := &net.UnixAddr{Name: socket, Net: "unixgram"}
 	conn, err := net.DialUnix("unixgram", nil, addr)

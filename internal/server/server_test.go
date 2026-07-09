@@ -126,13 +126,22 @@ func TestCircuitBreaker(t *testing.T) {
 	}
 
 	// keyedLimiter.banned() mirrors the bucket state.
+	// Drive the underlying bucket directly with a fixed timestamp to avoid
+	// token refills from wall-clock progression making the test flaky.
 	limiter := newKeyedLimiter(1, 1)
 	if limiter.banned("x") {
 		t.Fatal("banned returned true for unknown key")
 	}
-	limiter.allow("x") // drain
+	// Insert a pre-drained bucket so all subsequent allow calls are violations.
+	limiter.mu.Lock()
+	drained := newTokenBucket(1, 1, now)
+	drained.allow(now) // consume the single token
+	limiter.buckets["x"] = drained
+	limiter.mu.Unlock()
 	for i := 0; i < circuitBreakerThreshold; i++ {
-		limiter.allow("x")
+		limiter.mu.Lock()
+		limiter.buckets["x"].allow(now)
+		limiter.mu.Unlock()
 	}
 	if !limiter.banned("x") {
 		t.Fatal("limiter.banned returned false after threshold violations")

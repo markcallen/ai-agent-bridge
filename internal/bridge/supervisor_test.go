@@ -1247,17 +1247,29 @@ func TestPTYReadErrorTerminatesSession(t *testing.T) {
 	}
 
 	// After the process exits the PTY read will error; the session should
-	// transition to Stopped or Failed without manual intervention.
+	// transition to Stopped or Failed without manual intervention. The
+	// force-stop path may also remove the session from the live map, so
+	// ErrSessionNotFound is also a valid termination signal.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		info, getErr := sup.Get("pty-err-1")
+		if errors.Is(getErr, ErrSessionNotFound) {
+			return // session force-removed after PTY error
+		}
 		if getErr == nil && (info.State == SessionStateStopped || info.State == SessionStateFailed) {
 			return // session cleaned up as expected
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	info, _ := sup.Get("pty-err-1")
-	t.Fatalf("session did not terminate after PTY closed: state=%v", info.State)
+	info, getErr := sup.Get("pty-err-1")
+	if errors.Is(getErr, ErrSessionNotFound) {
+		return
+	}
+	var state SessionState
+	if info != nil {
+		state = info.State
+	}
+	t.Fatalf("session did not terminate after PTY closed: state=%v getErr=%v", state, getErr)
 }
 
 // exitImmediateTestProvider runs "true" (exits immediately) via PTY.
