@@ -547,6 +547,14 @@ func (s *Supervisor) readLoop(ms *managedSession) {
 					ms.info.Error = err.Error()
 				}
 				ms.mu.Unlock()
+				// Force-terminate the process so any pending WriteInput calls see
+				// SessionNotFound rather than writing to a dead PTY file descriptor.
+				sessionID := ms.info.SessionID
+				go func() {
+					if stopErr := s.Stop(sessionID, true); stopErr != nil {
+						slog.Debug("stop after PTY read error", "session_id", sessionID, "error", stopErr)
+					}
+				}()
 			}
 			return
 		}

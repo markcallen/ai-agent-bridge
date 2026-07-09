@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +16,45 @@ import (
 
 	"github.com/markcallen/ai-agent-bridge/internal/localserver"
 )
+
+// sdNotify sends a notification to the systemd service manager via
+// $NOTIFY_SOCKET. It is a no-op when the socket is not set (i.e. when not
+// running under systemd).
+//
+// systemd uses abstract Unix domain sockets whose path begins with '@'; the
+// kernel API requires the leading '@' to be replaced with a NUL byte.
+func sdNotify(state string) {
+	socket := os.Getenv("NOTIFY_SOCKET")
+	if socket == "" {
+		return
+	}
+	// Translate abstract socket notation: '@' prefix → '\0' prefix.
+	if len(socket) > 0 && socket[0] == '@' {
+		socket = "\x00" + socket[1:]
+	}
+	addr := &net.UnixAddr{Name: socket, Net: "unixgram"}
+	conn, err := net.DialUnix("unixgram", nil, addr)
+	if err != nil {
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	_, _ = conn.Write([]byte(state))
+}
+
+// sdWatchdog sends periodic WATCHDOG=1 pings until done is closed.
+// WatchdogSec must be set in the systemd unit for these to be effective.
+func sdWatchdog(interval time.Duration, done <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			sdNotify("WATCHDOG=1")
+		case <-done:
+			return
+		}
+	}
+}
 
 func newServerCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -102,11 +142,18 @@ auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
 			}
 			fmt.Fprintf(os.Stderr, "ai-agent-bridge server listening — %s (pid %d)\n", mode, os.Getpid())
 
+			// Notify systemd that the server is ready and start the watchdog
+			// heartbeat. Both are no-ops when not running under systemd.
+			sdNotify("READY=1\nSTATUS=listening")
+			watchdogDone := make(chan struct{})
+			go sdWatchdog(15*time.Second, watchdogDone)
+
 			// Block until signal.
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			sig := <-sigCh
 			fmt.Fprintf(os.Stderr, "\nReceived %s, shutting down...\n", sig)
+			close(watchdogDone)
 			srv.Stop()
 			return nil
 		},
