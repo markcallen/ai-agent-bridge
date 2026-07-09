@@ -1212,3 +1212,64 @@ func TestControlEventSeqIsZero(t *testing.T) {
 		t.Fatal("timed out waiting for control chunk")
 	}
 }
+
+// TestPTYReadErrorTerminatesSession verifies that a non-EOF PTY read error
+// causes the supervisor to force-stop the session. This exercises the fix for
+// the issue where a dead PTY left the session alive so clients could flood
+// WriteInput against it indefinitely.
+func TestPTYReadErrorTerminatesSession(t *testing.T) {
+	registry := NewRegistry()
+	// Use a provider whose process exits immediately; the PTY will then return
+	// an I/O error on the next Read, which is exactly the failure mode we want
+	// to handle.
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	// Use a fast-exit command: "true" finishes instantly, closing the PTY.
+	trueProv := &exitImmediateTestProvider{testProvider: testProvider{id: "exit-immediate"}}
+	if err := registry.Register(trueProv); err != nil {
+		t.Fatalf("Register exit-immediate: %v", err)
+	}
+
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute)
+	defer sup.Close()
+
+	_, err := sup.Start(context.Background(), SessionConfig{
+		ProjectID:   "proj-pty-err",
+		SessionID:   "pty-err-1",
+		RepoPath:    t.TempDir(),
+		Options:     map[string]string{"provider": "exit-immediate"},
+		InitialCols: 80,
+		InitialRows: 24,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// After the process exits the PTY read will error; the session should
+	// transition to Stopped or Failed without manual intervention.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		info, getErr := sup.Get("pty-err-1")
+		if getErr == nil && (info.State == SessionStateStopped || info.State == SessionStateFailed) {
+			return // session cleaned up as expected
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	info, _ := sup.Get("pty-err-1")
+	t.Fatalf("session did not terminate after PTY closed: state=%v", info.State)
+}
+
+// exitImmediateTestProvider runs "true" (exits immediately) via PTY.
+type exitImmediateTestProvider struct {
+	testProvider
+}
+
+func (p *exitImmediateTestProvider) ID() string { return "exit-immediate" }
+func (p *exitImmediateTestProvider) BuildCommand(ctx context.Context, cfg SessionConfig) (*exec.Cmd, error) {
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		truePath = "/usr/bin/true"
+	}
+	return exec.CommandContext(ctx, truePath), nil
+}

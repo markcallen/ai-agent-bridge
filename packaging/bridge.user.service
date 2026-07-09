@@ -4,11 +4,19 @@ Documentation=https://github.com/markcallen/ai-agent-bridge
 After=default.target
 
 [Service]
-Type=simple
+Type=notify
 ExecStart=/usr/bin/bridgectl server start
 Restart=on-failure
 RestartSec=5s
 Environment=HOME=%h
+
+# Watchdog: restart if the process stops sending heartbeats for 30s.
+WatchdogSec=30s
+
+# Resource caps to prevent a runaway RPC flood from taking down the OS.
+LimitNOFILE=65536
+MemoryMax=512M
+CPUQuota=50%
 
 [Install]
 WantedBy=default.target

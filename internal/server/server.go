@@ -324,6 +324,16 @@ func (s *BridgeServer) WriteInput(ctx context.Context, req *bridgev1.WriteInputR
 		return nil, err
 	}
 	if !s.writeRL.allow(req.SessionId) {
+		if s.writeRL.banned(req.SessionId) {
+			// Circuit breaker tripped: the client has sent too many requests while
+			// rate-limited. Force-terminate the session so the client can no longer
+			// write to it, then return Unavailable (distinct from ResourceExhausted)
+			// so a well-behaved client stops retrying entirely.
+			slog.Warn("write input circuit breaker tripped, terminating session",
+				"session_id", req.SessionId, "client_id", req.ClientId)
+			go func() { _ = s.supervisor.Stop(req.SessionId, true) }()
+			return nil, status.Error(codes.Unavailable, "write input circuit breaker: session terminated due to sustained rate limit violations")
+		}
 		return nil, status.Error(codes.ResourceExhausted, "write input rate limit exceeded for session")
 	}
 	if err := s.authorizeSession(claims, req.SessionId); err != nil {
