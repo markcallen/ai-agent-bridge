@@ -2,6 +2,7 @@ package localserver
 
 import (
 	"crypto/x509"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -207,7 +208,7 @@ func TestIssueClientCert_RejectsPathTraversal(t *testing.T) {
 }
 
 // TestEnsurePKI_StepCASkipsAutoGen verifies that when a StepCAConfig is
-// supplied but the `step` binary is absent, EnsurePKI does not generate a
+// supplied and the native cert request fails, EnsurePKI does not generate a
 // self-signed CA and instead returns a clear error.
 func TestEnsurePKI_StepCASkipsAutoGen(t *testing.T) {
 	stateDir := t.TempDir()
@@ -215,12 +216,18 @@ func TestEnsurePKI_StepCASkipsAutoGen(t *testing.T) {
 	rootPEM := filepath.Join(stateDir, "root.crt")
 	require.NoError(t, os.WriteFile(rootPEM, []byte("placeholder"), 0o644))
 
+	// Override JWK function to simulate failure (no real CA available).
+	oldJWK := requestCertJWKFn
+	requestCertJWKFn = func(_ *StepCAConfig, _ []string, _, _ string, _ *slog.Logger) error {
+		return fmt.Errorf("connection refused")
+	}
+	t.Cleanup(func() { requestCertJWKFn = oldJWK })
+
 	stepCfg := &StepCAConfig{
 		URL:      "https://ca.example.internal:443",
 		RootPath: rootPEM,
 	}
 	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, testLogger(), stepCfg)
-	// `step` is not installed in the test environment, so we expect an error.
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Step CA")
 
@@ -240,13 +247,21 @@ func TestEnsurePKI_StepCAMissingRoot(t *testing.T) {
 	assert.Contains(t, err.Error(), "step-ca-root")
 }
 
-// TestEnsurePKI_StepCAHappyPath exercises the Step CA code path using a stub
-// `step` binary so the happy path is covered without a real Step CA server.
+// TestEnsurePKI_StepCAHappyPath exercises the Step CA code path using a mock
+// cert requester so the happy path is covered without a real Step CA server.
 func TestEnsurePKI_StepCAHappyPath(t *testing.T) {
-	fakeStepDir(t)
 	stateDir := t.TempDir()
 	rootPEM := filepath.Join(stateDir, "root.crt")
 	require.NoError(t, os.WriteFile(rootPEM, []byte("fake-root-cert"), 0o644))
+
+	// Override JWK function to write placeholder cert/key files.
+	oldJWK := requestCertJWKFn
+	requestCertJWKFn = func(_ *StepCAConfig, _ []string, certPath, keyPath string, _ *slog.Logger) error {
+		require.NoError(t, os.WriteFile(certPath, []byte("FAKE-SERVER-CERT"), 0o644))
+		require.NoError(t, os.WriteFile(keyPath, []byte("FAKE-SERVER-KEY"), 0o600))
+		return nil
+	}
+	t.Cleanup(func() { requestCertJWKFn = oldJWK })
 
 	stepCfg := &StepCAConfig{
 		URL:      "https://ca.example.internal:443",
@@ -261,7 +276,7 @@ func TestEnsurePKI_StepCAHappyPath(t *testing.T) {
 	assert.True(t, strings.HasPrefix(string(bundle), "fake-root-cert"), "bundle should start with Step CA root")
 	assert.Contains(t, string(bundle), "BEGIN CERTIFICATE", "bundle should also contain local CA cert")
 
-	// Server cert and key files should exist (written by the fake step script).
+	// Server cert and key files should exist (written by the mock function).
 	_, err = os.Stat(mat.ServerCertPath)
 	assert.NoError(t, err, "server cert should exist")
 	_, err = os.Stat(mat.ServerKeyPath)
@@ -283,10 +298,18 @@ func TestEnsurePKI_StepCAHappyPath(t *testing.T) {
 // TestEnsurePKI_StepCAIdempotent verifies that a second EnsurePKI call with
 // Step CA config is a no-op when ca-bundle.crt already exists.
 func TestEnsurePKI_StepCAIdempotent(t *testing.T) {
-	fakeStepDir(t)
 	stateDir := t.TempDir()
 	rootPEM := filepath.Join(stateDir, "root.crt")
 	require.NoError(t, os.WriteFile(rootPEM, []byte("fake-root-cert"), 0o644))
+
+	// Override JWK function to write placeholder cert/key files.
+	oldJWK := requestCertJWKFn
+	requestCertJWKFn = func(_ *StepCAConfig, _ []string, certPath, keyPath string, _ *slog.Logger) error {
+		require.NoError(t, os.WriteFile(certPath, []byte("FAKE-SERVER-CERT"), 0o644))
+		require.NoError(t, os.WriteFile(keyPath, []byte("FAKE-SERVER-KEY"), 0o600))
+		return nil
+	}
+	t.Cleanup(func() { requestCertJWKFn = oldJWK })
 
 	stepCfg := &StepCAConfig{URL: "https://ca.example.internal:443", RootPath: rootPEM}
 	_, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg)

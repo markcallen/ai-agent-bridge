@@ -887,7 +887,7 @@ func TestStepCANonexistentRoot(t *testing.T) {
 
 // TestStepCAMissingStepCLI verifies that when `step` is not on PATH,
 // the server returns a clear error with an install link.
-func TestStepCAMissingStepCLI(t *testing.T) {
+func TestStepCAUnreachableCA(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in short mode")
 	}
@@ -901,9 +901,6 @@ func TestStepCAMissingStepCLI(t *testing.T) {
 	dummyRoot := filepath.Join(t.TempDir(), "root.crt")
 	require.NoError(t, os.WriteFile(dummyRoot, []byte("dummy-cert"), 0o644))
 
-	// Remove step from PATH so exec.LookPath fails.
-	t.Setenv("PATH", t.TempDir())
-
 	_, err := localserver.Start(localserver.Config{
 		StateDir:       stateDir,
 		ListenAddr:     "127.0.0.1:0",
@@ -911,11 +908,9 @@ func TestStepCAMissingStepCLI(t *testing.T) {
 		StepCAURL:      "https://ca.example.com",
 		StepCARootPath: dummyRoot,
 	})
-	require.Error(t, err, "should fail when step CLI is not on PATH")
-	assert.Contains(t, err.Error(), "step",
-		"error should mention the step CLI")
-	assert.Contains(t, err.Error(), "smallstep.com/cli",
-		"error should include the install URL")
+	require.Error(t, err, "should fail when Step CA is unreachable")
+	assert.Contains(t, err.Error(), "Step CA",
+		"error should mention Step CA")
 }
 
 // TestOIDCFlagValidation verifies that IssueClientCertViaOIDC rejects
@@ -1534,6 +1529,21 @@ exit 0
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
 }
 
+// mockCertRequester overrides the native JWK/ACME cert request functions with
+// a stub that writes placeholder cert/key files. This replaces fakeStepBin for
+// tests that call EnsurePKI with a StepCAConfig.
+func mockCertRequester(t *testing.T) {
+	t.Helper()
+	mock := func(_ *localserver.StepCAConfig, _ []string, certPath, keyPath string, _ *slog.Logger) error {
+		if err := os.WriteFile(certPath, []byte("fake-cert"), 0o644); err != nil {
+			return err
+		}
+		return os.WriteFile(keyPath, []byte("fake-key"), 0o600)
+	}
+	restore := localserver.SetCertRequestFuncs(mock, mock)
+	t.Cleanup(restore)
+}
+
 // TestStepCADualCAArchitecture verifies that EnsurePKI with Step CA config
 // creates both Step CA-derived server certs and a local CA for CLI credentials,
 // and that the ca-bundle.crt contains both trust roots.
@@ -1545,7 +1555,7 @@ func TestStepCADualCAArchitecture(t *testing.T) {
 		t.Skip("secure mode not supported on Windows")
 	}
 
-	fakeStepBin(t)
+	mockCertRequester(t)
 	stateDir := testStateDir(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -1604,7 +1614,7 @@ func TestStepCAIdempotency(t *testing.T) {
 		t.Skip("secure mode not supported on Windows")
 	}
 
-	fakeStepBin(t)
+	mockCertRequester(t)
 	stateDir := testStateDir(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -1650,7 +1660,7 @@ func TestStepCATier1ClientIssuance(t *testing.T) {
 		t.Skip("secure mode not supported on Windows")
 	}
 
-	fakeStepBin(t)
+	mockCertRequester(t)
 	stateDir := testStateDir(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 

@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
+.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
@@ -40,6 +40,13 @@ test-e2e:
 	E2E_ONLY=$(E2E_ONLY) ./scripts/with_env_secrets.sh docker compose -f e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-client; \
 	rc=$$?; \
 	docker compose -f e2e/docker-compose.yml down -v; \
+	exit $$rc
+
+test-step-ca-e2e:
+	@set +e; \
+	docker compose -f e2e/step-ca/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-client; \
+	rc=$$?; \
+	docker compose -f e2e/step-ca/docker-compose.yml down -v; \
 	exit $$rc
 
 test-cover:

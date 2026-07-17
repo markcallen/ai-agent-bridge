@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 )
@@ -28,6 +29,10 @@ type StepCAConfig struct {
 	// provisioner (e.g. "https://accounts.google.com"). Used by
 	// IssueClientCertViaOIDC to select the correct provisioner.
 	OIDCProviderURL string
+	// Provisioner is the name of the Step CA provisioner to use for
+	// certificate requests (e.g. "acme", "bridge-jwk"). When empty, the
+	// step CLI selects the default provisioner.
+	Provisioner string
 	// ProvisionerPasswordFile is the path to a file containing the JWK
 	// provisioner password. When set, it is passed as
 	// --provisioner-password-file to `step ca certificate` so the command
@@ -88,11 +93,15 @@ func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger, stepCA
 	mat := LoadPKIMaterial(stateDir)
 	certsDir := CertsDir(stateDir)
 
-	// Use ca-bundle.crt as sentinel — it is produced by both auto-PKI and
-	// Step CA paths, so checking it covers both cases.
+	// Check that all essential PKI files exist. If any are missing, regenerate.
+	// This covers partial state from interrupted runs or manual cleanup.
 	if _, err := os.Stat(mat.CABundlePath); err == nil {
-		logger.Info("PKI material already exists", "dir", certsDir)
-		return mat, nil
+		if _, err := os.Stat(mat.ServerCertPath); err == nil {
+			if _, err := os.Stat(mat.ServerKeyPath); err == nil {
+				logger.Info("PKI material already exists", "dir", certsDir)
+				return mat, nil
+			}
+		}
 	}
 
 	if err := os.MkdirAll(certsDir, 0o700); err != nil {
@@ -190,24 +199,16 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	serverCert := filepath.Join(certsDir, "server.crt")
 	serverKey := filepath.Join(certsDir, "server.key")
 
-	stepArgs := []string{
-		"ca", "certificate",
-		sans[0],
-		serverCert,
-		serverKey,
-		"--ca-url", stepCA.URL,
-		"--root", stepCA.RootPath,
-		"--not-after", "2160h", // 90 days
-		"--force",
-	}
-	for _, san := range sans[1:] {
-		stepArgs = append(stepArgs, "--san", san)
-	}
-	if stepCA.ProvisionerPasswordFile != "" {
-		stepArgs = append(stepArgs, "--provisioner-password-file", stepCA.ProvisionerPasswordFile)
-	}
-	if err := runStep(stepArgs, logger); err != nil {
-		return nil, fmt.Errorf("obtain server cert from Step CA: %w", err)
+	// Dispatch to the native certificate request function based on provisioner type.
+	switch strings.ToLower(stepCA.Provisioner) {
+	case "acme":
+		if err := requestCertACMEFn(stepCA, sans, serverCert, serverKey, logger); err != nil {
+			return nil, fmt.Errorf("obtain server cert from Step CA (ACME): %w", err)
+		}
+	default:
+		if err := requestCertJWKFn(stepCA, sans, serverCert, serverKey, logger); err != nil {
+			return nil, fmt.Errorf("obtain server cert from Step CA (JWK): %w", err)
+		}
 	}
 	mat.ServerCertPath = serverCert
 	mat.ServerKeyPath = serverKey
@@ -376,7 +377,7 @@ func IssueClientCertViaOIDC(stateDir, clientName string, stepCA *StepCAConfig, l
 func runStep(args []string, logger *slog.Logger) error {
 	stepBin, err := exec.LookPath("step")
 	if err != nil {
-		return fmt.Errorf("'step' CLI not found on PATH — install it from https://smallstep.com/cli/: %w", err)
+		return fmt.Errorf("'step' CLI not found on PATH — required only for OIDC enrollment; install from https://smallstep.com/cli/: %w", err)
 	}
 	logger.Debug("running step CLI", "args", args)
 	cmd := exec.Command(stepBin, args...)

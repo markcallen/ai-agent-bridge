@@ -182,6 +182,10 @@ type Config struct {
 	// StepCAOIDCProvider is the OIDC issuer URL configured as a Step CA
 	// provisioner. Used by `bridgectl server issue-client --oidc-provider`.
 	StepCAOIDCProvider string
+	// StepCAProvisioner is the name of the Step CA provisioner to use
+	// (e.g. "acme", "bridge-jwk"). When empty, the step CLI selects the
+	// default provisioner.
+	StepCAProvisioner string
 	// StepCAProvisionerPasswordFile is the path to a file containing the
 	// JWK provisioner password. When set, `step ca certificate` runs
 	// non-interactively (required in Docker/headless environments).
@@ -253,6 +257,21 @@ func Start(cfg Config) (*Server, error) {
 				for _, k := range fileCfg.Auth.JWTPublicKeys {
 					cfg.JWTPublicKeys[k.Issuer] = k.KeyPath
 				}
+			}
+			if len(cfg.ServerSANs) == 0 && len(fileCfg.Server.SANs) > 0 {
+				cfg.ServerSANs = fileCfg.Server.SANs
+			}
+			if cfg.StepCAURL == "" && fileCfg.StepCA.URL != "" {
+				cfg.StepCAURL = fileCfg.StepCA.URL
+			}
+			if cfg.StepCARootPath == "" && fileCfg.StepCA.Root != "" {
+				cfg.StepCARootPath = fileCfg.StepCA.Root
+			}
+			if cfg.StepCAProvisioner == "" && fileCfg.StepCA.Provisioner != "" {
+				cfg.StepCAProvisioner = fileCfg.StepCA.Provisioner
+			}
+			if cfg.StepCAProvisionerPasswordFile == "" && fileCfg.StepCA.ProvisionerPasswordFile != "" {
+				cfg.StepCAProvisionerPasswordFile = fileCfg.StepCA.ProvisionerPasswordFile
 			}
 		}
 	}
@@ -456,6 +475,7 @@ func Start(cfg Config) (*Server, error) {
 					URL:                     cfg.StepCAURL,
 					RootPath:                cfg.StepCARootPath,
 					OIDCProviderURL:         cfg.StepCAOIDCProvider,
+					Provisioner:             cfg.StepCAProvisioner,
 					ProvisionerPasswordFile: cfg.StepCAProvisionerPasswordFile,
 				}
 			}

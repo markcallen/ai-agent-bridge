@@ -23,6 +23,7 @@ func newServerCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(
+		newServerInitCmd(),
 		newServerStartCmd(),
 		newServerStatusCmd(),
 		newServerStopCmd(),
@@ -43,6 +44,7 @@ func newServerStartCmd() *cobra.Command {
 		logFormat                     string
 		stepCAURL                     string
 		stepCARootPath                string
+		stepCAProvisioner             string
 		stepCAProvisionerPasswordFile string
 	)
 
@@ -63,6 +65,14 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if localserver.IsServerRunning("") {
 				return fmt.Errorf("server already running")
+			}
+
+			// Default config path to ~/.ai-agent-bridge/bridge.yaml when not set.
+			if configPath == "" {
+				defaultCfg := filepath.Join(localserver.StateDir(), "bridge.yaml")
+				if _, err := os.Stat(defaultCfg); err == nil {
+					configPath = defaultCfg
+				}
 			}
 
 			// Build logger from --log-level and --log-format.
@@ -96,6 +106,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 				Logger:                        logger,
 				StepCAURL:                     stepCAURL,
 				StepCARootPath:                stepCARootPath,
+				StepCAProvisioner:             stepCAProvisioner,
 				StepCAProvisionerPasswordFile: stepCAProvisionerPasswordFile,
 			}
 			if globalRPS > 0 {
@@ -132,6 +143,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 	cmd.Flags().StringVar(&logFormat, "log-format", "text", "log format: text or json")
 	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA URL for Tier-2 PKI (e.g. https://step-ca.internal:443); requires --step-ca-root")
 	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to the Step CA root certificate (required with --step-ca-url)")
+	cmd.Flags().StringVar(&stepCAProvisioner, "step-ca-provisioner", "", "Step CA provisioner name (e.g. acme, bridge-jwk); defaults to CA's default provisioner")
 	cmd.Flags().StringVar(&stepCAProvisionerPasswordFile, "step-ca-provisioner-password-file", "", "path to provisioner password file for non-interactive Step CA cert requests")
 
 	return cmd
