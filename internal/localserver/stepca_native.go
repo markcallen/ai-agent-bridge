@@ -52,9 +52,13 @@ func SetCertRequestFuncs(jwk, acme CertRequesterFunc) func() {
 	}
 }
 
-// requestCertJWK obtains a certificate from Step CA using the JWK provisioner.
+// RequestCertJWK obtains a certificate from Step CA using the JWK provisioner.
 // The provisioner password is read from stepCA.ProvisionerPasswordFile, or
-// prompted from stdin if not set.
+// prompted from stdin if not set. Exported for use by CLI commands.
+func RequestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath string, logger *slog.Logger) error {
+	return requestCertJWK(stepCA, sans, certPath, keyPath, logger)
+}
+
 func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath string, logger *slog.Logger) error {
 	// Read provisioner password.
 	password, err := readProvisionerPassword(stepCA.ProvisionerPasswordFile)
@@ -116,8 +120,13 @@ func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath strin
 	return nil
 }
 
-// requestCertACME obtains a certificate from Step CA using the ACME provisioner.
+// RequestCertACME obtains a certificate from Step CA using the ACME provisioner.
 // It starts a temporary HTTP server on port 80 to solve the HTTP-01 challenge.
+// Exported for use by CLI commands.
+func RequestCertACME(stepCA *StepCAConfig, sans []string, certPath, keyPath string, logger *slog.Logger) error {
+	return requestCertACME(stepCA, sans, certPath, keyPath, logger)
+}
+
 func requestCertACME(stepCA *StepCAConfig, sans []string, certPath, keyPath string, logger *slog.Logger) error {
 	provName := stepCA.Provisioner
 	if provName == "" {
