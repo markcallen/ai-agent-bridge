@@ -73,8 +73,14 @@ func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath strin
 
 	logger.Info("requesting certificate via JWK provisioner", "url", stepCA.URL, "provisioner", provName)
 
+	// Build a transport that trusts both system CAs and the Step CA root.
+	tr, err := combinedTrustTransport(stepCA.RootPath)
+	if err != nil {
+		return fmt.Errorf("build TLS transport: %w", err)
+	}
+
 	// Discover the provisioner and decrypt its key with the password.
-	prov, err := ca.NewProvisioner(provName, "", stepCA.URL, password, ca.WithRootFile(stepCA.RootPath))
+	prov, err := ca.NewProvisioner(provName, "", stepCA.URL, password, ca.WithTransport(tr))
 	if err != nil {
 		return fmt.Errorf("init JWK provisioner: %w", err)
 	}
@@ -91,19 +97,25 @@ func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath strin
 		return fmt.Errorf("create sign request: %w", err)
 	}
 
-	// Set validity to 90 days.
-	notAfter := time.Now().Add(90 * 24 * time.Hour)
-	signReq.NotAfter = stepapi.NewTimeDuration(notAfter)
+	// Let the CA's provisioner decide the validity period — don't override
+	// NotAfter. The default JWK provisioner typically allows 24h max.
+
+	logger.Debug("sign request",
+		"cn", signReq.CsrPEM.Subject.CommonName,
+		"dns_names", signReq.CsrPEM.DNSNames,
+		"ips", signReq.CsrPEM.IPAddresses,
+	)
 
 	// Sign the certificate.
-	client, err := ca.NewClient(stepCA.URL, ca.WithRootFile(stepCA.RootPath))
+	client, err := ca.NewClient(stepCA.URL, ca.WithTransport(tr))
 	if err != nil {
 		return fmt.Errorf("create Step CA client: %w", err)
 	}
 
 	resp, err := client.Sign(signReq)
 	if err != nil {
-		return fmt.Errorf("sign certificate: %w", err)
+		return fmt.Errorf("sign certificate (CN=%s, SANs=%v): %w",
+			signReq.CsrPEM.Subject.CommonName, signReq.CsrPEM.DNSNames, err)
 	}
 
 	// Write the certificate PEM.
@@ -282,3 +294,27 @@ type acmeUser struct {
 func (u *acmeUser) GetEmail() string                        { return "" }
 func (u *acmeUser) GetRegistration() *registration.Resource { return u.registration }
 func (u *acmeUser) GetPrivateKey() crypto.PrivateKey        { return u.key }
+
+// combinedTrustTransport builds an http.Transport that trusts both system CAs
+// and the Step CA root certificate. This is necessary when the Step CA server's
+// own TLS certificate is issued by a public CA (e.g. Let's Encrypt) while the
+// certificates it issues are signed by its own root.
+func combinedTrustTransport(rootCertPath string) (*http.Transport, error) {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	if rootCertPath != "" {
+		rootPEM, err := os.ReadFile(rootCertPath)
+		if err != nil {
+			return nil, fmt.Errorf("read root cert %q: %w", rootCertPath, err)
+		}
+		pool.AppendCertsFromPEM(rootPEM)
+	}
+	return &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs:    pool,
+			MinVersion: tls.VersionTLS12,
+		},
+	}, nil
+}
