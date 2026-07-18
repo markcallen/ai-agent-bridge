@@ -49,7 +49,7 @@ for suite in $SUITES; do
   for arch in $ARCHES; do
     binary_dir="dists/$suite/$COMPONENT/binary-$arch"
     mkdir -p "$binary_dir"
-    dpkg-scanpackages --arch "$arch" "pool/$COMPONENT" >"$binary_dir/Packages"
+    dpkg-scanpackages --multiversion --arch "$arch" "pool/$COMPONENT" >"$binary_dir/Packages"
     gzip -9c "$binary_dir/Packages" >"$binary_dir/Packages.gz"
   done
 

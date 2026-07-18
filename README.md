@@ -1,7 +1,6 @@
 # AI Agent Bridge
 
 [![CI](https://github.com/markcallen/ai-agent-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/ci.yml)
-[![Smoke Tests](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml/badge.svg?event=workflow_dispatch)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml)
 [![Publish](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml)
 [![License](https://img.shields.io/github/license/markcallen/ai-agent-bridge)](LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/markcallen/ai-agent-bridge)](https://github.com/markcallen/ai-agent-bridge/releases)

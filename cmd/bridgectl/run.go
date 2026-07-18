@@ -98,7 +98,9 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 
 	cols, rows := currentTTYSize()
 	sessionID := uuid.NewString()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// WithCancel (not WithTimeout): the streaming attach has no natural wall-clock
+	// limit. timeout still bounds unary RPCs (StartSession, etc.) via connectClient.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if _, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
@@ -183,11 +185,10 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 						return
 					}
 				}
-				data := normalizeTTYInput(buf[:n])
 				_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
 					SessionId: sessionID,
 					ClientId:  stream.ClientID(),
-					Data:      data,
+					Data:      buf[:n],
 				})
 			}
 			if readErr != nil {
@@ -281,7 +282,9 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 
 	sessionID := uuid.NewString()
 	clientID := uuid.NewString()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	// WithCancel (not WithTimeout): the streaming attach has no natural wall-clock
+	// limit. timeout still bounds unary RPCs (StartSession, etc.) via connectClient.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	if _, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
@@ -367,14 +370,4 @@ func currentTTYSize() (uint32, uint32) {
 		return 120, 40
 	}
 	return uint32(ws.Cols), uint32(ws.Rows)
-}
-
-func normalizeTTYInput(b []byte) []byte {
-	data := append([]byte(nil), b...)
-	for i := range data {
-		if data[i] == '\n' {
-			data[i] = '\r'
-		}
-	}
-	return data
 }

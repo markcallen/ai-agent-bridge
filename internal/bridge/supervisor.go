@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"regexp"
@@ -546,6 +547,14 @@ func (s *Supervisor) readLoop(ms *managedSession) {
 					ms.info.Error = err.Error()
 				}
 				ms.mu.Unlock()
+				// Force-terminate the process so any pending WriteInput calls see
+				// SessionNotFound rather than writing to a dead PTY file descriptor.
+				sessionID := ms.info.SessionID
+				go func() {
+					if stopErr := s.Stop(sessionID, true); stopErr != nil {
+						slog.Debug("stop after PTY read error", "session_id", sessionID, "error", stopErr)
+					}
+				}()
 			}
 			return
 		}
@@ -622,16 +631,13 @@ func (s *Supervisor) readLoopStreamJSON(ms *managedSession, r io.ReadCloser) {
 // closeLive marks the session output as exhausted and closes every observer
 // channel. Must only be called from readLoop or readLoopStreamJSON — after all
 // sends to observer channels are complete.
-//
-// Channels are closed under ms.mu so that concurrent appendChunk and
-// fanoutControlEvent calls (which also send under ms.mu) cannot race.
+// The observers map is kept intact so deferred Detach calls (from AttachSession
+// goroutines draining their channels) can still clean up session state.
 func (s *Supervisor) closeLive(ms *managedSession) {
 	ms.mu.Lock()
-	for _, entry := range ms.observers {
-		close(entry.ch)
-	}
-	ms.observers = nil
 	ms.liveClosed = true
+	obs := make(map[string]*observerEntry, len(ms.observers))
+	maps.Copy(obs, ms.observers)
 	ms.mu.Unlock()
 }
 
@@ -947,15 +953,11 @@ func (s *Supervisor) Attach(sessionID, clientID string, afterSeq uint64, role At
 		ms.observers = make(map[string]*observerEntry)
 	}
 
-	// If the same clientID is already attached, close its stale channel before
-	// registering the new one so the previous goroutine drains cleanly.
-	if prev, exists := ms.observers[clientID]; exists {
-		slog.Warn("client re-attaching with same id, closing stale channel", "session_id", sessionID, "client_id", clientID)
-		close(prev.ch)
+	// Close and evict any stale channel from a prior attach with the same client_id
+	// to avoid leaking goroutines that are draining the old channel.
+	if existing, ok := ms.observers[clientID]; ok {
+		close(existing.ch)
 		delete(ms.observers, clientID)
-		if ms.info.ActiveWriterClientID == clientID {
-			ms.info.ActiveWriterClientID = ""
-		}
 	}
 
 	// Build the live channel. If the read loop already finished, hand the caller

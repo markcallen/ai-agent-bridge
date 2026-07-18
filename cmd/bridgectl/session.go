@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -64,6 +65,10 @@ func newSessionListCmd() *cobra.Command {
 				return nil
 			}
 
+			sort.Slice(resp.Sessions, func(i, j int) bool {
+				return resp.Sessions[i].CreatedAt.AsTime().Before(resp.Sessions[j].CreatedAt.AsTime())
+			})
+
 			fmt.Printf("%-36s  %-10s  %-10s  %s\n", "SESSION ID", "PROVIDER", "STATUS", "CREATED")
 			for _, s := range resp.Sessions {
 				status := sessionStatusString(s.Status)
@@ -104,7 +109,7 @@ func newSessionAttachCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&observeOnly, "observe", false, "attach as read-only observer (no input)")
 	cmd.Flags().BoolVar(&takeOver, "take-over", false, "forcibly claim the writer slot from the current active writer")
-	cmd.Flags().BoolVar(&release, "release", false, "release the active writer slot (releases whichever client the server reports as active)")
+	cmd.Flags().BoolVar(&release, "release", false, "release the current active writer slot (affects whoever currently holds it)")
 	return cmd
 }
 
@@ -150,22 +155,29 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool) er
 	defer func() { _ = client.Close() }()
 
 	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return fmt.Errorf("stdin is not a terminal")
+	isObserver := role == bridgev1.AttachRole_ATTACH_ROLE_OBSERVER && !takeOver
+	var restore func()
+	if !isObserver {
+		// Writers need raw mode for interactive input; observers do not.
+		if !term.IsTerminal(fd) {
+			return fmt.Errorf("stdin is not a terminal")
+		}
+		oldState, err := term.MakeRaw(fd)
+		if err != nil {
+			return fmt.Errorf("set raw terminal: %w", err)
+		}
+		var restoreOnce sync.Once
+		restore = func() {
+			restoreOnce.Do(func() {
+				_ = term.Restore(fd, oldState)
+			})
+		}
+		defer restore()
+	} else {
+		restore = func() {}
 	}
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return fmt.Errorf("set raw terminal: %w", err)
-	}
-	var restoreOnce sync.Once
-	restore := func() {
-		restoreOnce.Do(func() {
-			_ = term.Restore(fd, oldState)
-		})
-	}
-	defer restore()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	clientID := uuid.NewString()
@@ -245,11 +257,10 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool) er
 							return
 						}
 					}
-					data := normalizeTTYInput(buf[:n])
 					_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
 						SessionId: sessionID,
 						ClientId:  stream.ClientID(),
-						Data:      data,
+						Data:      buf[:n],
 					})
 				}
 				if readErr != nil {
@@ -292,9 +303,9 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool) er
 	return nil
 }
 
-// releaseWriter sends a ReleaseWriter RPC for sessionID. It reads the session's
-// active writer from GetSession and releases that client id. This is a
-// fire-and-forget command: it doesn't attach a stream.
+// releaseWriter sends a ReleaseWriter RPC for sessionID targeting whoever
+// currently holds the active writer slot (not necessarily this client).
+// This is a fire-and-forget command: it doesn't attach a stream.
 func releaseWriter(sessionID string) error {
 	client, err := connectClient("", 10*time.Second)
 	if err != nil {

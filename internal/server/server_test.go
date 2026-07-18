@@ -95,6 +95,59 @@ func TestRateLimiters(t *testing.T) {
 	}
 }
 
+func TestCircuitBreaker(t *testing.T) {
+	now := time.Now()
+	// Bucket with rate=1/s, burst=1; use an empty bucket so every call is a violation.
+	bucket := newTokenBucket(1, 1, now)
+	bucket.allow(now) // drain the one token
+
+	// Drive consecutive violations up to the threshold.
+	for i := 0; i < circuitBreakerThreshold-1; i++ {
+		bucket.allow(now)
+		if bucket.isBanned(now) {
+			t.Fatalf("circuit breaker tripped too early at violation %d", i+1)
+		}
+	}
+	// The next violation should trip the breaker.
+	bucket.allow(now)
+	if !bucket.isBanned(now) {
+		t.Fatal("circuit breaker did not trip after threshold violations")
+	}
+	// Violations reset after the ban expires.
+	afterBan := now.Add(circuitBreakerBanDuration + time.Second)
+	if bucket.isBanned(afterBan) {
+		t.Fatal("bucket still banned after ban duration elapsed")
+	}
+	// A successful allow resets the consecutive violation counter.
+	bucket2 := newTokenBucket(10, 10, now)
+	bucket2.allow(now) // succeeds, resets counter
+	if bucket2.consecutiveViolations != 0 {
+		t.Fatal("consecutive violations not reset after successful allow")
+	}
+
+	// keyedLimiter.banned() mirrors the bucket state.
+	// Drive the underlying bucket directly with a fixed timestamp to avoid
+	// token refills from wall-clock progression making the test flaky.
+	limiter := newKeyedLimiter(1, 1)
+	if limiter.banned("x") {
+		t.Fatal("banned returned true for unknown key")
+	}
+	// Insert a pre-drained bucket so all subsequent allow calls are violations.
+	limiter.mu.Lock()
+	drained := newTokenBucket(1, 1, now)
+	drained.allow(now) // consume the single token
+	limiter.buckets["x"] = drained
+	limiter.mu.Unlock()
+	for i := 0; i < circuitBreakerThreshold; i++ {
+		limiter.mu.Lock()
+		limiter.buckets["x"].allow(now)
+		limiter.mu.Unlock()
+	}
+	if !limiter.banned("x") {
+		t.Fatal("limiter.banned returned false after threshold violations")
+	}
+}
+
 func TestBridgeHelpersAndProviderResponses(t *testing.T) {
 	registry := bridge.NewRegistry()
 	if err := registry.Register(&serverTestProvider{id: "healthy", version: "v1.2.3"}); err != nil {
