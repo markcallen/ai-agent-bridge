@@ -43,6 +43,7 @@ services:
       BRIDGE_CLIENT_CN: dev-client
       STEP_CA_URL: "https://step-ca.local:9443"
       STEP_CA_ROOT: "/step-ca/shared/root_ca.crt"
+      STEP_CA_PROVISIONER: "bridge-jwk"
       STEP_CA_PROVISIONER_PASSWORD: "step-ca-e2e-password"
     volumes:
       - bridge-state:/home/bridge/.ai-agent-bridge

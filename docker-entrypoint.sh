@@ -9,6 +9,7 @@ BRIDGE_SANS="${BRIDGE_SANS:-bridge,localhost,127.0.0.1}"
 BRIDGE_CLIENT_CN="${BRIDGE_CLIENT_CN:-client}"
 STEP_CA_URL="${STEP_CA_URL:-}"
 STEP_CA_ROOT="${STEP_CA_ROOT:-}"
+STEP_CA_PROVISIONER="${STEP_CA_PROVISIONER:-}"
 STEP_CA_PROVISIONER_PASSWORD="${STEP_CA_PROVISIONER_PASSWORD:-}"
 
 # Running as root — prepare directories the bridge user needs.
@@ -282,6 +283,9 @@ echo "==> Starting bridge as non-root user..."
 BRIDGE_CMD="bridgectl server start --config $BRIDGE_CONFIG"
 if [ -n "$STEP_CA_URL" ] && [ -n "$STEP_CA_ROOT" ]; then
   BRIDGE_CMD="$BRIDGE_CMD --step-ca-url $STEP_CA_URL --step-ca-root $STEP_CA_ROOT"
+  if [ -n "$STEP_CA_PROVISIONER" ]; then
+    BRIDGE_CMD="$BRIDGE_CMD --step-ca-provisioner $STEP_CA_PROVISIONER"
+  fi
   # Pass the provisioner password file for non-interactive JWK cert requests
   # (Docker containers have no TTY for interactive password prompts).
   STEP_PASS_FILE="/run/bridge-certs/step-provisioner-password"
