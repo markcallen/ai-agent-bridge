@@ -639,6 +639,9 @@ func (s *Supervisor) closeLive(ms *managedSession) {
 	obs := make(map[string]*observerEntry, len(ms.observers))
 	maps.Copy(obs, ms.observers)
 	ms.mu.Unlock()
+	for _, entry := range obs {
+		close(entry.ch)
+	}
 }
 
 // appendChunk adds a new chunk with the given type to the session buffer and
