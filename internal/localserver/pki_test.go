@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -380,6 +381,9 @@ func TestCopyFile_ErrorOnUnwritableDest(t *testing.T) {
 // TestIssueClientCertViaOIDC_RequiresStepBinary verifies that
 // IssueClientCertViaOIDC returns a useful error when the `step` CLI is absent.
 func TestIssueClientCertViaOIDC_RequiresStepBinary(t *testing.T) {
+	if _, err := exec.LookPath("step"); err == nil {
+		t.Skip("step binary is installed; cannot test missing-binary error")
+	}
 	stateDir := t.TempDir()
 	logger := testLogger()
 	rootPEM := filepath.Join(stateDir, "root.crt")
