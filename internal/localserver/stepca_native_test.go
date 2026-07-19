@@ -133,9 +133,9 @@ func TestProvisionerRouting_JWK(t *testing.T) {
 			}
 
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-			_, err := EnsurePKI(stateDir, []string{"server"}, logger, stepCfg)
+			_, err := EnsurePKI(stateDir, []string{"my-host.example.com"}, logger, stepCfg)
 			require.NoError(t, err)
-			assert.Contains(t, *jwkSANs, "server")
+			assert.Contains(t, *jwkSANs, "my-host.example.com")
 		})
 	}
 }
