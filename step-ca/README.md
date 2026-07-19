@@ -110,68 +110,132 @@ Trust Bundle (ca-bundle.crt)
     └── Contains: Step CA root + Local CA
 ```
 
-## Remote Client Enrollment (Tier 2)
+## Provisioners
 
-With Step CA, remote clients get their own certificates directly from the CA — no file copying from the server required.
+Step CA supports multiple provisioner types for issuing certificates. Each
+provisioner authenticates the requester differently:
 
-### 1. Start the bridge server
+| Provisioner | Type | Auth Method | Use Case |
+|-------------|------|-------------|----------|
+| `admin` | JWK | Shared password | CI runners, automated clients, bridge server |
+| `google` | OIDC | Google SSO browser login | Human operators with Google Workspace |
+| `acme` | ACME | HTTP-01 challenge (port 80) | Automated server certs |
+| `google-cloud` | GCP | Instance identity token | GCE workloads |
+| `amazon-web-services` | AWS | Instance identity document | EC2 workloads |
 
-On the server host (e.g. your macbook), point bridgectl at the Step CA instance.
-The `step` CLI will prompt for the provisioner password interactively:
+## Server Setup
+
+### Interactive setup
 
 ```bash
-# Save the Step CA root cert
-curl -sk https://step-ca-dev.example.com/roots | jq -r '.crts[0]' > step-ca-root.crt
+bridgectl server init
+```
 
-# Start the server (step CLI prompts for provisioner password)
+This auto-detects your Tailscale hostname, fetches the Step CA root cert,
+and writes `~/.ai-agent-bridge/bridge.yaml`. Then start the server:
+
+```bash
+bridgectl server start
+```
+
+The server obtains its TLS certificate from Step CA automatically using the
+provisioner configured during init (ACME by default, JWK if specified).
+
+### Manual setup
+
+```bash
+# Fetch the Step CA root cert
+mkdir -p ~/.ai-agent-bridge/certs
+curl -sk https://step-ca-dev.example.com/roots | \
+  jq -r '.crts[0]' > ~/.ai-agent-bridge/certs/step-ca-root.crt
+
+# Start the server with ACME provisioner
 bridgectl server start \
   --listen 0.0.0.0:9445 \
   --san myhost.example.com \
   --step-ca-url https://step-ca-dev.example.com \
-  --step-ca-root step-ca-root.crt
+  --step-ca-root ~/.ai-agent-bridge/certs/step-ca-root.crt \
+  --step-ca-provisioner acme
 ```
 
-> For headless or Docker environments where interactive prompts are not
-> available, pass `--step-ca-provisioner-password-file /path/to/pw.txt`.
+## Client Setup
 
-### 2. Enroll a remote client
+### Option A: JWK provisioner (recommended for dev machines)
 
-On the remote client machine (e.g. a dev server), get a certificate from Step CA
-and enroll with the bridge server. No files need to be copied from the server:
+No port binding or sudo needed — just a password prompt:
 
 ```bash
-# a. Get the Step CA root cert
-curl -sk https://step-ca-dev.example.com/roots | jq -r '.crts[0]' > step-ca-root.crt
-
-# b. Get a client certificate from Step CA (prompts for provisioner password)
-step ca certificate my-client my-client.crt my-client.key \
-  --ca-url https://step-ca-dev.example.com \
-  --root step-ca-root.crt
-
-# c. Enroll with the bridge server (generates JWT keypair and registers it)
-bridgectl client enroll \
-  --target myhost.example.com:9445 \
-  --ca step-ca-root.crt \
-  --cert my-client.crt \
-  --key my-client.key
+bridgectl client init \
+  --step-ca-url https://step-ca-dev.example.com \
+  --target bridge-host.example.com:9445
 ```
 
-After enrollment, the client has everything it needs to connect with mTLS + JWT.
+This discovers available provisioners from the CA, lets you pick one
+(choose the JWK provisioner, e.g. `admin`), prompts for the provisioner
+password, obtains a client certificate, and auto-enrolls with the bridge
+server.
 
-### 3. Connect with the Go SDK
+Alternatively, specify the provisioner directly:
+
+```bash
+bridgectl client init \
+  --step-ca-url https://step-ca-dev.example.com \
+  --provisioner admin \
+  --target bridge-host.example.com:9445
+```
+
+### Option B: OIDC provisioner (Google SSO)
+
+For teams using Google Workspace, operators can authenticate with their
+Google account — no shared passwords needed. This requires the `step` CLI:
+
+```bash
+# Install step CLI if not already present
+# macOS: brew install step
+# Linux: curl -fsSL https://dl.smallstep.com/cli/install-step-cli.sh | bash
+
+# Fetch root cert
+mkdir -p ~/.ai-agent-bridge/certs
+curl -sk https://step-ca-dev.example.com/roots | \
+  jq -r '.crts[0]' > ~/.ai-agent-bridge/certs/step-ca-root.crt
+
+# Get a client cert via Google OIDC (opens browser for login)
+step ca certificate my-name \
+  ~/.ai-agent-bridge/certs/my-name.crt \
+  ~/.ai-agent-bridge/certs/my-name.key \
+  --ca-url https://step-ca-dev.example.com \
+  --root /etc/ssl/certs/ca-certificates.crt \
+  --provisioner google
+
+# Enroll with the bridge server
+bridgectl client enroll \
+  --target bridge-host.example.com:9445 \
+  --ca ~/.ai-agent-bridge/certs/step-ca-root.crt \
+  --cert ~/.ai-agent-bridge/certs/my-name.crt \
+  --key ~/.ai-agent-bridge/certs/my-name.key
+```
+
+> **Note**: The `--root` for the `step` CLI points to the system CA bundle
+> (not the Step CA root) because the Step CA server's TLS certificate may
+> be issued by a public CA like Let's Encrypt.
+
+### After enrollment
+
+Both options produce the same result — a client certificate and JWT keypair
+in `~/.ai-agent-bridge/certs/`. Connect with the Go SDK:
 
 ```go
 client, _ := bridgeclient.New(
-    bridgeclient.WithTarget("myhost.example.com:9445"),
+    bridgeclient.WithTarget("bridge-host.example.com:9445"),
     bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
-        CABundlePath: "step-ca-root.crt",
-        CertPath:     "my-client.crt",
-        KeyPath:      "my-client.key",
+        CABundlePath: "~/.ai-agent-bridge/certs/step-ca-root.crt",
+        CertPath:     "~/.ai-agent-bridge/certs/my-name.crt",
+        KeyPath:      "~/.ai-agent-bridge/certs/my-name.key",
         ServerName:   "server",
     }),
     bridgeclient.WithJWT(bridgeclient.JWTConfig{
         PrivateKeyPath: "jwt-signing.key",  // generated by enroll
-        Issuer:         "my-client",
+        Issuer:         "my-name",
         Audience:       "bridge",
         TTL:            5 * time.Minute,
     }),
@@ -182,7 +246,7 @@ client, _ := bridgeclient.New(
 
 The Docker Compose setup runs Step CA and the bridge together for local testing.
 
-### 1. Issue a client certificate (local CA path)
+### Issue a client certificate (local CA path)
 
 Even with Step CA enabled, local CA client issuance works for testing:
 
@@ -191,10 +255,9 @@ make step-ca-issue-client STEP_CA_CLIENT_NAME=test-client
 ```
 
 Note: `bridgectl server issue-client` must run inside the bridge container
-because it needs the CA private key to sign the certificate. The CA key
-stays on the server by design — it should never leave the host.
+because it needs the CA private key to sign the certificate.
 
-To extract the credentials from the container:
+To extract and enroll:
 
 ```bash
 CLIENT=test-client
@@ -205,56 +268,12 @@ mkdir -p /tmp/bridge-creds
 $COMPOSE exec bridge cat $CERTS/ca-bundle.crt              > /tmp/bridge-creds/ca-bundle.crt
 $COMPOSE exec bridge cat $CERTS/clients/$CLIENT/$CLIENT.crt > /tmp/bridge-creds/$CLIENT.crt
 $COMPOSE exec bridge cat $CERTS/clients/$CLIENT/$CLIENT.key > /tmp/bridge-creds/$CLIENT.key
-```
 
-Then enroll the client's JWT key:
-
-```bash
 bridgectl client enroll \
   --target localhost:9445 \
   --ca /tmp/bridge-creds/ca-bundle.crt \
   --cert /tmp/bridge-creds/$CLIENT.crt \
   --key /tmp/bridge-creds/$CLIENT.key
-```
-
-### 2. Issue a certificate directly from Step CA
-
-```bash
-# Get the root cert
-docker compose -f step-ca/docker-compose.step-ca.yaml exec step-ca \
-  cat /home/step/certs/root_ca.crt > /tmp/step-root.crt
-
-# Issue a cert (uses the JWK provisioner, prompts for password)
-step ca certificate my-sdk /tmp/my-sdk.crt /tmp/my-sdk.key \
-  --ca-url https://localhost:9443 \
-  --root /tmp/step-root.crt \
-  --provisioner bridge-jwk \
-  --not-after 24h
-# Password: step-ca-dev-password (or the value of STEP_CA_PASSWORD)
-```
-
-### 3. Test OIDC enrollment (requires OIDC provisioner, optional)
-
-To test OIDC-based client enrollment, add an OIDC provisioner to Step CA:
-
-```bash
-# Add Google OIDC provisioner
-docker compose -f step-ca/docker-compose.step-ca.yaml exec step-ca \
-  step ca provisioner add google \
-  --type OIDC \
-  --client-id YOUR_GOOGLE_CLIENT_ID \
-  --client-secret YOUR_GOOGLE_CLIENT_SECRET \
-  --configuration-endpoint https://accounts.google.com/.well-known/openid-configuration \
-  --admin-password-file /home/step/secrets/password
-
-# Then issue a client cert via OIDC
-docker compose -f step-ca/docker-compose.step-ca.yaml exec bridge \
-  su -s /bin/bash bridge -c \
-  'HOME=/home/bridge bridgectl server issue-client \
-    --name mark \
-    --oidc-provider https://accounts.google.com \
-    --step-ca-url https://step-ca.local:9443 \
-    --step-ca-root /step-ca/root_ca.crt'
 ```
 
 ## Configuration
@@ -294,44 +313,38 @@ make up-step-ca
 
 ### Tier 2: Team / Staging
 
-- **When**: Multiple developers sharing a bridge instance over VPN
-- **How**: Step CA on a dedicated VM or container behind WireGuard/Tailscale
-- **Root cert**: Distributed via VPN provisioning or `step ca bootstrap`
+- **When**: Multiple developers sharing a bridge instance over Tailscale/WireGuard
+- **How**: Step CA on a dedicated VM or container accessible over the VPN
+- **Root cert**: Auto-fetched by `bridgectl server init` and `bridgectl client init`
 - **Provisioners**:
-  - **JWK** for automated SDK clients (CI runners, orchestrators)
-  - **OIDC** for human operators (Google Workspace, GitHub, Okta, Auth0)
+  - **JWK** (`admin`) for automated clients, CI runners, and bridge server certs
+  - **OIDC** (`google`) for human operators via Google Workspace SSO
+  - **ACME** (`acme`) for automated server certs without shared passwords
+  - **GCP** / **AWS** for cloud workloads using instance identity
 - **Certificate renewal**: Automatic via `step ca renew` cron or systemd timer
 - **Setup**:
   ```bash
-  # On the Step CA host
-  step ca init --deployment-type standalone \
-    --name "Team Bridge CA" \
-    --dns step-ca.vpn.internal \
-    --address :443
+  # On each bridge host
+  bridgectl server init    # auto-detects Tailscale, fetches root cert
+  bridgectl server start
 
-  # Add OIDC provisioner
-  step ca provisioner add google --type OIDC \
-    --client-id $GOOGLE_CLIENT_ID \
-    --client-secret $GOOGLE_CLIENT_SECRET \
-    --configuration-endpoint https://accounts.google.com/.well-known/openid-configuration
+  # On each developer machine (JWK — password, no sudo)
+  bridgectl client init \
+    --step-ca-url https://step-ca.vpn.internal \
+    --provisioner admin \
+    --target bridge-host.vpn.internal:9445
 
-  # On each bridge host — fetch root cert and start the server
-  curl -sk https://step-ca.vpn.internal/roots | jq -r '.crts[0]' > step-ca-root.crt
-  bridgectl server start --listen 0.0.0.0:9445 \
-    --san $(hostname).vpn.internal \
-    --step-ca-url https://step-ca.vpn.internal:443 \
-    --step-ca-root step-ca-root.crt
-
-  # On each client — get a cert from Step CA and enroll with the bridge
-  curl -sk https://step-ca.vpn.internal/roots | jq -r '.crts[0]' > step-ca-root.crt
-  step ca certificate my-client my-client.crt my-client.key \
-    --ca-url https://step-ca.vpn.internal:443 \
-    --root step-ca-root.crt
+  # On each developer machine (OIDC — Google SSO, no password)
+  step ca certificate my-name ~/.ai-agent-bridge/certs/my-name.crt \
+    ~/.ai-agent-bridge/certs/my-name.key \
+    --ca-url https://step-ca.vpn.internal \
+    --root /etc/ssl/certs/ca-certificates.crt \
+    --provisioner google
   bridgectl client enroll \
     --target bridge-host.vpn.internal:9445 \
-    --ca step-ca-root.crt \
-    --cert my-client.crt \
-    --key my-client.key
+    --ca ~/.ai-agent-bridge/certs/step-ca-root.crt \
+    --cert ~/.ai-agent-bridge/certs/my-name.crt \
+    --key ~/.ai-agent-bridge/certs/my-name.key
   ```
 
 ### Tier 3: Production

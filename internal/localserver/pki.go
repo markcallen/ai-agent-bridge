@@ -191,10 +191,26 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	mat.CACertPath = bundlePath
 	logger.Info("copied Step CA root", "bundle", bundlePath)
 
-	// 2. Obtain server certificate from Step CA via `step ca certificate`.
-	sans := serverSANs
+	// 2. Obtain server certificate from Step CA.
+	// Filter out local-only SANs (server, localhost, 127.0.0.1) that are
+	// added by buildServerSANs for Tier 1 self-signed certs but may be
+	// rejected by external CA provisioners.
+	var sans []string
+	for _, s := range serverSANs {
+		switch s {
+		case "server", "localhost", "127.0.0.1":
+			continue
+		default:
+			sans = append(sans, s)
+		}
+	}
 	if len(sans) == 0 {
-		sans = []string{"server"}
+		hostname, _ := os.Hostname()
+		if hostname != "" {
+			sans = []string{hostname}
+		} else {
+			sans = []string{"bridge"}
+		}
 	}
 	serverCert := filepath.Join(certsDir, "server.crt")
 	serverKey := filepath.Join(certsDir, "server.key")

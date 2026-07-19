@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -116,6 +117,16 @@ func runServerInit() error {
 			fmt.Printf("  Saved to %s\n", rootPath)
 		}
 		stepCA.Root = rootPath
+
+		// Bootstrap system trust: run `step ca bootstrap --install` so the
+		// Step CA root is trusted by the OS. This avoids TLS errors when the
+		// Step CA server's own cert is issued by a different CA (e.g. Let's
+		// Encrypt) and the SDK needs to verify both.
+		if err := bootstrapStepCA(stepCA.URL, rootPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not bootstrap CA trust: %v\n", err)
+			fmt.Fprintf(os.Stderr, "  You may need to run manually:\n")
+			fmt.Fprintf(os.Stderr, "    step ca bootstrap --ca-url %s --fingerprint <fingerprint> --install\n", stepCA.URL)
+		}
 
 		provDefault := existing.StepCA.Provisioner
 		if provDefault == "" {
@@ -295,4 +306,52 @@ func fetchStepCARoot(caURL, outPath string) error {
 		return err
 	}
 	return os.WriteFile(outPath, []byte(roots.Crts[0]), 0o644)
+}
+
+// bootstrapStepCA runs `step ca bootstrap --install` to add the Step CA root
+// to the system trust store. This is needed when the Step CA server's own TLS
+// certificate is issued by a different CA (e.g. Let's Encrypt via Tailscale).
+func bootstrapStepCA(caURL, rootCertPath string) error {
+	stepBin, err := exec.LookPath("step")
+	if err != nil {
+		return fmt.Errorf("'step' CLI not found — install from https://smallstep.com/cli/")
+	}
+
+	// Compute the SHA256 fingerprint of the root certificate.
+	fp, err := certFingerprint(rootCertPath)
+	if err != nil {
+		return fmt.Errorf("compute root cert fingerprint: %w", err)
+	}
+
+	fmt.Printf("Installing Step CA root into system trust store...\n")
+	fmt.Printf("  Fingerprint: %s\n", fp)
+
+	cmd := exec.Command(stepBin, "ca", "bootstrap",
+		"--ca-url", caURL,
+		"--fingerprint", fp,
+		"--install",
+		"--force",
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("step ca bootstrap --install: %w", err)
+	}
+
+	fmt.Println("  Step CA root installed in system trust store")
+	return nil
+}
+
+// certFingerprint computes the SHA256 fingerprint of a PEM certificate file.
+func certFingerprint(certPath string) (string, error) {
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return "", err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return "", fmt.Errorf("no PEM block in %s", certPath)
+	}
+	hash := sha256.Sum256(block.Bytes)
+	return fmt.Sprintf("%x", hash[:]), nil
 }

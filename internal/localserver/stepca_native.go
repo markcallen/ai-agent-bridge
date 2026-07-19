@@ -118,6 +118,12 @@ func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath strin
 		return fmt.Errorf("create sign request: %w", err)
 	}
 
+	logger.Debug("sign request",
+		"cn", signReq.CsrPEM.Subject.CommonName,
+		"dns_names", signReq.CsrPEM.DNSNames,
+		"ips", signReq.CsrPEM.IPAddresses,
+	)
+
 	// Sign the certificate.
 	client, err := ca.NewClient(stepCA.URL, ca.WithTransport(tr))
 	if err != nil {
@@ -126,7 +132,8 @@ func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath strin
 
 	resp, err := client.Sign(signReq)
 	if err != nil {
-		return fmt.Errorf("sign certificate: %w", err)
+		return fmt.Errorf("sign certificate (CN=%s, SANs=%v): %w",
+			signReq.CsrPEM.Subject.CommonName, signReq.CsrPEM.DNSNames, err)
 	}
 
 	// Write the certificate PEM.
