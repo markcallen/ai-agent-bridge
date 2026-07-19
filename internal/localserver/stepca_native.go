@@ -59,6 +59,28 @@ func RequestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath strin
 	return requestCertJWK(stepCA, sans, certPath, keyPath, logger)
 }
 
+// stepCATransport builds an HTTP transport that trusts both the system cert pool
+// and the Step CA's own root cert. This is necessary when the Step CA's TLS
+// certificate is signed by a chain that is not covered by the Step CA root alone
+// (e.g. an intermediate or a separate PKI for the server itself).
+func stepCATransport(rootPath string) (http.RoundTripper, error) {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	rootPEM, err := os.ReadFile(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("read Step CA root cert: %w", err)
+	}
+	pool.AppendCertsFromPEM(rootPEM)
+	return &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs:    pool,
+			MinVersion: tls.VersionTLS12,
+		},
+	}, nil
+}
+
 func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath string, logger *slog.Logger) error {
 	// Read provisioner password.
 	password, err := readProvisionerPassword(stepCA.ProvisionerPasswordFile)
@@ -73,8 +95,13 @@ func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath strin
 
 	logger.Info("requesting certificate via JWK provisioner", "url", stepCA.URL, "provisioner", provName)
 
+	tr, err := stepCATransport(stepCA.RootPath)
+	if err != nil {
+		return fmt.Errorf("build Step CA transport: %w", err)
+	}
+
 	// Discover the provisioner and decrypt its key with the password.
-	prov, err := ca.NewProvisioner(provName, "", stepCA.URL, password, ca.WithRootFile(stepCA.RootPath))
+	prov, err := ca.NewProvisioner(provName, "", stepCA.URL, password, ca.WithTransport(tr))
 	if err != nil {
 		return fmt.Errorf("init JWK provisioner: %w", err)
 	}
@@ -91,12 +118,8 @@ func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath strin
 		return fmt.Errorf("create sign request: %w", err)
 	}
 
-	// Set validity to 90 days.
-	notAfter := time.Now().Add(90 * 24 * time.Hour)
-	signReq.NotAfter = stepapi.NewTimeDuration(notAfter)
-
 	// Sign the certificate.
-	client, err := ca.NewClient(stepCA.URL, ca.WithRootFile(stepCA.RootPath))
+	client, err := ca.NewClient(stepCA.URL, ca.WithTransport(tr))
 	if err != nil {
 		return fmt.Errorf("create Step CA client: %w", err)
 	}
@@ -107,7 +130,7 @@ func requestCertJWK(stepCA *StepCAConfig, sans []string, certPath, keyPath strin
 	}
 
 	// Write the certificate PEM.
-	if err := writeCertPEM(certPath, resp); err != nil {
+	if err := WriteCertPEM(certPath, resp); err != nil {
 		return fmt.Errorf("write certificate: %w", err)
 	}
 
@@ -191,12 +214,10 @@ func requestCertACME(stepCA *StepCAConfig, sans []string, certPath, keyPath stri
 	}
 	user.registration = reg
 
-	// Request the certificate.
-	notAfter := time.Now().Add(90 * 24 * time.Hour)
+	// Request the certificate — let the provisioner decide validity duration.
 	resource, err := client.Certificate.Obtain(certificate.ObtainRequest{
-		Domains:  sans,
-		Bundle:   true,
-		NotAfter: notAfter,
+		Domains: sans,
+		Bundle:  true,
 	})
 	if err != nil {
 		return fmt.Errorf("obtain ACME certificate: %w", err)
@@ -234,8 +255,8 @@ func readProvisionerPassword(passwordFile string) ([]byte, error) {
 	return []byte(pw), nil
 }
 
-// writeCertPEM writes the certificate chain from a Step CA SignResponse to a PEM file.
-func writeCertPEM(path string, resp *stepapi.SignResponse) error {
+// WriteCertPEM writes the certificate chain from a Step CA SignResponse to a PEM file.
+func WriteCertPEM(path string, resp *stepapi.SignResponse) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err

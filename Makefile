@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
+.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
@@ -159,6 +159,38 @@ chat-codex: chat-example
 
 chat-gemini: CHAT_PROVIDER=gemini
 chat-gemini: chat-example
+
+# chat-ca: connects via Step CA-issued mTLS credentials + JWT from /tmp/bridge-creds
+CHAT_CA_TARGET ?= macbook.tail6198c2.ts.net:9445
+CHAT_CA_CREDS  ?= /tmp/bridge-creds
+CHAT_CA_NAME   ?= do-dev2
+
+chat-ca-example:
+	./scripts/with_env_secrets.sh go run ./examples/chat-ca \
+		-target $(CHAT_CA_TARGET) \
+		-provider $(CHAT_PROVIDER) \
+		-project $(CHAT_PROJECT) \
+		-cacert $(CHAT_CA_CREDS)/ca-bundle.crt \
+		-cert $(CHAT_CA_CREDS)/$(CHAT_CA_NAME).crt \
+		-key $(CHAT_CA_CREDS)/$(CHAT_CA_NAME).key \
+		-servername server \
+		-jwt-key jwt-signing.key \
+		-jwt-issuer $(CHAT_CA_NAME) \
+		-jwt-audience bridge \
+		-timeout 5m \
+		$(CHAT_REPO)
+
+chat-ca-claude: CHAT_PROVIDER=claude
+chat-ca-claude: chat-ca-example
+
+chat-ca-opencode: CHAT_PROVIDER=opencode
+chat-ca-opencode: chat-ca-example
+
+chat-ca-codex: CHAT_PROVIDER=codex
+chat-ca-codex: chat-ca-example
+
+chat-ca-gemini: CHAT_PROVIDER=gemini
+chat-ca-gemini: chat-ca-example
 
 chat-ts-example:
 	cd examples/chat-ts && \

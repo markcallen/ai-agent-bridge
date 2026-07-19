@@ -3,10 +3,13 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -218,6 +221,46 @@ func detectTailscaleFQDN() string {
 }
 
 // fetchStepCARoot fetches the root certificate from a Step CA /roots endpoint.
+// verifyStepCARoot dials the Step CA using the PEM root at rootPath and returns
+// an error if the TLS handshake fails. This lets callers detect a stale cached
+// root and re-fetch before proceeding.
+func verifyStepCARoot(caURL, rootPath string) error {
+	pemData, err := os.ReadFile(rootPath)
+	if err != nil {
+		return err
+	}
+	pool := x509.NewCertPool()
+	block, _ := pem.Decode(pemData)
+	if block == nil {
+		return fmt.Errorf("no PEM block in %s", rootPath)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return err
+	}
+	pool.AddCert(cert)
+
+	u, err := url.Parse(caURL)
+	if err != nil {
+		return err
+	}
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	}
+
+	conn, err := tls.Dial("tcp", host+":"+port, &tls.Config{
+		RootCAs:    pool,
+		ServerName: host,
+	})
+	if err != nil {
+		return err
+	}
+	_ = conn.Close()
+	return nil
+}
+
 func fetchStepCARoot(caURL, outPath string) error {
 	client := &http.Client{
 		Transport: &http.Transport{

@@ -105,7 +105,7 @@ func runClientInit(stepCAURL, rootPath, provisioner, name, target string) error 
 		}
 	}
 
-	// Root cert — fetch if not provided.
+	// Root cert — fetch if not provided, or if the cached copy no longer validates the CA.
 	if rootPath == "" {
 		rootPath = filepath.Join(certsDir, "step-ca-root.crt")
 		if _, err := os.Stat(rootPath); os.IsNotExist(err) {
@@ -114,6 +114,12 @@ func runClientInit(stepCAURL, rootPath, provisioner, name, target string) error 
 				return fmt.Errorf("fetch Step CA root cert: %w", err)
 			}
 			fmt.Printf("  Saved to %s\n", rootPath)
+		} else if err := verifyStepCARoot(stepCAURL, rootPath); err != nil {
+			fmt.Printf("Cached root cert no longer valid (%v), re-fetching...\n", err)
+			if err := fetchStepCARoot(stepCAURL, rootPath); err != nil {
+				return fmt.Errorf("fetch Step CA root cert: %w", err)
+			}
+			fmt.Printf("  Updated root cert saved to %s\n", rootPath)
 		} else {
 			fmt.Printf("Using existing root cert: %s\n", rootPath)
 		}

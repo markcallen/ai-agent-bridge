@@ -21,6 +21,7 @@ func newClientCmd() *cobra.Command {
 		Short: "Client credential management",
 	}
 	cmd.AddCommand(newClientInitCmd())
+	cmd.AddCommand(newClientRenewCmd())
 	cmd.AddCommand(newClientEnrollCmd())
 	return cmd
 }
