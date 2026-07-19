@@ -675,6 +675,10 @@ func (s *Supervisor) appendChunk(ms *managedSession, payload []byte, ctype Chunk
 func (s *Supervisor) fanoutControlEvent(ms *managedSession, ctype ChunkType, payload []byte) {
 	chunk := OutputChunk{Type: ctype, Payload: payload}
 	ms.mu.Lock()
+	if ms.liveClosed {
+		ms.mu.Unlock()
+		return
+	}
 	for clientID, entry := range ms.observers {
 		select {
 		case entry.ch <- chunk:
