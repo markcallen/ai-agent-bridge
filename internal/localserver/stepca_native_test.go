@@ -56,9 +56,11 @@ func TestProvisionerRouting_ACME(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	mat, err := EnsurePKI(stateDir, []string{"server.example.com"}, logger, stepCfg)
+	// "server" must be stripped for ACME (public CAs reject bare hostnames).
+	mat, err := EnsurePKI(stateDir, []string{"server", "server.example.com"}, logger, stepCfg)
 	require.NoError(t, err)
 
+	assert.NotContains(t, *acmeSANs, "server", "ACME must strip 'server' SAN")
 	assert.Contains(t, *acmeSANs, "server.example.com")
 	assert.FileExists(t, mat.ServerCertPath)
 	assert.FileExists(t, mat.ServerKeyPath)
@@ -103,7 +105,9 @@ func TestProvisionerRouting_ACME_CaseInsensitive(t *testing.T) {
 }
 
 // TestProvisionerRouting_JWK verifies that an empty provisioner or a named JWK
-// provisioner routes to the JWK function variable.
+// provisioner routes to the JWK function variable, and that "server" is
+// preserved in the SANs (unlike ACME, JWK / internal Step CA accepts it and
+// the client requires it for ServerName verification).
 func TestProvisionerRouting_JWK(t *testing.T) {
 	for _, provName := range []string{"", "bridge-jwk", "my-provisioner"} {
 		t.Run("provisioner="+provName, func(t *testing.T) {
@@ -133,8 +137,11 @@ func TestProvisionerRouting_JWK(t *testing.T) {
 			}
 
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-			_, err := EnsurePKI(stateDir, []string{"my-host.example.com"}, logger, stepCfg)
+			// Pass "server" explicitly — JWK must NOT strip it (clients verify
+			// ServerName "server" against the issued cert).
+			_, err := EnsurePKI(stateDir, []string{"server", "my-host.example.com"}, logger, stepCfg)
 			require.NoError(t, err)
+			assert.Contains(t, *jwkSANs, "server", "JWK must preserve 'server' SAN for client TLS verification")
 			assert.Contains(t, *jwkSANs, "my-host.example.com")
 		})
 	}

@@ -192,37 +192,39 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	logger.Info("copied Step CA root", "bundle", bundlePath)
 
 	// 2. Obtain server certificate from Step CA.
-	// Filter out local-only SANs (server, localhost, 127.0.0.1) that are
-	// added by buildServerSANs for Tier 1 self-signed certs but may be
-	// rejected by external CA provisioners.
-	var sans []string
-	for _, s := range serverSANs {
-		switch s {
-		case "server", "localhost", "127.0.0.1":
-			continue
-		default:
-			sans = append(sans, s)
-		}
-	}
-	if len(sans) == 0 {
-		hostname, _ := os.Hostname()
-		if hostname != "" {
-			sans = []string{hostname}
-		} else {
-			sans = []string{"bridge"}
-		}
-	}
 	serverCert := filepath.Join(certsDir, "server.crt")
 	serverKey := filepath.Join(certsDir, "server.key")
 
 	// Dispatch to the native certificate request function based on provisioner type.
 	switch strings.ToLower(stepCA.Provisioner) {
 	case "acme":
+		// ACME / public CAs reject bare hostnames such as "server" or
+		// "localhost" and raw IPs like "127.0.0.1".  Strip them before
+		// requesting so the challenge doesn't fail.
+		var sans []string
+		for _, s := range serverSANs {
+			switch s {
+			case "server", "localhost", "127.0.0.1":
+				continue
+			default:
+				sans = append(sans, s)
+			}
+		}
+		if len(sans) == 0 {
+			hostname, _ := os.Hostname()
+			if hostname != "" {
+				sans = []string{hostname}
+			} else {
+				sans = []string{"bridge"}
+			}
+		}
 		if err := requestCertACMEFn(stepCA, sans, serverCert, serverKey, logger); err != nil {
 			return nil, fmt.Errorf("obtain server cert from Step CA (ACME): %w", err)
 		}
 	default:
-		if err := requestCertJWKFn(stepCA, sans, serverCert, serverKey, logger); err != nil {
+		// JWK (internal Step CA) accepts all SANs including "server",
+		// which must be present so the client can verify ServerName "server".
+		if err := requestCertJWKFn(stepCA, serverSANs, serverCert, serverKey, logger); err != nil {
 			return nil, fmt.Errorf("obtain server cert from Step CA (JWK): %w", err)
 		}
 	}
