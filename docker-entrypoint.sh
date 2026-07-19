@@ -282,8 +282,8 @@ echo "==> Starting bridge as non-root user..."
 BRIDGE_CMD="bridgectl server start --config $BRIDGE_CONFIG"
 if [ -n "$STEP_CA_URL" ] && [ -n "$STEP_CA_ROOT" ]; then
   BRIDGE_CMD="$BRIDGE_CMD --step-ca-url $STEP_CA_URL --step-ca-root $STEP_CA_ROOT"
-  # Pass the provisioner password file so `step ca certificate` runs
-  # non-interactively (Docker containers have no TTY for interactive prompts).
+  # Pass the provisioner password file for non-interactive JWK cert requests
+  # (Docker containers have no TTY for interactive password prompts).
   STEP_PASS_FILE="/run/bridge-certs/step-provisioner-password"
   if [ -f "$STEP_PASS_FILE" ]; then
     BRIDGE_CMD="$BRIDGE_CMD --step-ca-provisioner-password-file $STEP_PASS_FILE"
