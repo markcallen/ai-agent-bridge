@@ -64,6 +64,18 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
+	// Check session state before attempting to claim the writer slot.
+	info, err := client.GetSession(ctx, &bridgev1.GetSessionRequest{SessionId: sessionID})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "get session: %v\n", err)
+		os.Exit(1)
+	}
+	if info.ActiveWriterClientId != "" {
+		fmt.Fprintf(os.Stderr, "session already has an active writer (client %s)\n", info.ActiveWriterClientId)
+		fmt.Fprintf(os.Stderr, "use watch-session to observe without taking the writer slot\n")
+		os.Exit(1)
+	}
+
 	clientID := uuid.NewString()
 	stream, err := client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
 		SessionId: sessionID,
