@@ -27,9 +27,9 @@ func main() {
 	timeout := flag.Duration("timeout", 30*time.Minute, "session timeout")
 
 	// mTLS flags — defaults point to the Step CA credential directory
-	caBundle := flag.String("cacert", "/tmp/bridge-creds/ca-bundle.crt", "path to CA bundle")
-	cert := flag.String("cert", "/tmp/bridge-creds/do-dev2.crt", "path to client certificate")
-	key := flag.String("key", "/tmp/bridge-creds/do-dev2.key", "path to client private key")
+	caBundle := flag.String("cacert", "/home/marka/.ai-agent-bridge/certs/step-ca-root.crt", "path to CA bundle")
+	cert := flag.String("cert", "/home/marka/.ai-agent-bridge/certs/do-dev2.crt", "path to client certificate")
+	key := flag.String("key", "/home/marka/.ai-agent-bridge/certs/do-dev2.key", "path to client private key")
 	serverName := flag.String("servername", "server", "TLS server name override")
 
 	// JWT flags — defaults match the identity issued by the Step CA
