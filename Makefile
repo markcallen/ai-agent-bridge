@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
+.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start list-sessions build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
@@ -191,6 +191,22 @@ chat-ca-codex: chat-ca-example
 
 chat-ca-gemini: CHAT_PROVIDER=gemini
 chat-ca-gemini: chat-ca-example
+
+LIST_SESSIONS_TARGET ?= macbook.tail6198c2.ts.net:9445
+LIST_SESSIONS_CACERT ?= /home/marka/.ai-agent-bridge/certs/step-ca-root.crt
+LIST_SESSIONS_CERT   ?= /home/marka/.ai-agent-bridge/certs/do-dev2.crt
+LIST_SESSIONS_KEY    ?= /home/marka/.ai-agent-bridge/certs/do-dev2.key
+LIST_SESSIONS_JWT    ?= jwt-signing.key
+LIST_SESSIONS_ISSUER ?= do-dev2
+
+list-sessions:
+	go run ./examples/list-sessions \
+		-target $(LIST_SESSIONS_TARGET) \
+		-cacert $(LIST_SESSIONS_CACERT) \
+		-cert   $(LIST_SESSIONS_CERT) \
+		-key    $(LIST_SESSIONS_KEY) \
+		-jwt-key    $(LIST_SESSIONS_JWT) \
+		-jwt-issuer $(LIST_SESSIONS_ISSUER)
 
 chat-ts-example:
 	cd examples/chat-ts && \
