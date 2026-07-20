@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start list-sessions watch-session build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
+.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start list-sessions watch-session attach-session build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
@@ -209,6 +209,7 @@ list-sessions:
 		-jwt-issuer $(LIST_SESSIONS_ISSUER)
 
 WATCH_SESSION_ID ?=
+ATTACH_SESSION_ID ?=
 
 watch-session:
 	@test -n "$(WATCH_SESSION_ID)" || (echo "usage: make watch-session WATCH_SESSION_ID=<id>"; exit 1)
@@ -220,6 +221,17 @@ watch-session:
 		-jwt-key    $(LIST_SESSIONS_JWT) \
 		-jwt-issuer $(LIST_SESSIONS_ISSUER) \
 		$(WATCH_SESSION_ID)
+
+attach-session:
+	@test -n "$(ATTACH_SESSION_ID)" || (echo "usage: make attach-session ATTACH_SESSION_ID=<id>"; exit 1)
+	go run ./examples/attach-session \
+		-target $(LIST_SESSIONS_TARGET) \
+		-cacert $(LIST_SESSIONS_CACERT) \
+		-cert   $(LIST_SESSIONS_CERT) \
+		-key    $(LIST_SESSIONS_KEY) \
+		-jwt-key    $(LIST_SESSIONS_JWT) \
+		-jwt-issuer $(LIST_SESSIONS_ISSUER) \
+		$(ATTACH_SESSION_ID)
 
 chat-ts-example:
 	cd examples/chat-ts && \
