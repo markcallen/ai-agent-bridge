@@ -107,7 +107,7 @@ jobs:
         run: pnpm --dir examples/web/ui install --frozen-lockfile
 
       - name: Build web UI
-        run: npm run build:ts
+        run: pnpm --dir examples/web/ui run build
 
   smoke:
     if: github.event_name == 'pull_request'
