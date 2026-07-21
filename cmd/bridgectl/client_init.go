@@ -213,8 +213,10 @@ func runClientInit(stepCAURL, rootPath, provisioner, name, target string) error 
 			"--cert", certPath,
 			"--key", keyPath,
 			"--name", name,
+			"--out", certsDir,
 		}
 		enrollCmd := newClientEnrollCmd()
+		enrollCmd.SilenceUsage = true
 		enrollCmd.SetArgs(enrollArgs)
 		if err := enrollCmd.Execute(); err != nil {
 			return fmt.Errorf("auto-enroll: %w", err)

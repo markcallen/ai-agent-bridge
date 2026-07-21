@@ -93,6 +93,8 @@ with a cert signed by the server's trusted CA can enroll.`,
 			}
 
 			// Connect with mTLS only (no JWT — we're enrolling to get JWT auth).
+			// ServerName "server" matches the SAN that buildServerSANs always
+			// adds to every bridge server cert regardless of PKI mode.
 			client, err := bridgeclient.New(
 				bridgeclient.WithTarget(target),
 				bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
