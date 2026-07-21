@@ -108,11 +108,19 @@ func runClientRenew(stepCAURL, rootPath, certPath, keyPath string, before time.D
 		return fmt.Errorf("load cert/key: %w", err)
 	}
 
+	// Use GetClientCertificate instead of Certificates so the cert is sent
+	// unconditionally. With Certificates, Go only sends the cert when its
+	// issuer DN matches what the server advertises in CertificateRequest; Step
+	// CA chains (root→intermediate→leaf) cause a mismatch that silently
+	// suppresses the cert, resulting in "missing client certificate" from the
+	// /renew endpoint.
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			RootCAs:      pool,
-			Certificates: []tls.Certificate{tlsCert},
-			MinVersion:   tls.VersionTLS12,
+			RootCAs: pool,
+			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				return &tlsCert, nil
+			},
+			MinVersion: tls.VersionTLS12,
 		},
 	}
 
