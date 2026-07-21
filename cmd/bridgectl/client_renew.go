@@ -1,16 +1,14 @@
 package main
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
-	ca "github.com/smallstep/certificates/ca"
 	"github.com/spf13/cobra"
 
 	"github.com/markcallen/ai-agent-bridge/internal/localserver"
@@ -28,17 +26,16 @@ func newClientRenewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "renew",
 		Short: "Renew a client certificate from Step CA",
-		Long: `Renew an existing client certificate using the certificate itself as
-the credential — no provisioner password required.
+		Long: `Renew an existing client certificate via the Step CA /renew endpoint.
 
-The existing cert and key are used for mutual TLS authentication against
-the Step CA /renew endpoint. The cert file is overwritten in-place; the
-key is unchanged.
+Uses the 'step' CLI to perform renewal with a signed token (the same
+mechanism as 'step ca renew'). The cert file is overwritten in-place;
+the key is unchanged.
 
 Use --before to only renew when the cert expires within a given window,
 making this safe to call from a cron job or systemd timer:
 
-  bridgectl client renew --before 2h`,
+  bridgectl client renew --step-ca-url https://step-ca.example.com --before 2h`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runClientRenew(stepCAURL, rootPath, certPath, keyPath, before)
 		},
@@ -92,53 +89,29 @@ func runClientRenew(stepCAURL, rootPath, certPath, keyPath string, before time.D
 		return nil
 	}
 
-	// Build a transport: system roots + Step CA root + existing client cert (for mTLS auth).
-	pool, err := x509.SystemCertPool()
+	stepBin, err := exec.LookPath("step")
 	if err != nil {
-		pool = x509.NewCertPool()
-	}
-	rootPEM, err := os.ReadFile(rootPath)
-	if err != nil {
-		return fmt.Errorf("read Step CA root: %w", err)
-	}
-	pool.AppendCertsFromPEM(rootPEM)
-
-	tlsCert, err := tls.LoadX509KeyPair(certPath, keyPath)
-	if err != nil {
-		return fmt.Errorf("load cert/key: %w", err)
-	}
-
-	// Use GetClientCertificate instead of Certificates so the cert is sent
-	// unconditionally. With Certificates, Go only sends the cert when its
-	// issuer DN matches what the server advertises in CertificateRequest; Step
-	// CA chains (root→intermediate→leaf) cause a mismatch that silently
-	// suppresses the cert, resulting in "missing client certificate" from the
-	// /renew endpoint.
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			RootCAs: pool,
-			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-				return &tlsCert, nil
-			},
-			MinVersion: tls.VersionTLS12,
-		},
-	}
-
-	// Create a Step CA client and renew.
-	client, err := ca.NewClient(stepCAURL, ca.WithTransport(tr))
-	if err != nil {
-		return fmt.Errorf("create Step CA client: %w", err)
+		return fmt.Errorf("'step' CLI not found on PATH — required for certificate renewal; install from https://smallstep.com/cli/: %w", err)
 	}
 
 	fmt.Printf("\nRenewing certificate from %s...\n", stepCAURL)
-	resp, err := client.Renew(tr)
-	if err != nil {
-		return fmt.Errorf("renew certificate: %w", err)
-	}
 
-	// Overwrite the existing cert file in-place; key is unchanged.
-	if err := localserver.WriteCertPEM(certPath, resp); err != nil {
-		return fmt.Errorf("write renewed cert: %w", err)
+	// step ca renew uses a signed token (not mTLS) by default, which works
+	// regardless of whether the Step CA server requests client certs at the
+	// TLS level.
+	args := []string{
+		"ca", "renew",
+		"--ca-url", stepCAURL,
+		"--root", rootPath,
+		"--force",
+		certPath,
+		keyPath,
+	}
+	cmd := exec.Command(stepBin, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("step ca renew: %w", err)
 	}
 
 	renewed, err := loadLeafCert(certPath)
