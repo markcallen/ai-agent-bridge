@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 )
@@ -272,6 +273,80 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	logger.Info("generated JWT signing keypair", "pub", pubPath)
 
 	return mat, nil
+}
+
+// RenewServerCert re-issues the server certificate in-place. For auto-PKI it
+// re-signs using the existing CA; for Step CA it requests a new cert from the
+// CA server. The new cert is written to the same file paths so the
+// CertReloader picks it up on the next TLS handshake without a server restart.
+func RenewServerCert(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig) error {
+	mat := LoadPKIMaterial(stateDir)
+
+	if stepCA != nil && stepCA.URL != "" {
+		return renewServerCertStepCA(mat, serverSANs, logger, stepCA)
+	}
+	return renewServerCertAutoGen(mat, serverSANs, logger)
+}
+
+func renewServerCertAutoGen(mat *PKIMaterial, serverSANs []string, logger *slog.Logger) error {
+	caCert, caKey, err := pki.LoadCA(mat.CACertPath, mat.CAKeyPath)
+	if err != nil {
+		return fmt.Errorf("load CA: %w", err)
+	}
+
+	certsDir := filepath.Dir(mat.ServerCertPath)
+	_, _, err = pki.IssueCert(caCert, caKey, pki.CertTypeServer, "server", serverSANs, certsDir)
+	if err != nil {
+		return fmt.Errorf("re-issue server cert: %w", err)
+	}
+
+	logger.Info("renewed server certificate (auto-PKI)", "cert", mat.ServerCertPath, "sans", serverSANs)
+	return nil
+}
+
+func renewServerCertStepCA(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig) error {
+	switch strings.ToLower(stepCA.Provisioner) {
+	case "acme":
+		// ACME / public CAs reject bare hostnames and raw IPs.
+		var sans []string
+		for _, s := range serverSANs {
+			switch s {
+			case "server", "localhost", "127.0.0.1":
+				continue
+			default:
+				sans = append(sans, s)
+			}
+		}
+		if len(sans) == 0 {
+			hostname, _ := os.Hostname()
+			if hostname != "" {
+				sans = []string{hostname}
+			} else {
+				sans = []string{"bridge"}
+			}
+		}
+		if err := requestCertACMEFn(stepCA, sans, mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
+			return fmt.Errorf("renew server cert (ACME): %w", err)
+		}
+	default:
+		if err := requestCertJWKFn(stepCA, serverSANs, mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
+			return fmt.Errorf("renew server cert (JWK): %w", err)
+		}
+	}
+
+	logger.Info("renewed server certificate (Step CA)", "cert", mat.ServerCertPath)
+	return nil
+}
+
+// ServerCertExpiry returns the NotBefore and NotAfter times of the server
+// certificate at the given path. Used by the renewal loop to determine when
+// to trigger renewal.
+func ServerCertExpiry(certPath string) (notBefore, notAfter time.Time, err error) {
+	cert, err := pki.LoadCert(certPath)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	return cert.NotBefore, cert.NotAfter, nil
 }
 
 // IssueClientCert issues a new client certificate signed by the existing CA.

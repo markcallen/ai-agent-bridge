@@ -490,7 +490,7 @@ func TestBuildServerSANs(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := buildServerSANs(tc.listenAddr, tc.extra)
+			result := BuildServerSANs(tc.listenAddr, tc.extra)
 			for _, want := range tc.wantHas {
 				assert.Contains(t, result, want)
 			}

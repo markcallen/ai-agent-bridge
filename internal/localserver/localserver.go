@@ -73,6 +73,12 @@ type Server struct {
 	stateDir   string
 	mu         sync.Mutex
 	stopped    bool
+
+	// Certificate renewal (secure mode only).
+	renewCancel context.CancelFunc // cancels the renewal goroutine
+	serverSANs  []string           // SANs for cert re-issuance
+	stepCA      *StepCAConfig      // nil for auto-PKI mode
+	pkiMat      *PKIMaterial       // paths to cert/key files
 }
 
 // ServerMode represents how the server is running.
@@ -441,6 +447,12 @@ func Start(cfg Config) (*Server, error) {
 	var grpcOpts []grpc.ServerOption
 	var jwtVerifier *auth.JWTVerifier
 
+	// Renewal-related state; populated when secure mode is using managed PKI.
+	var serverSANs []string
+	var stepCAConfig *StepCAConfig
+	var pkiMat *PKIMaterial
+	explicitCerts := false
+
 	if cfg.ListenAddr != "" {
 		// Secure mode: TCP + mTLS + JWT.
 		// TODO(windows): Secure mode (mTLS+JWT) is not yet supported on Windows.
@@ -456,8 +468,10 @@ func Start(cfg Config) (*Server, error) {
 		mode = ModeSecure
 
 		var mat *PKIMaterial
+
 		if cfg.CABundlePath != "" {
 			// Use pre-issued certificates from Config (e.g. provided via config file).
+			explicitCerts = true
 			if cfg.TLSCertPath == "" || cfg.TLSKeyPath == "" {
 				sup.Close()
 				if store != nil {
@@ -472,10 +486,9 @@ func Start(cfg Config) (*Server, error) {
 			}
 		} else {
 			// Auto-generate PKI material if not present, or delegate to Step CA.
-			sans := buildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
-			var stepCA *StepCAConfig
+			serverSANs = BuildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
 			if cfg.StepCAURL != "" {
-				stepCA = &StepCAConfig{
+				stepCAConfig = &StepCAConfig{
 					URL:                     cfg.StepCAURL,
 					RootPath:                cfg.StepCARootPath,
 					OIDCProviderURL:         cfg.StepCAOIDCProvider,
@@ -484,7 +497,7 @@ func Start(cfg Config) (*Server, error) {
 				}
 			}
 			var pkiErr error
-			mat, pkiErr = EnsurePKI(stateDir, sans, logger, stepCA)
+			mat, pkiErr = EnsurePKI(stateDir, serverSANs, logger, stepCAConfig)
 			if pkiErr != nil {
 				sup.Close()
 				if store != nil {
@@ -493,6 +506,7 @@ func Start(cfg Config) (*Server, error) {
 				return nil, fmt.Errorf("ensure PKI: %w", pkiErr)
 			}
 		}
+		pkiMat = mat
 
 		secureOpts, verifier, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys)
 		if err != nil {
@@ -572,6 +586,19 @@ func Start(cfg Config) (*Server, error) {
 		listener:   ln,
 		logger:     logger,
 		stateDir:   stateDir,
+	}
+
+	// Start background certificate renewal for auto-PKI and Step CA modes.
+	// Explicit certs are managed externally; the CertReloader in the TLS
+	// config still picks up changes on disk, but we don't run the renewal
+	// loop ourselves.
+	if mode == ModeSecure && !explicitCerts {
+		s.serverSANs = serverSANs
+		s.stepCA = stepCAConfig
+		s.pkiMat = pkiMat
+		renewCtx, renewCancel := context.WithCancel(context.Background())
+		s.renewCancel = renewCancel
+		go s.certRenewalLoop(renewCtx)
 	}
 
 	go func() {
@@ -654,9 +681,9 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 	}, verifier, nil
 }
 
-// buildServerSANs extracts the host from listenAddr and merges it with
+// BuildServerSANs extracts the host from listenAddr and merges it with
 // any additional SANs. Deduplicates entries.
-func buildServerSANs(listenAddr string, extra []string) []string {
+func BuildServerSANs(listenAddr string, extra []string) []string {
 	seen := make(map[string]bool)
 	var sans []string
 	add := func(s string) {
@@ -714,6 +741,11 @@ func (s *Server) Stop() {
 
 	s.logger.Info("stopping local server")
 
+	// Cancel the background cert renewal goroutine if running.
+	if s.renewCancel != nil {
+		s.renewCancel()
+	}
+
 	// Bounded graceful shutdown: try graceful first, then force-stop after
 	// 5 seconds. GracefulStop can block indefinitely if long-lived streams
 	// (e.g. AttachSession) are active.
@@ -743,6 +775,70 @@ func (s *Server) Stop() {
 	_ = os.Remove(filepath.Join(s.stateDir, "server.mode"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.sock"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.lock"))
+}
+
+// certRenewalCheckInterval is how often the renewal loop checks cert expiry.
+const certRenewalCheckInterval = 1 * time.Hour
+
+// certRenewalLoop periodically checks the server certificate's expiry and
+// renews it when less than 1/3 of the certificate's total lifetime remains.
+// Renewed certs are written to the same file paths; the CertReloader in the
+// TLS config picks them up on the next handshake. Existing gRPC connections
+// are unaffected — only new TLS handshakes use the renewed cert.
+func (s *Server) certRenewalLoop(ctx context.Context) {
+	// Check once at startup to handle already-expired certs.
+	s.checkAndRenew()
+
+	ticker := time.NewTicker(certRenewalCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.checkAndRenew()
+		}
+	}
+}
+
+func (s *Server) checkAndRenew() {
+	notBefore, notAfter, err := ServerCertExpiry(s.pkiMat.ServerCertPath)
+	if err != nil {
+		s.logger.Warn("cert renewal: failed to read server cert", "error", err)
+		return
+	}
+
+	lifetime := notAfter.Sub(notBefore)
+	remaining := time.Until(notAfter)
+	renewThreshold := lifetime / 3
+
+	if remaining > renewThreshold {
+		s.logger.Debug("cert renewal: certificate still valid",
+			"expires", notAfter.Format(time.RFC3339),
+			"remaining", remaining.Round(time.Minute),
+			"renew_at", time.Now().Add(remaining-renewThreshold).Format(time.RFC3339),
+		)
+		return
+	}
+
+	if remaining <= 0 {
+		s.logger.Warn("cert renewal: server certificate has EXPIRED, renewing now",
+			"expired", notAfter.Format(time.RFC3339),
+		)
+	} else {
+		s.logger.Info("cert renewal: server certificate approaching expiry, renewing",
+			"expires", notAfter.Format(time.RFC3339),
+			"remaining", remaining.Round(time.Minute),
+		)
+	}
+
+	if err := RenewServerCert(s.stateDir, s.serverSANs, s.logger, s.stepCA); err != nil {
+		s.logger.Error("cert renewal: failed to renew server certificate", "error", err)
+		return
+	}
+
+	s.logger.Info("cert renewal: server certificate renewed successfully — new connections will use the new cert")
 }
 
 // listen creates the appropriate listener for the platform.

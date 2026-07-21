@@ -28,6 +28,7 @@ func newSessionCmd() *cobra.Command {
 	cmd.AddCommand(
 		newSessionListCmd(),
 		newSessionAttachCmd(),
+		newSessionWatchCmd(),
 		newSessionStopCmd(),
 	)
 
@@ -133,6 +134,28 @@ func newSessionAttachCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&observeOnly, "observe", false, "attach as read-only observer (no input)")
 	cmd.Flags().BoolVar(&takeOver, "take-over", false, "forcibly claim the writer slot from the current active writer")
 	cmd.Flags().BoolVar(&release, "release", false, "release the current active writer slot (affects whoever currently holds it)")
+	addRemoteFlags(cmd, &remote, &cert, &key, &jwtKey)
+	return cmd
+}
+
+func newSessionWatchCmd() *cobra.Command {
+	var (
+		remote string
+		cert   string
+		key    string
+		jwtKey string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "watch <session-id>",
+		Short: "Watch a running session (read-only)",
+		Long:  "Attach to a running session as a read-only observer. Shorthand for 'session attach <session-id> --observe'.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return attachSession(args[0], bridgev1.AttachRole_ATTACH_ROLE_OBSERVER, false, remote, cert, key, jwtKey)
+		},
+	}
+
 	addRemoteFlags(cmd, &remote, &cert, &key, &jwtKey)
 	return cmd
 }

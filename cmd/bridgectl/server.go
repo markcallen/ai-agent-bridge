@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/markcallen/ai-agent-bridge/internal/config"
 	"github.com/markcallen/ai-agent-bridge/internal/localserver"
 )
 
@@ -68,6 +69,7 @@ func newServerCmd() *cobra.Command {
 		newServerStatusCmd(),
 		newServerStopCmd(),
 		newServerIssueClientCmd(),
+		newServerRenewCertCmd(),
 	)
 
 	return cmd
@@ -421,6 +423,127 @@ for interactive authentication. The 'step' CLI must be on PATH.`,
 	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to Step CA root certificate (required with --oidc-provider)")
 	cmd.Flags().BoolVar(&bundleCreds, "bundle", false, "create a .tar.gz bundle of client credentials for easy transfer")
 	cmd.Flags().StringVar(&deployTarget, "deploy", "", "scp credential bundle to a remote host (e.g. do-dev2:~/bridge-creds/); implies --bundle")
+
+	return cmd
+}
+
+func newServerRenewCertCmd() *cobra.Command {
+	var (
+		configPath                    string
+		serverSANs                    []string
+		stepCAURL                     string
+		stepCARootPath                string
+		stepCAProvisioner             string
+		stepCAProvisionerPasswordFile string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "renew-cert",
+		Short: "Renew the server TLS certificate without restarting",
+		Long: `Re-issue the server TLS certificate using the existing CA (auto-PKI) or
+by requesting a new one from Step CA. The new certificate is written to
+the same file paths so the running server picks it up on the next TLS
+handshake — no restart required.
+
+Existing client connections are unaffected; only new connections use the
+renewed certificate. Client trust bundles do not need to change because
+the same CA signed both the old and new certificates.
+
+The running server also performs automatic background renewal when less
+than 1/3 of the certificate's lifetime remains. Use this command for
+immediate renewal (e.g. when the cert has already expired).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			stateDir := localserver.StateDir()
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+			// Load config file for SANs and Step CA settings.
+			if configPath == "" {
+				defaultCfg := filepath.Join(stateDir, "bridge.yaml")
+				if _, err := os.Stat(defaultCfg); err == nil {
+					configPath = defaultCfg
+				}
+			}
+			if configPath != "" {
+				fileCfg, err := config.Load(configPath)
+				if err != nil {
+					logger.Warn("could not load config file", "path", configPath, "error", err)
+				} else {
+					if len(serverSANs) == 0 && len(fileCfg.Server.SANs) > 0 {
+						serverSANs = fileCfg.Server.SANs
+					}
+					if stepCAURL == "" && fileCfg.StepCA.URL != "" {
+						stepCAURL = fileCfg.StepCA.URL
+					}
+					if stepCARootPath == "" && fileCfg.StepCA.Root != "" {
+						stepCARootPath = fileCfg.StepCA.Root
+					}
+					if stepCAProvisioner == "" && fileCfg.StepCA.Provisioner != "" {
+						stepCAProvisioner = fileCfg.StepCA.Provisioner
+					}
+					if stepCAProvisionerPasswordFile == "" && fileCfg.StepCA.ProvisionerPasswordFile != "" {
+						stepCAProvisionerPasswordFile = fileCfg.StepCA.ProvisionerPasswordFile
+					}
+					if len(serverSANs) == 0 && fileCfg.Server.Listen != "" {
+						serverSANs = localserver.BuildServerSANs(fileCfg.Server.Listen, nil)
+					}
+				}
+			}
+
+			// Ensure we have at least the default SANs.
+			if len(serverSANs) == 0 {
+				serverSANs = []string{"server", "127.0.0.1", "localhost"}
+			}
+
+			// Show current cert status.
+			mat := localserver.LoadPKIMaterial(stateDir)
+			_, notAfter, err := localserver.ServerCertExpiry(mat.ServerCertPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not read current cert: %v\n", err)
+			} else {
+				remaining := time.Until(notAfter)
+				if remaining <= 0 {
+					fmt.Fprintf(os.Stderr, "Current certificate EXPIRED %s ago.\n", (-remaining).Round(time.Second))
+				} else {
+					fmt.Fprintf(os.Stderr, "Current certificate expires in %s (%s).\n",
+						remaining.Round(time.Second), notAfter.Format(time.RFC3339))
+				}
+			}
+
+			var stepCA *localserver.StepCAConfig
+			if stepCAURL != "" {
+				stepCA = &localserver.StepCAConfig{
+					URL:                     stepCAURL,
+					RootPath:                stepCARootPath,
+					Provisioner:             stepCAProvisioner,
+					ProvisionerPasswordFile: stepCAProvisionerPasswordFile,
+				}
+			}
+
+			if err := localserver.RenewServerCert(stateDir, serverSANs, logger, stepCA); err != nil {
+				return fmt.Errorf("renew cert: %w", err)
+			}
+
+			// Show new cert status.
+			_, notAfter, err = localserver.ServerCertExpiry(mat.ServerCertPath)
+			if err != nil {
+				return fmt.Errorf("verify renewed cert: %w", err)
+			}
+
+			fmt.Fprintf(os.Stderr, "Certificate renewed. New expiry: %s (%s from now).\n",
+				notAfter.Format(time.RFC3339), time.Until(notAfter).Round(time.Second))
+			fmt.Fprintln(os.Stderr, "The running server will use the new certificate for all new TLS connections.")
+			fmt.Fprintln(os.Stderr, "Existing connections are unaffected.")
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&configPath, "config", "", "path to YAML config file (default: ~/.ai-agent-bridge/bridge.yaml)")
+	cmd.Flags().StringSliceVar(&serverSANs, "san", nil, "server cert SANs (overrides config file)")
+	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA URL (overrides config file)")
+	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "Step CA root cert path (overrides config file)")
+	cmd.Flags().StringVar(&stepCAProvisioner, "step-ca-provisioner", "", "Step CA provisioner name (overrides config file)")
+	cmd.Flags().StringVar(&stepCAProvisionerPasswordFile, "step-ca-provisioner-password-file", "", "provisioner password file (overrides config file)")
 
 	return cmd
 }
