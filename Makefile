@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini chat-ts-example chat-ts-claude chat-ts-opencode chat-ts-codex chat-ts-gemini chat-web-install chat-web-dev chat-web-build chat-web-start chat-web-docker-dev chat-web-docker-start list-sessions watch-session attach-session build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
+.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini sessions-list sessions-watch sessions-attach web-install web-dev web-build web-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
@@ -137,15 +137,9 @@ step-ca-issue-client:
 
 chat-example:
 	./scripts/with_env_secrets.sh go run ./examples/chat \
-		-target $(CHAT_TARGET) \
-		-provider $(CHAT_PROVIDER) \
-		-project $(CHAT_PROJECT) \
-		-cacert certs/ca-bundle.crt \
-		-cert certs/dev-client.crt \
-		-key certs/dev-client.key \
-		-jwt-key certs/jwt-signing.key \
-		-jwt-issuer dev \
-		-timeout 5m \
+		--provider $(CHAT_PROVIDER) \
+		--project $(CHAT_PROJECT) \
+		--timeout 5m \
 		$(CHAT_REPO)
 
 chat-claude: CHAT_PROVIDER=claude
@@ -160,24 +154,15 @@ chat-codex: chat-example
 chat-gemini: CHAT_PROVIDER=gemini
 chat-gemini: chat-example
 
-# chat-ca: connects via Step CA-issued mTLS credentials + JWT from /tmp/bridge-creds
-CHAT_CA_TARGET ?= macbook.tail6198c2.ts.net:9445
-CHAT_CA_CREDS  ?= /tmp/bridge-creds
-CHAT_CA_NAME   ?= do-dev2
+# chat-ca: connects via Step CA-issued mTLS credentials auto-discovered from ~/.ai-agent-bridge/certs/
+CHAT_CA_REMOTE ?= macbook.tail6198c2.ts.net
 
 chat-ca-example:
 	./scripts/with_env_secrets.sh go run ./examples/chat-ca \
-		-target $(CHAT_CA_TARGET) \
-		-provider $(CHAT_PROVIDER) \
-		-project $(CHAT_PROJECT) \
-		-cacert $(CHAT_CA_CREDS)/ca-bundle.crt \
-		-cert $(CHAT_CA_CREDS)/$(CHAT_CA_NAME).crt \
-		-key $(CHAT_CA_CREDS)/$(CHAT_CA_NAME).key \
-		-servername server \
-		-jwt-key jwt-signing.key \
-		-jwt-issuer $(CHAT_CA_NAME) \
-		-jwt-audience bridge \
-		-timeout 5m \
+		--remote $(CHAT_CA_REMOTE) \
+		--provider $(CHAT_PROVIDER) \
+		--project $(CHAT_PROJECT) \
+		--timeout 5m \
 		$(CHAT_REPO)
 
 chat-ca-claude: CHAT_PROVIDER=claude
@@ -192,89 +177,38 @@ chat-ca-codex: chat-ca-example
 chat-ca-gemini: CHAT_PROVIDER=gemini
 chat-ca-gemini: chat-ca-example
 
-LIST_SESSIONS_TARGET ?= macbook.tail6198c2.ts.net:9445
-LIST_SESSIONS_CACERT ?= /home/marka/.ai-agent-bridge/certs/step-ca-root.crt
-LIST_SESSIONS_CERT   ?= /home/marka/.ai-agent-bridge/certs/do-dev2.crt
-LIST_SESSIONS_KEY    ?= /home/marka/.ai-agent-bridge/certs/do-dev2.key
-LIST_SESSIONS_JWT    ?= jwt-signing.key
-LIST_SESSIONS_ISSUER ?= do-dev2
+# sessions example: list / watch / attach subcommands
+SESSIONS_REMOTE ?=
 
-list-sessions:
-	go run ./examples/list-sessions \
-		-target $(LIST_SESSIONS_TARGET) \
-		-cacert $(LIST_SESSIONS_CACERT) \
-		-cert   $(LIST_SESSIONS_CERT) \
-		-key    $(LIST_SESSIONS_KEY) \
-		-jwt-key    $(LIST_SESSIONS_JWT) \
-		-jwt-issuer $(LIST_SESSIONS_ISSUER)
+sessions-list:
+	go run ./examples/sessions list $(if $(SESSIONS_REMOTE),--remote $(SESSIONS_REMOTE))
 
-WATCH_SESSION_ID ?=
-ATTACH_SESSION_ID ?=
+SESSIONS_WATCH_ID ?=
+sessions-watch:
+	@test -n "$(SESSIONS_WATCH_ID)" || (echo "usage: make sessions-watch SESSIONS_WATCH_ID=<id>"; exit 1)
+	go run ./examples/sessions watch $(if $(SESSIONS_REMOTE),--remote $(SESSIONS_REMOTE)) $(SESSIONS_WATCH_ID)
 
-watch-session:
-	@test -n "$(WATCH_SESSION_ID)" || (echo "usage: make watch-session WATCH_SESSION_ID=<id>"; exit 1)
-	go run ./examples/watch-session \
-		-target $(LIST_SESSIONS_TARGET) \
-		-cacert $(LIST_SESSIONS_CACERT) \
-		-cert   $(LIST_SESSIONS_CERT) \
-		-key    $(LIST_SESSIONS_KEY) \
-		-jwt-key    $(LIST_SESSIONS_JWT) \
-		-jwt-issuer $(LIST_SESSIONS_ISSUER) \
-		$(WATCH_SESSION_ID)
+SESSIONS_ATTACH_ID ?=
+sessions-attach:
+	@test -n "$(SESSIONS_ATTACH_ID)" || (echo "usage: make sessions-attach SESSIONS_ATTACH_ID=<id>"; exit 1)
+	go run ./examples/sessions attach $(if $(SESSIONS_REMOTE),--remote $(SESSIONS_REMOTE)) $(SESSIONS_ATTACH_ID)
 
-attach-session:
-	@test -n "$(ATTACH_SESSION_ID)" || (echo "usage: make attach-session ATTACH_SESSION_ID=<id>"; exit 1)
-	go run ./examples/attach-session \
-		-target $(LIST_SESSIONS_TARGET) \
-		-cacert $(LIST_SESSIONS_CACERT) \
-		-cert   $(LIST_SESSIONS_CERT) \
-		-key    $(LIST_SESSIONS_KEY) \
-		-jwt-key    $(LIST_SESSIONS_JWT) \
-		-jwt-issuer $(LIST_SESSIONS_ISSUER) \
-		$(ATTACH_SESSION_ID)
+# web example: Go server + Vite frontend
+WEB_PORT     ?= 8080
+WEB_VITE_PORT ?= 5173
 
-chat-ts-example:
-	cd examples/chat-ts && \
-	../../scripts/with_env_secrets.sh npx tsx src/index.ts \
-		--target $(CHAT_TARGET) \
-		--provider $(CHAT_PROVIDER) \
-		--project $(CHAT_PROJECT) \
-		--cacert ../../certs/ca-bundle.crt \
-		--cert ../../certs/dev-client.crt \
-		--key ../../certs/dev-client.key \
-		--jwt-key $(CHAT_JWT_KEY) \
-		$(CHAT_REPO)
+web-install:
+	cd examples/web/ui && pnpm install
 
-chat-ts-claude: CHAT_PROVIDER=claude
-chat-ts-claude: chat-ts-example
+web-dev: web-install
+	cd examples/web && go run . --port $(WEB_PORT) --vite-port $(WEB_VITE_PORT) &\
+	cd examples/web/ui && pnpm dev
 
-chat-ts-opencode: CHAT_PROVIDER=opencode
-chat-ts-opencode: chat-ts-example
+web-build: web-install
+	cd examples/web/ui && pnpm build
 
-chat-ts-codex: CHAT_PROVIDER=codex
-chat-ts-codex: chat-ts-example
-
-chat-ts-gemini: CHAT_PROVIDER=gemini
-chat-ts-gemini: chat-ts-example
-
-chat-web-install:
-	cd packages/bridge-client-node && npm run build
-	cd examples/chat-web && pnpm install
-
-chat-web-dev: chat-web-install
-	cd examples/chat-web && pnpm dev
-
-chat-web-build: chat-web-install
-	cd examples/chat-web && pnpm build
-
-chat-web-start: chat-web-build
-	cd examples/chat-web && pnpm start
-
-chat-web-docker-dev:
-	docker compose -f docker-compose.yml -f docker-compose.local.yaml up --build --watch
-
-chat-web-docker-start:
-	docker compose up --build chat-web
+web-start: web-build
+	cd examples/web && go run . --port $(WEB_PORT) --vite-port 0
 
 test-cli-e2e:
 	go test -v -count=1 -race -timeout 120s ./e2e/bridgectl/

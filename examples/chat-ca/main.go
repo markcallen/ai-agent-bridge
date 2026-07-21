@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -17,47 +21,71 @@ import (
 	"github.com/google/uuid"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+	"github.com/markcallen/ai-agent-bridge/internal/localserver"
 	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
 
 func main() {
-	target := flag.String("target", "macbook.tail6198c2.ts.net:9445", "bridge gRPC address")
-	project := flag.String("project", "dev", "project ID")
-	provider := flag.String("provider", "claude", "interactive provider name")
+	remote := flag.String("remote", "", "remote hostname or host:port (required; port defaults to 9445)")
+	stateDir := flag.String("state-dir", "", "state dir for credential discovery (default: ~/.ai-agent-bridge)")
+	certFlag := flag.String("cert", "", "override client cert path")
+	keyFlag := flag.String("key", "", "override client key path (derived from --cert if omitted)")
+	jwtKeyFlag := flag.String("jwt-key", "", "override JWT signing key path")
+	project := flag.String("project", "local", "project ID")
+	provider := flag.String("provider", "claude", "provider name")
 	timeout := flag.Duration("timeout", 30*time.Minute, "session timeout")
-
-	// mTLS flags — defaults point to the Step CA credential directory
-	caBundle := flag.String("cacert", "/home/marka/.ai-agent-bridge/certs/step-ca-root.crt", "path to CA bundle")
-	cert := flag.String("cert", "/home/marka/.ai-agent-bridge/certs/do-dev2.crt", "path to client certificate")
-	key := flag.String("key", "/home/marka/.ai-agent-bridge/certs/do-dev2.key", "path to client private key")
-	serverName := flag.String("servername", "server", "TLS server name override")
-
-	// JWT flags — defaults match the identity issued by the Step CA
-	jwtKey := flag.String("jwt-key", "jwt-signing.key", "path to Ed25519 JWT signing key")
-	jwtIssuer := flag.String("jwt-issuer", "do-dev2", "JWT issuer claim")
-	jwtAudience := flag.String("jwt-audience", "bridge", "JWT audience claim")
-
 	flag.Parse()
 
+	if *remote == "" {
+		fmt.Fprintln(os.Stderr, "error: --remote is required")
+		fmt.Fprintln(os.Stderr, "usage: chat-ca --remote <host>[:<port>] [flags] <repo-path>")
+		os.Exit(1)
+	}
 	if flag.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "usage: chat-ca [flags] <repo-path>")
+		fmt.Fprintln(os.Stderr, "usage: chat-ca --remote <host>[:<port>] [flags] <repo-path>")
 		os.Exit(1)
 	}
 	repoPath := flag.Arg(0)
 
+	sd := *stateDir
+	if sd == "" {
+		sd = localserver.StateDir()
+	}
+
+	target := normalizeRemote(*remote)
+
+	certPath, keyPath, jwtKeyPath, issuer, err := resolveRemoteCreds(sd, *certFlag, *keyFlag, *jwtKeyFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "To set up remote credentials:")
+		fmt.Fprintln(os.Stderr, "  bridgectl client init    — enroll with the remote Step CA")
+		fmt.Fprintln(os.Stderr, "  bridgectl client enroll  — re-enroll an existing identity")
+		os.Exit(1)
+	}
+
+	certsDir := filepath.Join(sd, "certs")
+	caBundle := filepath.Join(certsDir, "step-ca-root.crt")
+	if _, statErr := os.Stat(caBundle); statErr != nil {
+		fmt.Fprintf(os.Stderr, "error: CA bundle not found: %s\n", caBundle)
+		fmt.Fprintln(os.Stderr, "Run 'bridgectl client init' to enroll with the remote Step CA")
+		os.Exit(1)
+	}
+
 	client, err := bridgeclient.New(
-		bridgeclient.WithTarget(*target),
+		bridgeclient.WithTarget(target),
 		bridgeclient.WithTimeout(*timeout),
 		bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
-			CABundlePath: *caBundle,
-			CertPath:     *cert,
-			KeyPath:      *key,
-			ServerName:   *serverName,
+			CABundlePath: caBundle,
+			CertPath:     certPath,
+			KeyPath:      keyPath,
+			ServerName:   "server",
 		}),
 		bridgeclient.WithJWT(bridgeclient.JWTConfig{
-			PrivateKeyPath: *jwtKey,
-			Issuer:         *jwtIssuer,
-			Audience:       *jwtAudience,
+			PrivateKeyPath: jwtKeyPath,
+			Issuer:         issuer,
+			Audience:       "bridge",
+			TTL:            5 * time.Minute,
 		}),
 	)
 	if err != nil {
@@ -173,6 +201,107 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\r\nstream failed: %v\r\n", err)
 		os.Exit(1)
 	}
+}
+
+// normalizeRemote ensures the remote address includes a port.
+func normalizeRemote(remote string) string {
+	if strings.Contains(remote, ":") {
+		return remote
+	}
+	return remote + ":9445"
+}
+
+// resolveRemoteCreds finds the client cert, key, JWT key, and issuer for a
+// remote Step CA connection. Explicit overrides take precedence; otherwise
+// credentials are auto-discovered from stateDir/certs/.
+func resolveRemoteCreds(stateDir, certOverride, keyOverride, jwtKeyOverride string) (certPath, keyPath, jwtKeyPath, issuer string, err error) {
+	certsDir := filepath.Join(stateDir, "certs")
+
+	// Resolve client cert.
+	if certOverride != "" {
+		certPath = certOverride
+	} else {
+		certPath, err = discoverClientCert(certsDir)
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("could not find client cert in %s: %w", certsDir, err)
+		}
+	}
+
+	// Resolve client key.
+	if keyOverride != "" {
+		keyPath = keyOverride
+	} else {
+		keyPath = strings.TrimSuffix(certPath, ".crt") + ".key"
+	}
+	if _, statErr := os.Stat(keyPath); statErr != nil {
+		return "", "", "", "", fmt.Errorf("client key not found: %s", keyPath)
+	}
+
+	// Derive issuer from the CN of the client cert.
+	issuer, err = certCN(certPath)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("read client cert CN from %s: %w", certPath, err)
+	}
+
+	// Resolve JWT signing key.
+	if jwtKeyOverride != "" {
+		jwtKeyPath = jwtKeyOverride
+	} else {
+		// Prefer certsDir/jwt-signing.key; fall back to stateDir/jwt-signing.key.
+		primary := filepath.Join(certsDir, "jwt-signing.key")
+		fallback := filepath.Join(stateDir, "jwt-signing.key")
+		if _, statErr := os.Stat(primary); statErr == nil {
+			jwtKeyPath = primary
+		} else if _, statErr := os.Stat(fallback); statErr == nil {
+			jwtKeyPath = fallback
+		} else {
+			return "", "", "", "", fmt.Errorf("JWT signing key not found (checked %s and %s)", primary, fallback)
+		}
+	}
+
+	return certPath, keyPath, jwtKeyPath, issuer, nil
+}
+
+// discoverClientCert finds the first non-CA *.crt file in certsDir.
+// It skips step-ca-root.crt, ca-bundle.crt, ca.crt, and server.crt.
+func discoverClientCert(certsDir string) (string, error) {
+	skip := map[string]bool{
+		"step-ca-root.crt": true,
+		"ca-bundle.crt":    true,
+		"ca.crt":           true,
+		"server.crt":       true,
+	}
+	entries, err := os.ReadDir(certsDir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".crt" {
+			continue
+		}
+		if skip[e.Name()] {
+			continue
+		}
+		return filepath.Join(certsDir, e.Name()), nil
+	}
+	return "", fmt.Errorf("no client certificate found")
+}
+
+// certCN reads a PEM-encoded certificate file and returns the subject CN.
+func certCN(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return "", fmt.Errorf("no PEM block found")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", err
+	}
+	return cert.Subject.CommonName, nil
 }
 
 func setRawTTY() (func(), error) {
