@@ -1,4 +1,4 @@
-.PHONY: build proto test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini sessions-list sessions-watch sessions-attach web-install web-dev web-build web-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
+.PHONY: build proto tools test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini sessions-list sessions-watch sessions-attach web-install web-dev web-build web-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
@@ -20,6 +20,10 @@ build: proto
 build-cli:
 	@mkdir -p $(BIN_DIR)
 	go build $(LDFLAGS) -o $(BRIDGE_CLI) ./cmd/bridgectl
+
+tools:
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@$(shell go list -m -f '{{.Version}}' google.golang.org/protobuf)
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(shell go list -m -f '{{.Version}}' google.golang.org/grpc/cmd/protoc-gen-go-grpc)
 
 PROTOC_INCLUDE := $(shell brew --prefix 2>/dev/null)/include
 proto:
