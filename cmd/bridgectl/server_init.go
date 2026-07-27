@@ -109,12 +109,27 @@ func runServerInit() error {
 			rootPath = existing.StepCA.Root
 		}
 
-		fmt.Printf("Fetching root cert from %s...\n", stepCA.URL)
-		if err := fetchStepCARoot(stepCA.URL, rootPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not fetch root cert: %v\n", err)
-			rootPath = prompt(reader, "Path to Step CA root certificate", rootPath)
-		} else {
+		for {
+			fmt.Printf("Fetching root cert from %s...\n", stepCA.URL)
+			if err := fetchStepCARoot(stepCA.URL, rootPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not fetch root cert: %v\n", err)
+				alt := prompt(reader, "Enter a different Step CA URL (or path to root cert file)", stepCA.URL)
+				if alt == stepCA.URL {
+					// User accepted the same URL — treat as "skip, use path instead".
+					rootPath = prompt(reader, "Path to Step CA root certificate", rootPath)
+					break
+				}
+				// If user entered a file path that exists, use it directly.
+				if _, statErr := os.Stat(alt); statErr == nil {
+					rootPath = alt
+					break
+				}
+				// Otherwise treat as a new URL and retry.
+				stepCA.URL = alt
+				continue
+			}
 			fmt.Printf("  Saved to %s\n", rootPath)
+			break
 		}
 		stepCA.Root = rootPath
 
