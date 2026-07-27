@@ -1,6 +1,7 @@
 package localserver
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -145,6 +146,43 @@ func TestProvisionerRouting_JWK(t *testing.T) {
 			assert.Contains(t, *jwkSANs, "my-host.example.com")
 		})
 	}
+}
+
+// TestSetCertRenewerFunc verifies that SetCertRenewerFunc correctly overrides
+// and restores the renewCertMTLSFn function variable.
+func TestSetCertRenewerFunc(t *testing.T) {
+	original := renewCertMTLSFn
+
+	called := false
+	restore := SetCertRenewerFunc(func(_ *StepCAConfig, _, _ string, _ *slog.Logger) error {
+		called = true
+		return nil
+	})
+
+	// Call through the function variable — it should call our override.
+	err := renewCertMTLSFn(nil, "", "", nil)
+	require.NoError(t, err)
+	assert.True(t, called, "override should have been called")
+
+	// Restore and verify the original is back.
+	restore()
+	// We can't call the original (it needs a real Step CA), but we can verify
+	// the function pointer was restored.
+	assert.Equal(t,
+		fmt.Sprintf("%p", original),
+		fmt.Sprintf("%p", renewCertMTLSFn),
+		"restore should put back the original function",
+	)
+}
+
+// TestSetCertRenewerFunc_NilNoOp verifies that passing nil to
+// SetCertRenewerFunc does not change the function variable.
+func TestSetCertRenewerFunc_NilNoOp(t *testing.T) {
+	before := fmt.Sprintf("%p", renewCertMTLSFn)
+	restore := SetCertRenewerFunc(nil)
+	after := fmt.Sprintf("%p", renewCertMTLSFn)
+	assert.Equal(t, before, after, "nil should not change the function variable")
+	restore()
 }
 
 // TestReadProvisionerPassword_File verifies reading password from a file.

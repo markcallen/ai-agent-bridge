@@ -305,33 +305,11 @@ func renewServerCertAutoGen(mat *PKIMaterial, serverSANs []string, logger *slog.
 }
 
 func renewServerCertStepCA(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig) error {
-	switch strings.ToLower(stepCA.Provisioner) {
-	case "acme":
-		// ACME / public CAs reject bare hostnames and raw IPs.
-		var sans []string
-		for _, s := range serverSANs {
-			switch s {
-			case "server", "localhost", "127.0.0.1":
-				continue
-			default:
-				sans = append(sans, s)
-			}
-		}
-		if len(sans) == 0 {
-			hostname, _ := os.Hostname()
-			if hostname != "" {
-				sans = []string{hostname}
-			} else {
-				sans = []string{"bridge"}
-			}
-		}
-		if err := requestCertACMEFn(stepCA, sans, mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
-			return fmt.Errorf("renew server cert (ACME): %w", err)
-		}
-	default:
-		if err := requestCertJWKFn(stepCA, serverSANs, mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
-			return fmt.Errorf("renew server cert (JWK): %w", err)
-		}
+	// Use mTLS-based renewal: present the existing cert/key to the Step CA
+	// /renew endpoint. This works for any provisioner type (JWK, ACME, etc.)
+	// and does not require the provisioner password or an HTTP-01 challenge.
+	if err := renewCertMTLSFn(stepCA, mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
+		return fmt.Errorf("renew server cert (mTLS): %w", err)
 	}
 
 	logger.Info("renewed server certificate (Step CA)", "cert", mat.ServerCertPath)

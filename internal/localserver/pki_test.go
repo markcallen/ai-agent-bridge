@@ -448,6 +448,108 @@ func TestIssueClientCertViaOIDC_Validation(t *testing.T) {
 	}
 }
 
+// TestRenewServerCertStepCA_UsesMTLS verifies that renewServerCertStepCA calls
+// renewCertMTLSFn (not requestCertJWKFn or requestCertACMEFn) so that renewal
+// does not require the provisioner password or an ACME challenge.
+func TestRenewServerCertStepCA_UsesMTLS(t *testing.T) {
+	for _, provName := range []string{"", "bridge-jwk", "acme", "ACME"} {
+		t.Run("provisioner="+provName, func(t *testing.T) {
+			stateDir := t.TempDir()
+			certsDir := filepath.Join(stateDir, "certs")
+			require.NoError(t, os.MkdirAll(certsDir, 0o700))
+
+			rootPath := filepath.Join(t.TempDir(), "root.crt")
+			require.NoError(t, os.WriteFile(rootPath, []byte("FAKE-ROOT"), 0o644))
+
+			// Write placeholder server cert/key that the mTLS renewer would read.
+			serverCert := filepath.Join(certsDir, "server.crt")
+			serverKey := filepath.Join(certsDir, "server.key")
+			require.NoError(t, os.WriteFile(serverCert, []byte("OLD-CERT"), 0o644))
+			require.NoError(t, os.WriteFile(serverKey, []byte("OLD-KEY"), 0o600))
+
+			// Track which function was called.
+			mtlsCalled := false
+			oldMTLS := renewCertMTLSFn
+			renewCertMTLSFn = func(_ *StepCAConfig, certPath, keyPath string, _ *slog.Logger) error {
+				mtlsCalled = true
+				require.NoError(t, os.WriteFile(certPath, []byte("RENEWED-CERT"), 0o644))
+				return nil
+			}
+			t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+			// Ensure JWK and ACME functions are NOT called.
+			oldJWK := requestCertJWKFn
+			requestCertJWKFn = func(_ *StepCAConfig, _ []string, _, _ string, _ *slog.Logger) error {
+				t.Fatal("requestCertJWKFn should NOT be called during renewal")
+				return nil
+			}
+			t.Cleanup(func() { requestCertJWKFn = oldJWK })
+
+			oldACME := requestCertACMEFn
+			requestCertACMEFn = func(_ *StepCAConfig, _ []string, _, _ string, _ *slog.Logger) error {
+				t.Fatal("requestCertACMEFn should NOT be called during renewal")
+				return nil
+			}
+			t.Cleanup(func() { requestCertACMEFn = oldACME })
+
+			mat := &PKIMaterial{
+				ServerCertPath: serverCert,
+				ServerKeyPath:  serverKey,
+			}
+			stepCfg := &StepCAConfig{
+				URL:         "https://ca.example.com",
+				RootPath:    rootPath,
+				Provisioner: provName,
+			}
+
+			err := renewServerCertStepCA(mat, []string{"server", "10.0.0.1"}, testLogger(), stepCfg)
+			require.NoError(t, err)
+			assert.True(t, mtlsCalled, "renewCertMTLSFn should have been called")
+
+			// Verify the cert was overwritten.
+			data, err := os.ReadFile(serverCert)
+			require.NoError(t, err)
+			assert.Equal(t, "RENEWED-CERT", string(data))
+		})
+	}
+}
+
+// TestRenewServerCertStepCA_MTLSError verifies that an mTLS renewal failure
+// is propagated correctly.
+func TestRenewServerCertStepCA_MTLSError(t *testing.T) {
+	stateDir := t.TempDir()
+	certsDir := filepath.Join(stateDir, "certs")
+	require.NoError(t, os.MkdirAll(certsDir, 0o700))
+
+	rootPath := filepath.Join(t.TempDir(), "root.crt")
+	require.NoError(t, os.WriteFile(rootPath, []byte("FAKE-ROOT"), 0o644))
+
+	serverCert := filepath.Join(certsDir, "server.crt")
+	serverKey := filepath.Join(certsDir, "server.key")
+	require.NoError(t, os.WriteFile(serverCert, []byte("OLD-CERT"), 0o644))
+	require.NoError(t, os.WriteFile(serverKey, []byte("OLD-KEY"), 0o600))
+
+	oldMTLS := renewCertMTLSFn
+	renewCertMTLSFn = func(_ *StepCAConfig, _, _ string, _ *slog.Logger) error {
+		return fmt.Errorf("connection refused")
+	}
+	t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+	mat := &PKIMaterial{
+		ServerCertPath: serverCert,
+		ServerKeyPath:  serverKey,
+	}
+	stepCfg := &StepCAConfig{
+		URL:      "https://ca.example.com",
+		RootPath: rootPath,
+	}
+
+	err := renewServerCertStepCA(mat, []string{"server"}, testLogger(), stepCfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mTLS")
+	assert.Contains(t, err.Error(), "connection refused")
+}
+
 func TestLoadPKIMaterial(t *testing.T) {
 	stateDir := filepath.Join(os.TempDir(), "test-state")
 	mat := LoadPKIMaterial(stateDir)

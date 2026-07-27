@@ -28,10 +28,14 @@ import (
 var (
 	requestCertJWKFn  = requestCertJWK
 	requestCertACMEFn = requestCertACME
+	renewCertMTLSFn   = renewCertMTLS
 )
 
 // CertRequesterFunc is the signature for certificate request functions.
 type CertRequesterFunc func(*StepCAConfig, []string, string, string, *slog.Logger) error
+
+// CertRenewerFunc is the signature for mTLS-based certificate renewal.
+type CertRenewerFunc func(*StepCAConfig, string, string, *slog.Logger) error
 
 // SetCertRequestFuncs overrides the JWK and ACME cert request functions.
 // It returns a restore function that should be called (e.g. via t.Cleanup)
@@ -49,6 +53,20 @@ func SetCertRequestFuncs(jwk, acme CertRequesterFunc) func() {
 	return func() {
 		requestCertJWKFn = oldJWK
 		requestCertACMEFn = oldACME
+	}
+}
+
+// SetCertRenewerFunc overrides the mTLS renewal function variable.
+// It returns a restore function that should be called (e.g. via t.Cleanup)
+// to reset the original. This is exported for use by e2e tests in other
+// packages.
+func SetCertRenewerFunc(fn CertRenewerFunc) func() {
+	old := renewCertMTLSFn
+	if fn != nil {
+		renewCertMTLSFn = fn
+	}
+	return func() {
+		renewCertMTLSFn = old
 	}
 }
 
@@ -239,6 +257,59 @@ func requestCertACME(stepCA *StepCAConfig, sans []string, certPath, keyPath stri
 	}
 
 	logger.Info("obtained certificate via ACME provisioner", "cert", certPath, "sans", sans)
+	return nil
+}
+
+// renewCertMTLS renews an existing certificate via the Step CA /renew endpoint
+// using mTLS. The existing cert/key are presented as the client certificate;
+// Step CA issues a new cert with the same SANs and writes it to the same paths.
+// This avoids needing the provisioner password or solving an ACME challenge,
+// making it suitable for unattended server cert renewal.
+func renewCertMTLS(stepCA *StepCAConfig, certPath, keyPath string, logger *slog.Logger) error {
+	logger.Info("renewing certificate via mTLS", "url", stepCA.URL, "cert", certPath)
+
+	// Load the existing cert and key to present as the mTLS client identity.
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return fmt.Errorf("load existing cert/key for mTLS renewal: %w", err)
+	}
+
+	// Build a cert pool that trusts the Step CA root.
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	rootPEM, err := os.ReadFile(stepCA.RootPath)
+	if err != nil {
+		return fmt.Errorf("read Step CA root cert: %w", err)
+	}
+	pool.AppendCertsFromPEM(rootPEM)
+
+	// Create an mTLS transport that presents our existing cert.
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			RootCAs:      pool,
+			MinVersion:   tls.VersionTLS12,
+		},
+	}
+
+	client, err := ca.NewClient(stepCA.URL, ca.WithTransport(tr))
+	if err != nil {
+		return fmt.Errorf("create Step CA client for renewal: %w", err)
+	}
+
+	resp, err := client.Renew(tr)
+	if err != nil {
+		return fmt.Errorf("mTLS renew: %w", err)
+	}
+
+	// Write the renewed certificate PEM.
+	if err := WriteCertPEM(certPath, resp); err != nil {
+		return fmt.Errorf("write renewed certificate: %w", err)
+	}
+
+	logger.Info("renewed certificate via mTLS", "cert", certPath)
 	return nil
 }
 
