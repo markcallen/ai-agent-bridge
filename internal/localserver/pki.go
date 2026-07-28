@@ -110,7 +110,7 @@ func LoadPKIMaterial(stateDir string) *PKIMaterial {
 // Step CA via the `step` CLI. The JWT keypair is still generated locally.
 //
 // If the CA bundle already exists, this is a no-op and returns existing paths.
-func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig) (*PKIMaterial, error) {
+func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, certValidity time.Duration) (*PKIMaterial, error) {
 	mat := LoadPKIMaterial(stateDir)
 	certsDir := CertsDir(stateDir)
 
@@ -140,13 +140,13 @@ func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger, stepCA
 	}
 
 	if stepCA != nil && stepCA.URL != "" {
-		return ensurePKIStepCA(stateDir, serverSANs, logger, stepCA, mat, certsDir)
+		return ensurePKIStepCA(stateDir, serverSANs, logger, stepCA, mat, certsDir, certValidity)
 	}
-	return ensurePKIAutoGen(stateDir, serverSANs, logger, mat, certsDir)
+	return ensurePKIAutoGen(stateDir, serverSANs, logger, mat, certsDir, certValidity)
 }
 
 // ensurePKIAutoGen generates a self-signed CA and all derived material.
-func ensurePKIAutoGen(stateDir string, serverSANs []string, logger *slog.Logger, mat *PKIMaterial, certsDir string) (*PKIMaterial, error) {
+func ensurePKIAutoGen(stateDir string, serverSANs []string, logger *slog.Logger, mat *PKIMaterial, certsDir string, certValidity time.Duration) (*PKIMaterial, error) {
 	logger.Info("generating PKI material", "dir", certsDir)
 
 	// 1. Generate CA.
@@ -165,7 +165,7 @@ func ensurePKIAutoGen(stateDir string, serverSANs []string, logger *slog.Logger,
 	}
 
 	// 2. Issue server certificate with SANs.
-	serverCert, serverKey, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "server", serverSANs, certsDir)
+	serverCert, serverKey, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "server", serverSANs, certsDir, certValidity)
 	if err != nil {
 		return nil, fmt.Errorf("issue server cert: %w", err)
 	}
@@ -174,7 +174,7 @@ func ensurePKIAutoGen(stateDir string, serverSANs []string, logger *slog.Logger,
 	logger.Info("generated server cert", "cert", serverCert, "sans", serverSANs)
 
 	// 3. Issue local-client certificate for CLI connections.
-	clientCert, clientKey, err := pki.IssueCert(caCert, caKey, pki.CertTypeClient, "local-client", nil, certsDir)
+	clientCert, clientKey, err := pki.IssueCert(caCert, caKey, pki.CertTypeClient, "local-client", nil, certsDir, 0)
 	if err != nil {
 		return nil, fmt.Errorf("issue local-client cert: %w", err)
 	}
@@ -208,7 +208,7 @@ func ensurePKIAutoGen(stateDir string, serverSANs []string, logger *slog.Logger,
 // ensurePKIStepCA uses the Step CA CLI to obtain a server certificate.
 // The Step CA root cert is copied to ca-bundle.crt; JWT material is generated
 // locally as in auto-PKI mode (tokens are still validated per-client).
-func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, mat *PKIMaterial, certsDir string) (*PKIMaterial, error) {
+func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, mat *PKIMaterial, certsDir string, certValidity time.Duration) (*PKIMaterial, error) {
 	logger.Info("using Step CA for PKI", "url", stepCA.URL)
 
 	// 1. Copy Step CA root cert to ca-bundle.crt so clients can verify the server.
@@ -284,7 +284,7 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 		return nil, fmt.Errorf("load local CA: %w", err)
 	}
 
-	clientCert, clientKey, err := pki.IssueCert(localCA, localKey, pki.CertTypeClient, "local-client", nil, certsDir)
+	clientCert, clientKey, err := pki.IssueCert(localCA, localKey, pki.CertTypeClient, "local-client", nil, certsDir, 0)
 	if err != nil {
 		return nil, fmt.Errorf("issue local-client cert: %w", err)
 	}
@@ -317,23 +317,23 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 // re-signs using the existing CA; for Step CA it requests a new cert from the
 // CA server. The new cert is written to the same file paths so the
 // CertReloader picks it up on the next TLS handshake without a server restart.
-func RenewServerCert(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig) error {
+func RenewServerCert(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, certValidity time.Duration) error {
 	mat := LoadPKIMaterial(stateDir)
 
 	if stepCA != nil && stepCA.URL != "" {
 		return renewServerCertStepCA(mat, serverSANs, logger, stepCA)
 	}
-	return renewServerCertAutoGen(mat, serverSANs, logger)
+	return renewServerCertAutoGen(mat, serverSANs, logger, certValidity)
 }
 
-func renewServerCertAutoGen(mat *PKIMaterial, serverSANs []string, logger *slog.Logger) error {
+func renewServerCertAutoGen(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, certValidity time.Duration) error {
 	caCert, caKey, err := pki.LoadCA(mat.CACertPath, mat.CAKeyPath)
 	if err != nil {
 		return fmt.Errorf("load CA: %w", err)
 	}
 
 	certsDir := filepath.Dir(mat.ServerCertPath)
-	_, _, err = pki.IssueCert(caCert, caKey, pki.CertTypeServer, "server", serverSANs, certsDir)
+	_, _, err = pki.IssueCert(caCert, caKey, pki.CertTypeServer, "server", serverSANs, certsDir, certValidity)
 	if err != nil {
 		return fmt.Errorf("re-issue server cert: %w", err)
 	}
@@ -383,7 +383,7 @@ func IssueClientCert(stateDir, clientName string, logger *slog.Logger) (certPath
 	}
 
 	outDir := filepath.Join(CertsDir(stateDir), "clients", clientName)
-	certPath, keyPath, err = pki.IssueCert(caCert, caKey, pki.CertTypeClient, clientName, nil, outDir)
+	certPath, keyPath, err = pki.IssueCert(caCert, caKey, pki.CertTypeClient, clientName, nil, outDir, 0)
 	if err != nil {
 		return "", "", fmt.Errorf("issue client cert: %w", err)
 	}

@@ -358,3 +358,79 @@ sessions:
 		})
 	}
 }
+
+func TestLoadValidateCertDurations(t *testing.T) {
+	base := `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+providers:
+  echo:
+    binary: "cat"
+`
+
+	tests := []struct {
+		name    string
+		extra   string
+		wantErr string
+	}{
+		{
+			name:  "valid cert_validity",
+			extra: "  cert_validity: \"30m\"\n",
+		},
+		{
+			name:  "valid cert_renewal_check_interval",
+			extra: "  cert_renewal_check_interval: \"10m\"\n",
+		},
+		{
+			name:    "invalid cert_validity",
+			extra:   "  cert_validity: \"not-a-duration\"\n",
+			wantErr: "server.cert_validity",
+		},
+		{
+			name:    "invalid cert_renewal_check_interval",
+			extra:   "  cert_renewal_check_interval: \"bad\"\n",
+			wantErr: "server.cert_renewal_check_interval",
+		},
+		{
+			name:    "negative cert_validity",
+			extra:   "  cert_validity: \"-5m\"\n",
+			wantErr: "must not be negative",
+		},
+		{
+			name:    "negative cert_renewal_check_interval",
+			extra:   "  cert_renewal_check_interval: \"-1h\"\n",
+			wantErr: "must not be negative",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Insert extra fields under the server: block.
+			content := strings.Replace(base, "  listen:", tc.extra+"  listen:", 1)
+			dir := t.TempDir()
+			path := filepath.Join(dir, "bridge.yaml")
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			_, err := Load(path)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+		})
+	}
+}

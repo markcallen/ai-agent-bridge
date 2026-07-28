@@ -88,6 +88,8 @@ func newServerStartCmd() *cobra.Command {
 		stepCARootPath                string
 		stepCAProvisioner             string
 		stepCAProvisionerPasswordFile string
+		certValidity                  time.Duration
+		certRenewalCheckInterval      time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -150,6 +152,8 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 				StepCARootPath:                stepCARootPath,
 				StepCAProvisioner:             stepCAProvisioner,
 				StepCAProvisionerPasswordFile: stepCAProvisionerPasswordFile,
+				CertValidity:                  certValidity,
+				CertRenewalCheckInterval:      certRenewalCheckInterval,
 			}
 			if globalRPS > 0 {
 				cfg.RateLimits.GlobalRPS = globalRPS
@@ -194,6 +198,8 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to the Step CA root certificate (required with --step-ca-url)")
 	cmd.Flags().StringVar(&stepCAProvisioner, "step-ca-provisioner", "", "Step CA provisioner name (e.g. acme, bridge-jwk); defaults to CA's default provisioner")
 	cmd.Flags().StringVar(&stepCAProvisionerPasswordFile, "step-ca-provisioner-password-file", "", "path to provisioner password file for non-interactive Step CA cert requests")
+	cmd.Flags().DurationVar(&certValidity, "cert-validity", 0, "server certificate validity duration (e.g. 30m, 24h, 2160h); default 90 days")
+	cmd.Flags().DurationVar(&certRenewalCheckInterval, "cert-renewal-check-interval", 0, "how often to check certificate expiry (e.g. 10m, 1h); default 1 hour")
 
 	return cmd
 }
@@ -463,6 +469,7 @@ immediate renewal (e.g. when the cert has already expired).`,
 					configPath = defaultCfg
 				}
 			}
+			var certValidity time.Duration
 			if configPath != "" {
 				fileCfg, err := config.Load(configPath)
 				if err != nil {
@@ -485,6 +492,9 @@ immediate renewal (e.g. when the cert has already expired).`,
 					}
 					if len(serverSANs) == 0 && fileCfg.Server.Listen != "" {
 						serverSANs = localserver.BuildServerSANs(fileCfg.Server.Listen, nil)
+					}
+					if fileCfg.Server.CertValidity != "" {
+						certValidity = config.ParseDuration(fileCfg.Server.CertValidity, 0)
 					}
 				}
 			}
@@ -519,7 +529,7 @@ immediate renewal (e.g. when the cert has already expired).`,
 				}
 			}
 
-			if err := localserver.RenewServerCert(stateDir, serverSANs, logger, stepCA); err != nil {
+			if err := localserver.RenewServerCert(stateDir, serverSANs, logger, stepCA, certValidity); err != nil {
 				return fmt.Errorf("renew cert: %w", err)
 			}
 

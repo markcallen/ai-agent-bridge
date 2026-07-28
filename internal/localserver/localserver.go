@@ -75,10 +75,12 @@ type Server struct {
 	stopped    bool
 
 	// Certificate renewal (secure mode only).
-	renewCancel context.CancelFunc // cancels the renewal goroutine
-	serverSANs  []string           // SANs for cert re-issuance
-	stepCA      *StepCAConfig      // nil for auto-PKI mode
-	pkiMat      *PKIMaterial       // paths to cert/key files
+	renewCancel              context.CancelFunc // cancels the renewal goroutine
+	serverSANs               []string           // SANs for cert re-issuance
+	stepCA                   *StepCAConfig      // nil for auto-PKI mode
+	pkiMat                   *PKIMaterial       // paths to cert/key files
+	certValidity             time.Duration      // server cert validity for auto-PKI renewal
+	certRenewalCheckInterval time.Duration      // how often to check cert expiry
 }
 
 // ServerMode represents how the server is running.
@@ -196,6 +198,13 @@ type Config struct {
 	// JWK provisioner password. When set, `step ca certificate` runs
 	// non-interactively (required in Docker/headless environments).
 	StepCAProvisionerPasswordFile string
+
+	// CertValidity overrides the server certificate validity duration.
+	// Zero uses the default (90 days). Useful for testing renewal flows.
+	CertValidity time.Duration
+	// CertRenewalCheckInterval overrides how often the renewal loop checks
+	// certificate expiry. Zero uses the default (1 hour).
+	CertRenewalCheckInterval time.Duration
 }
 
 // Start launches a local bridge gRPC server. In local mode (default) it
@@ -266,6 +275,12 @@ func Start(cfg Config) (*Server, error) {
 			}
 			if len(cfg.ServerSANs) == 0 && len(fileCfg.Server.SANs) > 0 {
 				cfg.ServerSANs = fileCfg.Server.SANs
+			}
+			if cfg.CertValidity == 0 && fileCfg.Server.CertValidity != "" {
+				cfg.CertValidity = config.ParseDuration(fileCfg.Server.CertValidity, 0)
+			}
+			if cfg.CertRenewalCheckInterval == 0 && fileCfg.Server.CertRenewalCheckInterval != "" {
+				cfg.CertRenewalCheckInterval = config.ParseDuration(fileCfg.Server.CertRenewalCheckInterval, 0)
 			}
 			if cfg.StepCAURL == "" && fileCfg.StepCA.URL != "" {
 				cfg.StepCAURL = fileCfg.StepCA.URL
@@ -497,7 +512,7 @@ func Start(cfg Config) (*Server, error) {
 				}
 			}
 			var pkiErr error
-			mat, pkiErr = EnsurePKI(stateDir, serverSANs, logger, stepCAConfig)
+			mat, pkiErr = EnsurePKI(stateDir, serverSANs, logger, stepCAConfig, cfg.CertValidity)
 			if pkiErr != nil {
 				sup.Close()
 				if store != nil {
@@ -596,6 +611,8 @@ func Start(cfg Config) (*Server, error) {
 		s.serverSANs = serverSANs
 		s.stepCA = stepCAConfig
 		s.pkiMat = pkiMat
+		s.certValidity = cfg.CertValidity
+		s.certRenewalCheckInterval = cfg.CertRenewalCheckInterval
 		renewCtx, renewCancel := context.WithCancel(context.Background())
 		s.renewCancel = renewCancel
 		go s.certRenewalLoop(renewCtx)
@@ -777,8 +794,8 @@ func (s *Server) Stop() {
 	_ = os.Remove(filepath.Join(s.stateDir, "server.lock"))
 }
 
-// certRenewalCheckInterval is how often the renewal loop checks cert expiry.
-const certRenewalCheckInterval = 1 * time.Hour
+// defaultCertRenewalCheckInterval is how often the renewal loop checks cert expiry.
+const defaultCertRenewalCheckInterval = 1 * time.Hour
 
 // certRenewalLoop periodically checks the server certificate's expiry and
 // renews it when less than 1/3 of the certificate's total lifetime remains.
@@ -789,7 +806,11 @@ func (s *Server) certRenewalLoop(ctx context.Context) {
 	// Check once at startup to handle already-expired certs.
 	s.checkAndRenew()
 
-	ticker := time.NewTicker(certRenewalCheckInterval)
+	interval := s.certRenewalCheckInterval
+	if interval <= 0 {
+		interval = defaultCertRenewalCheckInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -833,7 +854,7 @@ func (s *Server) checkAndRenew() {
 		)
 	}
 
-	if err := RenewServerCert(s.stateDir, s.serverSANs, s.logger, s.stepCA); err != nil {
+	if err := RenewServerCert(s.stateDir, s.serverSANs, s.logger, s.stepCA, s.certValidity); err != nil {
 		s.logger.Error("cert renewal: failed to renew server certificate", "error", err)
 		return
 	}

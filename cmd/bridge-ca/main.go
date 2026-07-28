@@ -126,7 +126,7 @@ func cmdIssue() {
 		sans = strings.Split(*san, ",")
 	}
 
-	certPath, keyPath, err := pki.IssueCert(ca, key, ct, *cn, sans, *out)
+	certPath, keyPath, err := pki.IssueCert(ca, key, ct, *cn, sans, *out, 0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
