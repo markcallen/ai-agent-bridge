@@ -14,8 +14,8 @@ Supported providers: **Claude**, **Codex**, **OpenCode**, **Gemini**
 ## How It Works
 
 ```
-Your App (Go / Node.js / Browser)
-    ↕ Go SDK  or  Node.js SDK  or  raw gRPC
+Your App (Go)
+    ↕ Go SDK  or  raw gRPC
 ai-agent-bridge daemon
     ↕ PTY
 AI Agent process (claude / codex / opencode / gemini)
@@ -32,8 +32,7 @@ See [docs/service.md](docs/service.md) for architecture details.
 ### Prerequisites
 
 - [Go 1.25+](https://go.dev/dl/)
-- [nvm](https://github.com/nvm-sh/nvm)
-- Node.js 24.x. Use the version in `.nvmrc`.
+- [nvm](https://github.com/nvm-sh/nvm) and Node.js 24.x (for provider CLIs — use the version in `.nvmrc`)
 - (optional) `protoc` + `protoc-gen-go` + `protoc-gen-go-grpc` — only if modifying `.proto` files
 
 ### 1. Clone and configure
@@ -234,47 +233,6 @@ Full Go SDK reference: [docs/go-sdk.md](docs/go-sdk.md)
 
 ---
 
-## Installing the Node.js SDK
-
-```bash
-npm install @ai-agent-bridge/client-node
-```
-
-### Next.js Pages Router
-
-Create `pages/api/bridge.ts`:
-
-```ts
-import { createNextJsBridgeRoute } from "@ai-agent-bridge/client-node";
-export default createNextJsBridgeRoute({ bridgeAddr: "localhost:9445" });
-export const config = { api: { bodyParser: false } };
-```
-
-### React hook
-
-```tsx
-import { useBridgeSession } from "@ai-agent-bridge/client-node/react";
-
-function AgentPanel() {
-  const bridge = useBridgeSession("ws://localhost:3000/api/bridge");
-
-  return (
-    <>
-      <button onClick={() => bridge.startSession({
-        projectId: "p1",
-        repoPath: "/repo",
-        provider: "claude",
-      })}>Start</button>
-      {bridge.events.map(ev => <p key={ev.seq}>{ev.text}</p>)}
-    </>
-  );
-}
-```
-
-Full Node.js SDK reference: [docs/node-sdk.md](docs/node-sdk.md)
-
----
-
 ## Using grpcurl
 
 Install [grpcurl](https://github.com/fullstorydev/grpcurl) to call the bridge from a shell.
@@ -386,7 +344,6 @@ Run `ai-agent-bridge-ca <command> --help` for flags.
 cmd/bridge/                    Daemon binary
 cmd/bridge-ca/                 CA and certificate management CLI
 pkg/bridgeclient/              Go SDK
-packages/bridge-client-node/   Node.js gRPC-to-WebSocket adapter + React hook
 proto/bridge/v1/               Protobuf service definitions
 gen/bridge/v1/                 Generated protobuf Go code (do not edit)
 internal/auth/                 mTLS, JWT, gRPC interceptors
@@ -408,10 +365,7 @@ scripts/                       Development helper scripts
 - [docs/service.md](docs/service.md) — Architecture, configuration reference, security
 - [docs/install-ubuntu.md](docs/install-ubuntu.md) — apt repository installation and package details
 - [docs/go-sdk.md](docs/go-sdk.md) — Go SDK reference
-- [docs/node-sdk.md](docs/node-sdk.md) — Node.js SDK and React hook reference
 - [docs/grpc-api.md](docs/grpc-api.md) — Full gRPC API reference
-- [docs/go-websocket-integration.md](docs/go-websocket-integration.md) — Go HTTP WebSocket integration guide
-- [packages/bridge-client-node/README.md](packages/bridge-client-node/README.md) — Node.js client deep dive
 
 ---
 

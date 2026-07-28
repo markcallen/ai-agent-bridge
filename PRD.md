@@ -51,10 +51,10 @@ The bridge replaces direct in-process agent management with a networked, provide
 
 ## 4. Non-Goals
 
-- A first-party web UI is deferred but not excluded; the WebSocket adapter (`bridge-client-node`) already provides the foundation.
+- A first-party web UI is deferred but not excluded.
 - AI model routing or selection (consumers decide which provider to use).
 - Acting as a CI/CD system.
-- SDKs for languages other than Go and Node.js (protobuf definitions available for future stub generation).
+- SDKs for languages other than Go (protobuf definitions available for future stub generation).
 
 ---
 
@@ -62,7 +62,6 @@ The bridge replaces direct in-process agent management with a networked, provide
 
 - **prd-manager-control-plane** - Integrates via Go SDK to replace `internal/agent/Manager` with bridge-backed agent sessions.
 - **ndara-ai-orchestrator** - Integrates via Go SDK to add real agent subprocess management behind its existing `AgentDaemon` gRPC service.
-- **Web Application Developers** - Use `packages/bridge-client-node` and the `useBridgeSession` React hook to embed agent sessions in browser-based UIs without needing to speak gRPC directly.
 - **DevOps/Platform Engineers** - Deploy and operate bridge daemons on agent host machines.
 - **Security Engineers** - Configure and audit the zero-trust PKI infrastructure.
 - **Human Operators** - Engineers who need to observe a running agent session in real time, optionally inject a correction or question, then return control to the automated flow without restarting the session.
@@ -74,20 +73,14 @@ The bridge replaces direct in-process agent management with a networked, provide
 ### 6.1 Components
 
 ```
-┌─────────────────────┐        ┌────────────────────────────────┐
-│  prd-manager-       │        │  Web / Next.js App             │
-│  control-plane      │        │  (React + useBridgeSession)    │
-│  (HTTP API)         │        └───────────┬────────────────────┘
-└────────┬────────────┘                    │ WebSocket (JSON protocol)
-         │ Go SDK (bridgeclient)           ▼
-         │ gRPC + mTLS + JWT  ┌────────────────────────────────┐
-         │                    │  bridge-client-node            │
-         │                    │  (Node.js WebSocket adapter)   │
-         │                    │  or Go HTTP + bridgelib/       │
-         │                    │  WSHandler                     │
-         │                    └───────────┬────────────────────┘
-         │                                │ gRPC (plain or mTLS+JWT)
-         ▼                                ▼
+┌─────────────────────┐
+│  prd-manager-       │
+│  control-plane      │
+│  (HTTP API)         │
+└────────┬────────────┘
+         │ Go SDK (bridgeclient)
+         │ gRPC + mTLS + JWT
+         ▼
 ┌────────────────────────────────────────────────────────┐
 │                   AI Agent Bridge                       │
 │                   (bridge daemon)                       │
@@ -170,14 +163,12 @@ Writer transition protocol:
 | `cmd/bridgectl` | User-session bridge server and CLI |
 | `cmd/bridge-ca` | CA and certificate management CLI |
 | `pkg/bridgeclient` | Go SDK for consumer integration (gRPC client) |
-| `pkg/bridgelib` | Embeddable Go library (no separate gRPC server; includes WebSocket handler) |
-| `packages/bridge-client-node` | Node.js gRPC→WebSocket adapter + React hook (`useBridgeSession`) |
+| `pkg/bridgelib` | Embeddable Go library (no separate gRPC server) |
 | Debian/Ubuntu package distribution | Signed `.deb` packages, apt repository metadata, install helper, and Ubuntu install docs |
 | `proto/bridge/v1` | Protobuf service definitions |
 | `internal/bridge` | Session supervisor, provider adapters, event buffer |
 | `internal/auth` | mTLS, JWT, and zero-trust security primitives |
 | `internal/pki` | CA management, cross-signing, cert generation |
-| `docs/go-websocket-integration.md` | Guide for wiring the WebSocket protocol in a Go HTTP server |
 
 ---
 
@@ -754,7 +745,7 @@ Changes required:
 - Additional providers: `gemini`, `droid`
 - SDKs for Python, TypeScript (generated from protobuf)
 - SPIFFE/SPIRE integration for workload identity
-- Web UI for bridge status and session management (foundation: `bridge-client-node` WebSocket adapter is already implemented)
+- Web UI for bridge status and session management
 - CRL/OCSP for real-time certificate revocation
 - Multi-bridge clustering and session migration
 - Policy-as-code (OPA/Rego) for authorization decisions

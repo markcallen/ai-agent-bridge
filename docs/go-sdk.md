@@ -256,5 +256,4 @@ type CursorStore interface {
 
 - [gRPC API reference](grpc-api.md) — Proto types and field semantics
 - [Service reference](service.md) — Daemon configuration
-- [Node.js SDK](node-sdk.md) — Browser and Next.js integration
-- [Go WebSocket integration](go-websocket-integration.md) — Expose the bridge via WebSocket from a Go HTTP server
+- [gRPC API reference](grpc-api.md) — Full RPC surface and error codes

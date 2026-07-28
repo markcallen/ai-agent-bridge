@@ -28,8 +28,8 @@
          │
   ┌──────┴────────┐
   │  Your App     │
-  │  Go SDK  or   │
-  │  Node.js SDK  │
+  │  (Go SDK or   │
+  │   raw gRPC)   │
   └───────────────┘
 ```
 
@@ -298,6 +298,4 @@ The daemon emits structured JSON logs (configurable). Key log events:
 ## Related
 
 - [Go SDK reference](go-sdk.md)
-- [Node.js SDK reference](node-sdk.md)
 - [gRPC API reference](grpc-api.md)
-- [Go WebSocket integration](go-websocket-integration.md)

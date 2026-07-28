@@ -8,15 +8,13 @@ This is the canonical documentation index for the repository.
 - [service.md](service.md): daemon architecture, configuration, security model, Docker usage, and operational details.
 - [grpc-api.md](grpc-api.md): protobuf RPC surface, message fields, error codes, and client generation details.
 - [go-sdk.md](go-sdk.md): Go SDK usage, client options, reconnect behavior, and API examples.
-- [node-sdk.md](node-sdk.md): Node.js and React SDK usage, WebSocket bridge protocol, and Next.js integration.
-- [go-websocket-integration.md](go-websocket-integration.md): embedding the bridge WebSocket protocol into a Go HTTP server.
 
 ## Recommended Reading Order
 
 1. [install-ubuntu.md](install-ubuntu.md) if you are installing the packaged daemon on Ubuntu
 2. [service.md](service.md)
 3. [grpc-api.md](grpc-api.md)
-4. [go-sdk.md](go-sdk.md) or [node-sdk.md](node-sdk.md), depending on the client you are building
+4. [go-sdk.md](go-sdk.md) for Go SDK integration
 
 ## Local Development
 
