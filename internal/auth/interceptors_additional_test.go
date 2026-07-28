@@ -182,11 +182,11 @@ func TestAuditInterceptorsAndTLSConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitCA: %v", err)
 	}
-	serverCert, serverKey, err := pki.IssueCert(mustLoadCA(t, caCert, caKey), mustLoadCAKey(t, caCert, caKey), pki.CertTypeServer, "bridge.local", []string{"bridge.local", "127.0.0.1"}, dir)
+	serverCert, serverKey, err := pki.IssueCert(mustLoadCA(t, caCert, caKey), mustLoadCAKey(t, caCert, caKey), pki.CertTypeServer, "bridge.local", []string{"bridge.local", "127.0.0.1"}, dir, 0)
 	if err != nil {
 		t.Fatalf("Issue server cert: %v", err)
 	}
-	clientCert, clientKey, err := pki.IssueCert(mustLoadCA(t, caCert, caKey), mustLoadCAKey(t, caCert, caKey), pki.CertTypeClient, "client-a", nil, dir)
+	clientCert, clientKey, err := pki.IssueCert(mustLoadCA(t, caCert, caKey), mustLoadCAKey(t, caCert, caKey), pki.CertTypeClient, "client-a", nil, dir, 0)
 	if err != nil {
 		t.Fatalf("Issue client cert: %v", err)
 	}

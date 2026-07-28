@@ -37,8 +37,10 @@ type RuntimeConfig struct {
 }
 
 type ServerConfig struct {
-	Listen string   `yaml:"listen"`
-	SANs   []string `yaml:"san"`
+	Listen                   string   `yaml:"listen"`
+	SANs                     []string `yaml:"san"`
+	CertValidity             string   `yaml:"cert_validity"`
+	CertRenewalCheckInterval string   `yaml:"cert_renewal_check_interval"`
 }
 
 // StepCAYAMLConfig holds Step CA settings from the YAML config file.
@@ -256,6 +258,16 @@ func validate(cfg *Config) error {
 	}
 	if _, err := time.ParseDuration(cfg.Auth.JWTMaxTTL); err != nil {
 		return fmt.Errorf("config: auth.jwt_max_ttl: %w", err)
+	}
+	if cfg.Server.CertValidity != "" {
+		if _, err := time.ParseDuration(cfg.Server.CertValidity); err != nil {
+			return fmt.Errorf("config: server.cert_validity: %w", err)
+		}
+	}
+	if cfg.Server.CertRenewalCheckInterval != "" {
+		if _, err := time.ParseDuration(cfg.Server.CertRenewalCheckInterval); err != nil {
+			return fmt.Errorf("config: server.cert_renewal_check_interval: %w", err)
+		}
 	}
 	if _, err := time.ParseDuration(cfg.Sessions.IdleTimeout); err != nil {
 		return fmt.Errorf("config: sessions.idle_timeout: %w", err)

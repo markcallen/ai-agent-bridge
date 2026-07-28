@@ -1567,7 +1567,7 @@ func TestStepCADualCAArchitecture(t *testing.T) {
 		URL:      "https://ca.example.internal:443",
 		RootPath: rootPEM,
 	}
-	mat, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg)
+	mat, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg, 0)
 	require.NoError(t, err)
 
 	// 1. ca-bundle.crt should contain the Step CA root first, then the local CA.
@@ -1627,7 +1627,7 @@ func TestStepCAIdempotency(t *testing.T) {
 	}
 
 	// First call — generates everything.
-	mat1, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg)
+	mat1, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg, 0)
 	require.NoError(t, err)
 	bundle1, err := os.ReadFile(mat1.CABundlePath)
 	require.NoError(t, err)
@@ -1636,7 +1636,7 @@ func TestStepCAIdempotency(t *testing.T) {
 	require.NoError(t, os.WriteFile(rootPEM, []byte("changed-root"), 0o644))
 
 	// Second call — should be no-op; bundle should retain original content.
-	mat2, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg)
+	mat2, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg, 0)
 	require.NoError(t, err)
 	bundle2, err := os.ReadFile(mat2.CABundlePath)
 	require.NoError(t, err)
@@ -1673,7 +1673,7 @@ func TestStepCATier1ClientIssuance(t *testing.T) {
 	}
 
 	// Initialize PKI with Step CA.
-	_, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg)
+	_, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg, 0)
 	require.NoError(t, err)
 
 	// Issue a Tier-1 client cert (signed by local CA, not Step CA).

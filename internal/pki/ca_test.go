@@ -42,7 +42,7 @@ func TestIssueCert(t *testing.T) {
 		t.Fatalf("LoadCA: %v", err)
 	}
 
-	certPath, _, err := IssueCert(caCert, caKey, CertTypeServer, "bridge.local", []string{"bridge.local", "127.0.0.1"}, dir)
+	certPath, _, err := IssueCert(caCert, caKey, CertTypeServer, "bridge.local", []string{"bridge.local", "127.0.0.1"}, dir, 0)
 	if err != nil {
 		t.Fatalf("IssueCert: %v", err)
 	}

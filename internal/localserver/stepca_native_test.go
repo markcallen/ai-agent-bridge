@@ -59,7 +59,7 @@ func TestProvisionerRouting_ACME(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	// "server" must be kept because clients verify TLS with ServerName "server".
 	// Loopback entries ("localhost", "127.0.0.1") are still stripped.
-	mat, err := EnsurePKI(stateDir, []string{"server", "server.example.com"}, logger, stepCfg)
+	mat, err := EnsurePKI(stateDir, []string{"server", "server.example.com"}, logger, stepCfg, 0)
 	require.NoError(t, err)
 
 	assert.Contains(t, *acmeSANs, "server", "ACME must keep 'server' SAN for client TLS verification")
@@ -101,7 +101,7 @@ func TestProvisionerRouting_ACME_CaseInsensitive(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	_, err := EnsurePKI(stateDir, []string{"server"}, logger, stepCfg)
+	_, err := EnsurePKI(stateDir, []string{"server"}, logger, stepCfg, 0)
 	require.NoError(t, err)
 	assert.True(t, acmeCalled, "ACME function should have been called")
 }
@@ -141,7 +141,7 @@ func TestProvisionerRouting_JWK(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 			// Pass "server" explicitly — JWK must NOT strip it (clients verify
 			// ServerName "server" against the issued cert).
-			_, err := EnsurePKI(stateDir, []string{"server", "my-host.example.com"}, logger, stepCfg)
+			_, err := EnsurePKI(stateDir, []string{"server", "my-host.example.com"}, logger, stepCfg, 0)
 			require.NoError(t, err)
 			assert.Contains(t, *jwkSANs, "server", "JWK must preserve 'server' SAN for client TLS verification")
 			assert.Contains(t, *jwkSANs, "my-host.example.com")

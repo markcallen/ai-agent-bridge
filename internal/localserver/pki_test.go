@@ -48,7 +48,7 @@ func TestEnsurePKI(t *testing.T) {
 	stateDir := t.TempDir()
 	sans := []string{"10.0.0.1", "bridge.local"}
 
-	mat, err := EnsurePKI(stateDir, sans, testLogger(), nil)
+	mat, err := EnsurePKI(stateDir, sans, testLogger(), nil, 0)
 	require.NoError(t, err)
 
 	// Verify all files exist.
@@ -118,7 +118,7 @@ func TestEnsurePKI_Idempotent(t *testing.T) {
 	stateDir := t.TempDir()
 	sans := []string{"10.0.0.1"}
 
-	mat1, err := EnsurePKI(stateDir, sans, testLogger(), nil)
+	mat1, err := EnsurePKI(stateDir, sans, testLogger(), nil, 0)
 	require.NoError(t, err)
 
 	// Read the CA cert bytes from first run.
@@ -126,7 +126,7 @@ func TestEnsurePKI_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second call should be a no-op.
-	mat2, err := EnsurePKI(stateDir, sans, testLogger(), nil)
+	mat2, err := EnsurePKI(stateDir, sans, testLogger(), nil, 0)
 	require.NoError(t, err)
 
 	// CA cert should be identical (not regenerated).
@@ -140,7 +140,7 @@ func TestIssueClientCert(t *testing.T) {
 	logger := testLogger()
 
 	// First generate the CA via EnsurePKI.
-	mat, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, nil)
+	mat, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, nil, 0)
 	require.NoError(t, err)
 
 	// Issue a client cert.
@@ -191,7 +191,7 @@ func TestIssueClientCert_RejectsPathTraversal(t *testing.T) {
 	logger := testLogger()
 
 	// Generate PKI first.
-	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, nil)
+	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, nil, 0)
 	require.NoError(t, err)
 
 	badNames := []string{"../escape", "foo/bar", ".hidden", "", "a b c"}
@@ -228,7 +228,7 @@ func TestEnsurePKI_StepCASkipsAutoGen(t *testing.T) {
 		URL:      "https://ca.example.internal:443",
 		RootPath: rootPEM,
 	}
-	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, testLogger(), stepCfg)
+	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, testLogger(), stepCfg, 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Step CA")
 
@@ -243,7 +243,7 @@ func TestEnsurePKI_StepCASkipsAutoGen(t *testing.T) {
 func TestEnsurePKI_StepCAMissingRoot(t *testing.T) {
 	stateDir := t.TempDir()
 	stepCfg := &StepCAConfig{URL: "https://ca.example.internal:443"}
-	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, testLogger(), stepCfg)
+	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, testLogger(), stepCfg, 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "step-ca-root")
 }
@@ -268,7 +268,7 @@ func TestEnsurePKI_StepCAHappyPath(t *testing.T) {
 		URL:      "https://ca.example.internal:443",
 		RootPath: rootPEM,
 	}
-	mat, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg)
+	mat, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg, 0)
 	require.NoError(t, err)
 
 	// ca-bundle.crt should start with the Step CA root, followed by the local CA.
@@ -313,13 +313,13 @@ func TestEnsurePKI_StepCAIdempotent(t *testing.T) {
 	t.Cleanup(func() { requestCertJWKFn = oldJWK })
 
 	stepCfg := &StepCAConfig{URL: "https://ca.example.internal:443", RootPath: rootPEM}
-	_, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg)
+	_, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg, 0)
 	require.NoError(t, err)
 
 	// Overwrite root file with different content.
 	require.NoError(t, os.WriteFile(rootPEM, []byte("changed-root"), 0o644))
 	// Second call should be no-op: bundle should still have the original content.
-	mat2, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg)
+	mat2, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg, 0)
 	require.NoError(t, err)
 	bundle, _ := os.ReadFile(mat2.CABundlePath)
 	assert.True(t, strings.HasPrefix(string(bundle), "fake-root-cert"), "bundle should start with original Step CA root, not overwritten")
@@ -573,7 +573,7 @@ func TestEnsurePKI_ACMEKeepsServerSAN(t *testing.T) {
 		RootPath:    rootPEM,
 		Provisioner: "acme",
 	}
-	_, err := EnsurePKI(stateDir, []string{"server", "localhost", "127.0.0.1", "bridge.local"}, testLogger(), stepCfg)
+	_, err := EnsurePKI(stateDir, []string{"server", "localhost", "127.0.0.1", "bridge.local"}, testLogger(), stepCfg, 0)
 	require.NoError(t, err)
 
 	assert.Contains(t, capturedSANs, "server", "ACME path must keep 'server' SAN for client TLS verification")
@@ -590,7 +590,7 @@ func TestEnsurePKI_ModeChangeTriggerRegeneration(t *testing.T) {
 	logger := testLogger()
 
 	// First call: auto-PKI.
-	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, nil)
+	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, nil, 0)
 	require.NoError(t, err)
 
 	// Capture the auto-PKI CA bundle content.
@@ -614,7 +614,7 @@ func TestEnsurePKI_ModeChangeTriggerRegeneration(t *testing.T) {
 	stepCfg := &StepCAConfig{URL: "https://ca.example.internal:443", RootPath: rootPEM}
 
 	// Second call: Step CA mode — must regenerate despite existing files.
-	mat, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, stepCfg)
+	mat, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, stepCfg, 0)
 	require.NoError(t, err)
 
 	bundle, err := os.ReadFile(mat.CABundlePath)

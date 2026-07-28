@@ -44,7 +44,7 @@ func TestJWTCredentialsAndTransportTLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCA: %v", err)
 	}
-	clientCert, clientKey, err := pki.IssueCert(ca, key, pki.CertTypeClient, "client-a", nil, dir)
+	clientCert, clientKey, err := pki.IssueCert(ca, key, pki.CertTypeClient, "client-a", nil, dir, 0)
 	if err != nil {
 		t.Fatalf("IssueCert client: %v", err)
 	}

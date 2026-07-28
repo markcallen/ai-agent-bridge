@@ -23,7 +23,8 @@ const (
 )
 
 // IssueCert generates a new ECDSA P-384 keypair and certificate signed by the given CA.
-func IssueCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, ct CertType, cn string, sans []string, outDir string) (certPath, keyPath string, err error) {
+// When validity is zero the default (90 days) is used.
+func IssueCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, ct CertType, cn string, sans []string, outDir string, validity time.Duration) (certPath, keyPath string, err error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
 		return "", "", fmt.Errorf("generate key: %w", err)
@@ -34,6 +35,10 @@ func IssueCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, ct CertType, c
 		return "", "", err
 	}
 
+	if validity <= 0 {
+		validity = time.Duration(certValidityDays) * 24 * time.Hour
+	}
+
 	now := time.Now()
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
@@ -41,7 +46,7 @@ func IssueCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, ct CertType, c
 			CommonName: cn,
 		},
 		NotBefore: now,
-		NotAfter:  now.AddDate(0, 0, certValidityDays),
+		NotAfter:  now.Add(validity),
 	}
 
 	switch ct {
