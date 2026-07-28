@@ -56,4 +56,5 @@ e2e/.env
 
 # Claude
 .claude/scheduled_tasks.lock
+.claude/worktrees/
 /bridgectl
