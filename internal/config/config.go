@@ -260,13 +260,21 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("config: auth.jwt_max_ttl: %w", err)
 	}
 	if cfg.Server.CertValidity != "" {
-		if _, err := time.ParseDuration(cfg.Server.CertValidity); err != nil {
+		d, err := time.ParseDuration(cfg.Server.CertValidity)
+		if err != nil {
 			return fmt.Errorf("config: server.cert_validity: %w", err)
+		}
+		if d < 0 {
+			return fmt.Errorf("config: server.cert_validity must not be negative")
 		}
 	}
 	if cfg.Server.CertRenewalCheckInterval != "" {
-		if _, err := time.ParseDuration(cfg.Server.CertRenewalCheckInterval); err != nil {
+		d, err := time.ParseDuration(cfg.Server.CertRenewalCheckInterval)
+		if err != nil {
 			return fmt.Errorf("config: server.cert_renewal_check_interval: %w", err)
+		}
+		if d < 0 {
+			return fmt.Errorf("config: server.cert_renewal_check_interval must not be negative")
 		}
 	}
 	if _, err := time.ParseDuration(cfg.Sessions.IdleTimeout); err != nil {

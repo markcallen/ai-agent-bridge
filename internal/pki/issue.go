@@ -23,7 +23,7 @@ const (
 )
 
 // IssueCert generates a new ECDSA P-384 keypair and certificate signed by the given CA.
-// When validity is zero the default (90 days) is used.
+// When validity is zero or negative the default (90 days) is used.
 func IssueCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, ct CertType, cn string, sans []string, outDir string, validity time.Duration) (certPath, keyPath string, err error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {

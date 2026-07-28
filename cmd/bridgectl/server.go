@@ -469,6 +469,7 @@ immediate renewal (e.g. when the cert has already expired).`,
 					configPath = defaultCfg
 				}
 			}
+			var certValidity time.Duration
 			if configPath != "" {
 				fileCfg, err := config.Load(configPath)
 				if err != nil {
@@ -491,6 +492,9 @@ immediate renewal (e.g. when the cert has already expired).`,
 					}
 					if len(serverSANs) == 0 && fileCfg.Server.Listen != "" {
 						serverSANs = localserver.BuildServerSANs(fileCfg.Server.Listen, nil)
+					}
+					if fileCfg.Server.CertValidity != "" {
+						certValidity = config.ParseDuration(fileCfg.Server.CertValidity, 0)
 					}
 				}
 			}
@@ -525,7 +529,7 @@ immediate renewal (e.g. when the cert has already expired).`,
 				}
 			}
 
-			if err := localserver.RenewServerCert(stateDir, serverSANs, logger, stepCA, 0); err != nil {
+			if err := localserver.RenewServerCert(stateDir, serverSANs, logger, stepCA, certValidity); err != nil {
 				return fmt.Errorf("renew cert: %w", err)
 			}
 
