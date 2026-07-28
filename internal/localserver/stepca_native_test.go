@@ -57,11 +57,12 @@ func TestProvisionerRouting_ACME(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	// "server" must be stripped for ACME (public CAs reject bare hostnames).
+	// "server" must be kept because clients verify TLS with ServerName "server".
+	// Loopback entries ("localhost", "127.0.0.1") are still stripped.
 	mat, err := EnsurePKI(stateDir, []string{"server", "server.example.com"}, logger, stepCfg)
 	require.NoError(t, err)
 
-	assert.NotContains(t, *acmeSANs, "server", "ACME must strip 'server' SAN")
+	assert.Contains(t, *acmeSANs, "server", "ACME must keep 'server' SAN for client TLS verification")
 	assert.Contains(t, *acmeSANs, "server.example.com")
 	assert.FileExists(t, mat.ServerCertPath)
 	assert.FileExists(t, mat.ServerKeyPath)

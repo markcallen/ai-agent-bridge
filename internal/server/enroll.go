@@ -38,6 +38,13 @@ func (s *BridgeServer) RegisterJWTKey(ctx context.Context, req *bridgev1.Registe
 		return nil, status.Error(codes.InvalidArgument, "issuer must be alphanumeric with hyphens, underscores, or dots")
 	}
 
+	// Callers may only register their own issuer slot (issuer must equal the
+	// mTLS CN). This prevents one client from overwriting another client's JWT
+	// key by supplying a foreign or reserved issuer name.
+	if issuer != cn {
+		return nil, status.Errorf(codes.PermissionDenied, "issuer %q does not match client certificate CN %q", issuer, cn)
+	}
+
 	if len(req.PublicKey) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "public_key is required")
 	}

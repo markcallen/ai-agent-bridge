@@ -2059,18 +2059,20 @@ func TestRegisterJWTKeyEnrollment(t *testing.T) {
 	pubDER, err := x509.MarshalPKIXPublicKey(pubKey)
 	require.NoError(t, err)
 
-	// Step 3: Call RegisterJWTKey — should succeed with mTLS only.
+	// Step 3: Call RegisterJWTKey — issuer must match the client cert CN
+	// ("local-client") to pass the identity check introduced to prevent
+	// cross-issuer squatting.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	resp, err := mtlsOnlyClient.RegisterJWTKey(ctx, &bridgev1.RegisterJWTKeyRequest{
 		PublicKey: pubDER,
-		Issuer:    "enrolled-client",
+		Issuer:    "local-client",
 	})
 	require.NoError(t, err, "RegisterJWTKey should succeed with mTLS-only auth")
-	assert.Equal(t, "enrolled-client", resp.Issuer)
+	assert.Equal(t, "local-client", resp.Issuer)
 
 	// Verify the key was persisted to disk.
-	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", "enrolled-client.pub"))
+	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", "local-client.pub"))
 	require.NoError(t, err, "JWT public key should be persisted to disk")
 
 	// Step 4: Connect with mTLS + JWT using the newly registered key.
@@ -2085,7 +2087,7 @@ func TestRegisterJWTKeyEnrollment(t *testing.T) {
 		}),
 		bridgeclient.WithJWT(bridgeclient.JWTConfig{
 			PrivateKeyPath: privPath,
-			Issuer:         "enrolled-client",
+			Issuer:         "local-client",
 			Audience:       "bridge",
 		}),
 		bridgeclient.WithTimeout(5*time.Second),
@@ -2190,10 +2192,11 @@ func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	// Issuer must match the local-client cert CN to pass the identity check.
 	ctx := context.Background()
 	_, err = mtlsClient.RegisterJWTKey(ctx, &bridgev1.RegisterJWTKeyRequest{
 		PublicKey: pubDER,
-		Issuer:    "persist-test",
+		Issuer:    "local-client",
 	})
 	require.NoError(t, err)
 	_ = mtlsClient.Close()
@@ -2223,7 +2226,7 @@ func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
 		}),
 		bridgeclient.WithJWT(bridgeclient.JWTConfig{
 			PrivateKeyPath: privPath,
-			Issuer:         "persist-test",
+			Issuer:         "local-client",
 			Audience:       "bridge",
 		}),
 		bridgeclient.WithTimeout(5*time.Second),

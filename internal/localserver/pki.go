@@ -17,6 +17,26 @@ import (
 // safeNameRe matches a simple filename component: alphanumeric, hyphens, underscores, dots.
 var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+const (
+	pkiModeAuto   = "auto"
+	pkiModeStepCA = "step-ca"
+	pkiModeFile   = ".pki-mode"
+)
+
+// readPKIMode returns the PKI mode recorded in certsDir/.pki-mode, or "" if absent.
+func readPKIMode(certsDir string) string {
+	data, err := os.ReadFile(filepath.Join(certsDir, pkiModeFile))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// writePKIMode records the PKI mode in certsDir/.pki-mode.
+func writePKIMode(certsDir, mode string) error {
+	return os.WriteFile(filepath.Join(certsDir, pkiModeFile), []byte(mode), 0o644)
+}
+
 // StepCAConfig holds optional Step CA integration settings. When URL is set,
 // EnsurePKI delegates certificate issuance to the Step CA instance instead of
 // generating a self-signed CA. The `step` CLI must be on PATH.
@@ -96,11 +116,21 @@ func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger, stepCA
 
 	// Check that all essential PKI files exist. If any are missing, regenerate.
 	// This covers partial state from interrupted runs or manual cleanup.
+	// We also check the PKI mode: if the server is restarted with --step-ca-url
+	// after a previous auto-PKI run (or vice versa), the existing certs are
+	// incompatible and must be regenerated.
+	requestedMode := pkiModeAuto
+	if stepCA != nil && stepCA.URL != "" {
+		requestedMode = pkiModeStepCA
+	}
 	if _, err := os.Stat(mat.CABundlePath); err == nil {
 		if _, err := os.Stat(mat.ServerCertPath); err == nil {
 			if _, err := os.Stat(mat.ServerKeyPath); err == nil {
-				logger.Info("PKI material already exists", "dir", certsDir)
-				return mat, nil
+				if readPKIMode(certsDir) == requestedMode {
+					logger.Info("PKI material already exists", "dir", certsDir)
+					return mat, nil
+				}
+				logger.Info("PKI mode changed, regenerating", "dir", certsDir, "mode", requestedMode)
 			}
 		}
 	}
@@ -169,6 +199,9 @@ func ensurePKIAutoGen(stateDir string, serverSANs []string, logger *slog.Logger,
 	mat.JWTSigningKey = privPath
 	logger.Info("generated JWT signing keypair", "pub", pubPath)
 
+	// Record mode so EnsurePKI can detect a mode switch on the next start.
+	_ = writePKIMode(certsDir, pkiModeAuto)
+
 	return mat, nil
 }
 
@@ -199,13 +232,15 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	// Dispatch to the native certificate request function based on provisioner type.
 	switch strings.ToLower(stepCA.Provisioner) {
 	case "acme":
-		// ACME / public CAs reject bare hostnames such as "server" or
-		// "localhost" and raw IPs like "127.0.0.1".  Strip them before
-		// requesting so the challenge doesn't fail.
+		// ACME / public CAs reject bare hostnames like "localhost" and raw
+		// IPs like "127.0.0.1" during HTTP-01 or DNS-01 challenges. Strip
+		// those but keep "server": all bridgectl clients hard-code
+		// ServerName "server" for TLS verification, so the server cert must
+		// include it regardless of provisioner type.
 		var sans []string
 		for _, s := range serverSANs {
 			switch s {
-			case "server", "localhost", "127.0.0.1":
+			case "localhost", "127.0.0.1":
 				continue
 			default:
 				sans = append(sans, s)
@@ -271,6 +306,9 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	mat.JWTSigningPub = pubPath
 	mat.JWTSigningKey = privPath
 	logger.Info("generated JWT signing keypair", "pub", pubPath)
+
+	// Record mode so EnsurePKI can detect a mode switch on the next start.
+	_ = writePKIMode(certsDir, pkiModeStepCA)
 
 	return mat, nil
 }

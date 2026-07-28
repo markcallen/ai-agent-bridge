@@ -110,7 +110,7 @@ func TestRegisterJWTKey(t *testing.T) {
 		s, _ := testEnrollServer(t)
 
 		_, err := s.RegisterJWTKey(mtlsContext("test-client"), &bridgev1.RegisterJWTKeyRequest{
-			Issuer: "test",
+			Issuer: "test-client",
 		})
 		require.Error(t, err)
 		assert.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -121,7 +121,7 @@ func TestRegisterJWTKey(t *testing.T) {
 
 		_, err := s.RegisterJWTKey(mtlsContext("test-client"), &bridgev1.RegisterJWTKeyRequest{
 			PublicKey: []byte("not a valid key"),
-			Issuer:    "test",
+			Issuer:    "test-client",
 		})
 		require.Error(t, err)
 		assert.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -148,29 +148,44 @@ func TestRegisterJWTKey(t *testing.T) {
 
 		_, err := s.RegisterJWTKey(mtlsContext("test-client"), &bridgev1.RegisterJWTKeyRequest{
 			PublicKey: pubDER,
-			Issuer:    "test",
+			Issuer:    "test-client",
 		})
 		require.Error(t, err)
 		assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 	})
 
-	t.Run("idempotent overwrite", func(t *testing.T) {
+	t.Run("key rotation allowed", func(t *testing.T) {
+		// A client may re-register its own issuer slot (issuer == CN) with a
+		// different key, enabling self-service key rotation.
 		s, _ := testEnrollServer(t)
 		pubDER1, _ := genTestPubKeyDER(t)
 		pubDER2, _ := genTestPubKeyDER(t)
 
 		_, err := s.RegisterJWTKey(mtlsContext("test-client"), &bridgev1.RegisterJWTKeyRequest{
 			PublicKey: pubDER1,
-			Issuer:    "same-issuer",
+			Issuer:    "test-client",
 		})
 		require.NoError(t, err)
 
-		// Second registration with different key should succeed (overwrite).
+		// Second registration with a different key and the same CN/issuer should succeed.
 		_, err = s.RegisterJWTKey(mtlsContext("test-client"), &bridgev1.RegisterJWTKeyRequest{
 			PublicKey: pubDER2,
-			Issuer:    "same-issuer",
+			Issuer:    "test-client",
 		})
 		require.NoError(t, err)
-		assert.True(t, s.jwtVerifier.HasKey("same-issuer"))
+		assert.True(t, s.jwtVerifier.HasKey("test-client"))
+	})
+
+	t.Run("cross-issuer overwrite rejected", func(t *testing.T) {
+		// A client must not be able to claim or overwrite a foreign issuer slot.
+		s, _ := testEnrollServer(t)
+		pubDER, _ := genTestPubKeyDER(t)
+
+		_, err := s.RegisterJWTKey(mtlsContext("test-client"), &bridgev1.RegisterJWTKeyRequest{
+			PublicKey: pubDER,
+			Issuer:    "other-client",
+		})
+		require.Error(t, err)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err))
 	})
 }

@@ -550,6 +550,78 @@ func TestRenewServerCertStepCA_MTLSError(t *testing.T) {
 	assert.Contains(t, err.Error(), "connection refused")
 }
 
+// TestEnsurePKI_ACMEKeepsServerSAN verifies that the ACME provisioner path does
+// not strip the "server" SAN. Clients hard-code ServerName "server" for TLS
+// verification, so it must be present in the issued certificate.
+func TestEnsurePKI_ACMEKeepsServerSAN(t *testing.T) {
+	stateDir := t.TempDir()
+	rootPEM := filepath.Join(stateDir, "root.crt")
+	require.NoError(t, os.WriteFile(rootPEM, []byte("fake-root-cert"), 0o644))
+
+	var capturedSANs []string
+	oldACME := requestCertACMEFn
+	requestCertACMEFn = func(_ *StepCAConfig, sans []string, certPath, keyPath string, _ *slog.Logger) error {
+		capturedSANs = sans
+		require.NoError(t, os.WriteFile(certPath, []byte("FAKE-SERVER-CERT"), 0o644))
+		require.NoError(t, os.WriteFile(keyPath, []byte("FAKE-SERVER-KEY"), 0o600))
+		return nil
+	}
+	t.Cleanup(func() { requestCertACMEFn = oldACME })
+
+	stepCfg := &StepCAConfig{
+		URL:         "https://ca.example.internal:443",
+		RootPath:    rootPEM,
+		Provisioner: "acme",
+	}
+	_, err := EnsurePKI(stateDir, []string{"server", "localhost", "127.0.0.1", "bridge.local"}, testLogger(), stepCfg)
+	require.NoError(t, err)
+
+	assert.Contains(t, capturedSANs, "server", "ACME path must keep 'server' SAN for client TLS verification")
+	assert.Contains(t, capturedSANs, "bridge.local", "ACME path must keep non-loopback SANs")
+	assert.NotContains(t, capturedSANs, "localhost", "ACME path should strip 'localhost'")
+	assert.NotContains(t, capturedSANs, "127.0.0.1", "ACME path should strip '127.0.0.1'")
+}
+
+// TestEnsurePKI_ModeChangeTriggerRegeneration verifies that switching from
+// auto-PKI to Step CA mode (or vice versa) forces PKI regeneration even when
+// the cert files from the previous run still exist on disk.
+func TestEnsurePKI_ModeChangeTriggerRegeneration(t *testing.T) {
+	stateDir := t.TempDir()
+	logger := testLogger()
+
+	// First call: auto-PKI.
+	_, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, nil)
+	require.NoError(t, err)
+
+	// Capture the auto-PKI CA bundle content.
+	certsDir := CertsDir(stateDir)
+	autoBundle, err := os.ReadFile(filepath.Join(certsDir, "ca-bundle.crt"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(autoBundle), "fake-root-cert")
+
+	// Prepare Step CA mock.
+	rootPEM := filepath.Join(stateDir, "root.crt")
+	require.NoError(t, os.WriteFile(rootPEM, []byte("fake-root-cert"), 0o644))
+
+	oldJWK := requestCertJWKFn
+	requestCertJWKFn = func(_ *StepCAConfig, _ []string, certPath, keyPath string, _ *slog.Logger) error {
+		require.NoError(t, os.WriteFile(certPath, []byte("STEP-SERVER-CERT"), 0o644))
+		require.NoError(t, os.WriteFile(keyPath, []byte("STEP-SERVER-KEY"), 0o600))
+		return nil
+	}
+	t.Cleanup(func() { requestCertJWKFn = oldJWK })
+
+	stepCfg := &StepCAConfig{URL: "https://ca.example.internal:443", RootPath: rootPEM}
+
+	// Second call: Step CA mode — must regenerate despite existing files.
+	mat, err := EnsurePKI(stateDir, []string{"127.0.0.1"}, logger, stepCfg)
+	require.NoError(t, err)
+
+	bundle, err := os.ReadFile(mat.CABundlePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(bundle), "fake-root-cert", "bundle should now start with the Step CA root after mode switch")
+}
+
 func TestLoadPKIMaterial(t *testing.T) {
 	stateDir := filepath.Join(os.TempDir(), "test-state")
 	mat := LoadPKIMaterial(stateDir)
