@@ -111,7 +111,7 @@ jobs:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -209,7 +209,7 @@ jobs:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -255,7 +255,7 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -287,7 +287,7 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', needs.bump_and_tag.outputs.tag) || github.ref }}
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -409,7 +409,7 @@ jobs:
 
       - name: Set up Go
         if: env.AWS_SMOKE_ROLE_ARN != ''
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -475,7 +475,7 @@ jobs:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
