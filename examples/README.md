@@ -1,146 +1,156 @@
 # Examples
 
-These examples all connect to the same running `ai-agent-bridge` daemon. Start the bridge once, then try the Go terminal client, the TypeScript terminal client, and the web client against that same server.
+These examples show how to connect to an `ai-agent-bridge` server, start AI agent sessions, and interact with them. All examples auto-discover credentials from `~/.ai-agent-bridge/` — no flags to memorise.
 
-## Start One Bridge
+## Prerequisites
 
-From the repo root:
+Start the bridge server first:
+
+```bash
+# Local mode (auto TLS, no Step CA required)
+bridgectl server start
+
+# Or with Step CA for remote access — see docs/step-ca.md
+```
+
+For **remote** examples (`chat-ca`, `sessions --remote`, `web --remote`), you need a client certificate enrolled with the remote server:
+
+```bash
+bridgectl client init --step-ca-url https://your-ca.example.com
+# Follow the prompts; credentials are saved to ~/.ai-agent-bridge/certs/
+```
+
+---
+
+## `examples/chat` — Interactive session (local)
+
+Start a new Claude Code session on the local bridge and attach your terminal:
+
+```bash
+go run ./examples/chat <repo-path>
+# or
+make chat-claude CHAT_REPO=/path/to/repo
+make chat-opencode CHAT_REPO=/path/to/repo
+make chat-codex CHAT_REPO=/path/to/repo
+make chat-gemini CHAT_REPO=/path/to/repo
+```
+
+**Flags:**
+- `--state-dir` — override state directory (default: `~/.ai-agent-bridge`)
+- `--project` — project ID (default: `local`)
+- `--provider` — provider name (default: `claude`)
+- `--timeout` — session timeout (default: `30m`)
+
+---
+
+## `examples/chat-ca` — Interactive session (remote via Step CA)
+
+Same as `chat` but connects to a remote bridge server. Credentials are auto-discovered from `~/.ai-agent-bridge/certs/`.
+
+```bash
+go run ./examples/chat-ca --remote macbook.ts.net <repo-path>
+# or
+make chat-ca-claude CHAT_REPO=/path/to/repo CHAT_CA_REMOTE=macbook.ts.net
+make chat-ca-opencode CHAT_REPO=/path/to/repo CHAT_CA_REMOTE=macbook.ts.net
+```
+
+**Flags:**
+- `--remote` — remote hostname or `host:port` (required; defaults to port 9445)
+- `--state-dir` — override state directory
+- `--cert`, `--key`, `--jwt-key` — manual credential overrides (optional)
+- `--project`, `--provider`, `--timeout`
+
+---
+
+## `examples/sessions` — List, watch, and attach to sessions
+
+Three subcommands for managing existing sessions on local or remote servers:
+
+```bash
+# List all sessions
+go run ./examples/sessions list
+go run ./examples/sessions list --remote macbook.ts.net
+
+# Watch a session (read-only output stream)
+go run ./examples/sessions watch <session-id>
+go run ./examples/sessions watch --remote macbook.ts.net <session-id>
+
+# Attach to a session (claim the writer slot)
+go run ./examples/sessions attach <session-id>
+go run ./examples/sessions attach --remote macbook.ts.net <session-id>
+go run ./examples/sessions attach --take-over <session-id>  # force writer claim
+```
+
+**Makefile shortcuts:**
+
+```bash
+make sessions-list
+make sessions-list SESSIONS_REMOTE=macbook.ts.net
+
+make sessions-watch SESSIONS_WATCH_ID=<id>
+make sessions-watch SESSIONS_WATCH_ID=<id> SESSIONS_REMOTE=macbook.ts.net
+
+make sessions-attach SESSIONS_ATTACH_ID=<id>
+make sessions-attach SESSIONS_ATTACH_ID=<id> SESSIONS_REMOTE=macbook.ts.net
+```
+
+**Notes:**
+- `watch` streams output to stdout as a read-only observer.
+- `attach` checks for an active writer first; if one exists, it suggests `watch` or `--take-over`.
+- Press `Ctrl+\` to detach from `attach` without stopping the session; `Ctrl+C` sends interrupt to the session.
+
+---
+
+## `examples/web` — Web UI (Go server + Vite/React frontend)
+
+A browser-based interface for listing, starting, watching, and interacting with sessions. The Go server proxies all bridge API calls; the React frontend renders session output in an xterm.js terminal.
+
+### Development mode (hot reload)
+
+```bash
+# Terminal 1 — Go API server
+cd examples/web && go run . --port 8080
+
+# Terminal 2 — Vite dev server (proxies /api → :8080)
+cd examples/web/ui && pnpm install && pnpm dev
+```
+
+Then open `http://localhost:5173`.
+
+### Production mode
+
+```bash
+make web-build        # builds the Vite app into examples/web/ui/dist/
+make web-start        # serves the built UI + API from :8080
+```
+
+Then open `http://localhost:8080`.
+
+### Flags
+
+```
+--port       HTTP server port (default: 8080)
+--vite-port  Vite dev server port to proxy to; 0 = serve built ui/dist/ (default: 5173)
+```
+
+### Connecting to a remote server
+
+The web UI has a **Remote host** field in the header. Enter a hostname (e.g. `macbook.ts.net`) and all API calls will be routed to that remote bridge server using credentials from `~/.ai-agent-bridge/certs/`. Leave it empty to use the local server.
+
+---
+
+## Provider Notes
+
+| Provider | Required secret |
+|---|---|
+| `claude` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| `opencode` | depends on opencode config |
+| `codex` | `OPENAI_API_KEY` |
+| `gemini` | `GEMINI_API_KEY` |
+
+Set secrets in your `.env` file or via `env-secrets`:
 
 ```bash
 cp .env.example .env
 $EDITOR .env
-make dev-run
 ```
-
-This starts the bridge with local mTLS and JWT auth on `bridge.local:9445`.
-
-If you have not created the AWS secret yet:
-
-```bash
-cat > /tmp/ai-agent-bridge.secrets.env <<'EOF'
-CLAUDE_CODE_OAUTH_TOKEN=
-OPENAI_API_KEY=
-GEMINI_API_KEY=
-EOF
-$EDITOR /tmp/ai-agent-bridge.secrets.env
-env-secrets aws secret upsert \
-  --name ai-agent-bridge/dev \
-  --file /tmp/ai-agent-bridge.secrets.env \
-  --profile <aws-profile> \
-  --region <aws-region>
-```
-
-If this is your first local run, make sure `bridge.local` resolves locally:
-
-```bash
-make dev-setup
-```
-
-## 1. Run `examples/chat` (Go)
-
-From the repo root:
-
-```bash
-make chat-claude
-```
-
-Use the same running bridge with a different provider by switching the make target:
-
-```bash
-make chat-codex
-make chat-gemini
-```
-
-If you want to point at a different repo path or project:
-
-```bash
-make chat-claude CHAT_REPO=$PWD CHAT_PROJECT=dev
-```
-
-## 2. Run `examples/chat-ts` (TypeScript CLI)
-
-Install dependencies once:
-
-```bash
-cd examples/chat-ts
-npm install
-```
-
-Run the TypeScript terminal client against the same bridge:
-
-```bash
-cd examples/chat-ts
-npm start -- --target bridge.local:9445 --provider claude --project dev "$PWD/../.."
-```
-
-Switch only the provider to reuse the same bridge:
-
-```bash
-cd examples/chat-ts
-npm start -- --target bridge.local:9445 --provider codex --project dev "$PWD/../.."
-npm start -- --target bridge.local:9445 --provider gemini --project dev "$PWD/../.."
-```
-
-You can also use the repo-root shortcuts:
-
-```bash
-make chat-ts-claude
-make chat-ts-codex
-make chat-ts-gemini
-```
-
-## 3. Run `examples/chat-web` (React + Express)
-
-Build the shared Node client package and install the web example dependencies:
-
-```bash
-make chat-web-install
-```
-
-The web example already includes a local `.env` configured for the dev bridge in [`examples/chat-web/.env.example`](chat-web/.env.example). If you need to recreate it, use:
-
-```dotenv
-BRIDGE_ADDR=bridge.local:9445
-CA_CERT=../../certs/ca-bundle.crt
-CLIENT_CERT=../../certs/dev-client.crt
-CLIENT_KEY=../../certs/dev-client.key
-JWT_KEY=../../certs/jwt-signing.key
-JWT_ISSUER=dev
-JWT_AUDIENCE=bridge
-JWT_PROJECT=dev
-PORT=3000
-VITE_PORT=5173
-```
-
-Start the web app:
-
-```bash
-make chat-web-dev
-```
-
-Then open `http://localhost:3000`.
-
-To connect to the same running bridge with different providers:
-
-1. Enter the repo path you want the bridge session to run in.
-2. Choose `claude`, `codex`, or `gemini` from the provider dropdown.
-3. Click `Start`.
-
-Each selection starts a new bridge session on the same daemon at `bridge.local:9445`.
-
-## Provider Matrix
-
-All three examples talk to the same bridge API. The provider changes per session:
-
-| Example | Claude | Codex | Gemini |
-| --- | --- | --- | --- |
-| `examples/chat` | `make chat-claude` | `make chat-codex` | `make chat-gemini` |
-| `examples/chat-ts` | `make chat-ts-claude` | `make chat-ts-codex` | `make chat-ts-gemini` |
-| `examples/chat-web` | Select `claude` in the UI | Select `codex` in the UI | Select `gemini` in the UI |
-
-## Notes
-
-- `claude` requires `CLAUDE_CODE_OAUTH_TOKEN`.
-- `codex` requires `OPENAI_API_KEY`.
-- `gemini` requires `GEMINI_API_KEY`.
-- The bridge reports provider availability through health and provider-list APIs, so the web UI can show whether a provider is ready before you start a session.

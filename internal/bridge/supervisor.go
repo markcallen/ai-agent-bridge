@@ -647,6 +647,9 @@ func (s *Supervisor) closeLive(ms *managedSession) {
 // appendChunk adds a new chunk with the given type to the session buffer and
 // fans it out to all attached observers. Chunks for slow observers are dropped
 // with a warning; the observer remains attached.
+//
+// Sends are done under ms.mu with a non-blocking select so that closeLive
+// (which also holds ms.mu when closing channels) cannot race.
 func (s *Supervisor) appendChunk(ms *managedSession, payload []byte, ctype ChunkType) {
 	chunk := ms.buf.AppendTyped(payload, ctype)
 	s.persistChunk(ms.info.SessionID, chunk)
@@ -654,36 +657,36 @@ func (s *Supervisor) appendChunk(ms *managedSession, payload []byte, ctype Chunk
 	ms.info.OldestSeq = ms.buf.OldestSeq()
 	ms.info.LastSeq = ms.buf.LastSeq()
 	ms.lastActivity = time.Now()
-	// Snapshot the observer map so we don't hold the lock during channel sends.
-	obs := make(map[string]*observerEntry, len(ms.observers))
-	maps.Copy(obs, ms.observers)
-	ms.mu.Unlock()
-
-	for clientID, entry := range obs {
+	for clientID, entry := range ms.observers {
 		select {
 		case entry.ch <- chunk:
 		default:
 			slog.Warn("observer channel full, dropping chunk", "session_id", ms.info.SessionID, "client_id", clientID)
 		}
 	}
+	ms.mu.Unlock()
 }
 
 // fanoutControlEvent broadcasts a control chunk to all current observers
 // without appending it to the replay buffer or persisting it.
+//
+// Sends are done under ms.mu with a non-blocking select so that closeLive
+// (which also holds ms.mu when closing channels) cannot race.
 func (s *Supervisor) fanoutControlEvent(ms *managedSession, ctype ChunkType, payload []byte) {
 	chunk := OutputChunk{Type: ctype, Payload: payload}
 	ms.mu.Lock()
-	obs := make(map[string]*observerEntry, len(ms.observers))
-	maps.Copy(obs, ms.observers)
-	ms.mu.Unlock()
-
-	for clientID, entry := range obs {
+	if ms.liveClosed {
+		ms.mu.Unlock()
+		return
+	}
+	for clientID, entry := range ms.observers {
 		select {
 		case entry.ch <- chunk:
 		default:
 			slog.Warn("observer channel full, dropping control event", "session_id", ms.info.SessionID, "client_id", clientID, "type", ctype)
 		}
 	}
+	ms.mu.Unlock()
 }
 
 // NotifyWriterClaimed broadcasts a ChunkTypeWriterClaimed control event to all
@@ -1013,7 +1016,10 @@ func (s *Supervisor) countObservers(ms *managedSession) int {
 	return n
 }
 
-func (s *Supervisor) Detach(sessionID, clientID string) error {
+// Detach removes clientID from the session's observer set. It returns true if
+// the detaching client held the active-writer slot (so the server can broadcast
+// a WRITER_RELEASED event), and any error.
+func (s *Supervisor) Detach(sessionID, clientID string) (wasWriter bool, err error) {
 	s.mu.RLock()
 	ms, ok := s.sessions[sessionID]
 	s.mu.RUnlock()
@@ -1023,17 +1029,17 @@ func (s *Supervisor) Detach(sessionID, clientID string) error {
 		_, inHistory := s.history[sessionID]
 		s.histMu.RUnlock()
 		if inHistory {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+		return false, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
 	}
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	if ms.recovered {
-		return nil
+		return false, nil
 	}
 	if _, present := ms.observers[clientID]; !present {
-		return ErrClientMismatch
+		return false, ErrClientMismatch
 	}
 	delete(ms.observers, clientID)
 
@@ -1042,12 +1048,13 @@ func (s *Supervisor) Detach(sessionID, clientID string) error {
 		ms.info.ActiveWriterClientID = ""
 		ms.info.Attached = false
 		ms.info.AttachedClientID = ""
+		wasWriter = true
 	}
 	ms.info.ObserverCount = s.countObservers(ms)
 	if len(ms.observers) == 0 && ms.info.State == SessionStateAttached {
 		ms.info.State = SessionStateRunning
 	}
-	return nil
+	return wasWriter, nil
 }
 
 func (s *Supervisor) Get(sessionID string) (*SessionInfo, error) {

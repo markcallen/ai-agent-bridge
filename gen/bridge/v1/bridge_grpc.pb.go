@@ -19,17 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	BridgeService_StartSession_FullMethodName  = "/bridge.v1.BridgeService/StartSession"
-	BridgeService_StopSession_FullMethodName   = "/bridge.v1.BridgeService/StopSession"
-	BridgeService_GetSession_FullMethodName    = "/bridge.v1.BridgeService/GetSession"
-	BridgeService_ListSessions_FullMethodName  = "/bridge.v1.BridgeService/ListSessions"
-	BridgeService_AttachSession_FullMethodName = "/bridge.v1.BridgeService/AttachSession"
-	BridgeService_WriteInput_FullMethodName    = "/bridge.v1.BridgeService/WriteInput"
-	BridgeService_ResizeSession_FullMethodName = "/bridge.v1.BridgeService/ResizeSession"
-	BridgeService_ClaimWriter_FullMethodName   = "/bridge.v1.BridgeService/ClaimWriter"
-	BridgeService_ReleaseWriter_FullMethodName = "/bridge.v1.BridgeService/ReleaseWriter"
-	BridgeService_Health_FullMethodName        = "/bridge.v1.BridgeService/Health"
-	BridgeService_ListProviders_FullMethodName = "/bridge.v1.BridgeService/ListProviders"
+	BridgeService_StartSession_FullMethodName   = "/bridge.v1.BridgeService/StartSession"
+	BridgeService_StopSession_FullMethodName    = "/bridge.v1.BridgeService/StopSession"
+	BridgeService_GetSession_FullMethodName     = "/bridge.v1.BridgeService/GetSession"
+	BridgeService_ListSessions_FullMethodName   = "/bridge.v1.BridgeService/ListSessions"
+	BridgeService_AttachSession_FullMethodName  = "/bridge.v1.BridgeService/AttachSession"
+	BridgeService_WriteInput_FullMethodName     = "/bridge.v1.BridgeService/WriteInput"
+	BridgeService_ResizeSession_FullMethodName  = "/bridge.v1.BridgeService/ResizeSession"
+	BridgeService_ClaimWriter_FullMethodName    = "/bridge.v1.BridgeService/ClaimWriter"
+	BridgeService_ReleaseWriter_FullMethodName  = "/bridge.v1.BridgeService/ReleaseWriter"
+	BridgeService_Health_FullMethodName         = "/bridge.v1.BridgeService/Health"
+	BridgeService_ListProviders_FullMethodName  = "/bridge.v1.BridgeService/ListProviders"
+	BridgeService_RegisterJWTKey_FullMethodName = "/bridge.v1.BridgeService/RegisterJWTKey"
 )
 
 // BridgeServiceClient is the client API for BridgeService service.
@@ -52,6 +53,11 @@ type BridgeServiceClient interface {
 	ReleaseWriter(ctx context.Context, in *ReleaseWriterRequest, opts ...grpc.CallOption) (*ReleaseWriterResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 	ListProviders(ctx context.Context, in *ListProvidersRequest, opts ...grpc.CallOption) (*ListProvidersResponse, error)
+	// RegisterJWTKey enrolls a client's Ed25519 public key for JWT authentication.
+	// Requires a valid mTLS peer certificate; JWT auth is not required (the mTLS
+	// certificate itself authorizes the enrollment). After registration, the client
+	// can mint JWT tokens signed with the corresponding private key.
+	RegisterJWTKey(ctx context.Context, in *RegisterJWTKeyRequest, opts ...grpc.CallOption) (*RegisterJWTKeyResponse, error)
 }
 
 type bridgeServiceClient struct {
@@ -181,6 +187,16 @@ func (c *bridgeServiceClient) ListProviders(ctx context.Context, in *ListProvide
 	return out, nil
 }
 
+func (c *bridgeServiceClient) RegisterJWTKey(ctx context.Context, in *RegisterJWTKeyRequest, opts ...grpc.CallOption) (*RegisterJWTKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterJWTKeyResponse)
+	err := c.cc.Invoke(ctx, BridgeService_RegisterJWTKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BridgeServiceServer is the server API for BridgeService service.
 // All implementations must embed UnimplementedBridgeServiceServer
 // for forward compatibility.
@@ -201,6 +217,11 @@ type BridgeServiceServer interface {
 	ReleaseWriter(context.Context, *ReleaseWriterRequest) (*ReleaseWriterResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	ListProviders(context.Context, *ListProvidersRequest) (*ListProvidersResponse, error)
+	// RegisterJWTKey enrolls a client's Ed25519 public key for JWT authentication.
+	// Requires a valid mTLS peer certificate; JWT auth is not required (the mTLS
+	// certificate itself authorizes the enrollment). After registration, the client
+	// can mint JWT tokens signed with the corresponding private key.
+	RegisterJWTKey(context.Context, *RegisterJWTKeyRequest) (*RegisterJWTKeyResponse, error)
 	mustEmbedUnimplementedBridgeServiceServer()
 }
 
@@ -243,6 +264,9 @@ func (UnimplementedBridgeServiceServer) Health(context.Context, *HealthRequest) 
 }
 func (UnimplementedBridgeServiceServer) ListProviders(context.Context, *ListProvidersRequest) (*ListProvidersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListProviders not implemented")
+}
+func (UnimplementedBridgeServiceServer) RegisterJWTKey(context.Context, *RegisterJWTKeyRequest) (*RegisterJWTKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterJWTKey not implemented")
 }
 func (UnimplementedBridgeServiceServer) mustEmbedUnimplementedBridgeServiceServer() {}
 func (UnimplementedBridgeServiceServer) testEmbeddedByValue()                       {}
@@ -456,6 +480,24 @@ func _BridgeService_ListProviders_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BridgeService_RegisterJWTKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterJWTKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BridgeServiceServer).RegisterJWTKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BridgeService_RegisterJWTKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BridgeServiceServer).RegisterJWTKey(ctx, req.(*RegisterJWTKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // BridgeService_ServiceDesc is the grpc.ServiceDesc for BridgeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -502,6 +544,10 @@ var BridgeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListProviders",
 			Handler:    _BridgeService_ListProviders_Handler,
+		},
+		{
+			MethodName: "RegisterJWTKey",
+			Handler:    _BridgeService_RegisterJWTKey_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

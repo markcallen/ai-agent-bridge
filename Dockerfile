@@ -32,6 +32,14 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install step CLI for Step CA integration (Tier 2 PKI).
+# The binary is used by bridgectl to obtain certificates from a Step CA instance.
+ARG STEP_VERSION=0.30.6
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/smallstep/cli/releases/download/v${STEP_VERSION}/step-cli_${ARCH}.deb" -o /tmp/step-cli.deb && \
+    dpkg -i /tmp/step-cli.deb && \
+    rm /tmp/step-cli.deb
+
 RUN useradd -m -s /bin/bash bridge && \
     mkdir -p /home/bridge/.gemini && \
     chown -R bridge:bridge /home/bridge/.gemini
@@ -47,6 +55,7 @@ RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force && \
     || true)
 COPY config/bridge.yaml /app/config/bridge.yaml
 COPY config/bridge-docker.yaml /app/config/bridge-docker.yaml
+COPY config/bridge-docker-stepca.yaml /app/config/bridge-docker-stepca.yaml
 COPY docker-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

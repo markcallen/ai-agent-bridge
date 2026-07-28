@@ -1,0 +1,79 @@
+services:
+  # Step CA initialization — runs once to bootstrap the CA, then exits.
+  step-ca-init:
+    image: smallstep/step-ca:latest
+    entrypoint: ["/bin/sh", "/scripts/init.sh"]
+    environment:
+      CA_NAME: "Step CA E2E Test CA"
+      CA_DNS: "step-ca.local,localhost"
+      CA_ADDRESS: ":9443"
+      PROVISIONER_PASSWORD: "step-ca-e2e-password"
+    volumes:
+      - step-ca-data:/home/step
+      - ../../step-ca/init.sh:/scripts/init.sh:ro
+
+  # Step CA server — long-running CA that issues certificates.
+  step-ca:
+    image: smallstep/step-ca:latest
+    volumes:
+      - step-ca-data:/home/step
+    depends_on:
+      step-ca-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "step", "ca", "health", "--ca-url", "https://localhost:9443", "--root", "/home/step/certs/root_ca.crt"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      default:
+        aliases:
+          - step-ca.local
+
+  # Bridge server configured to use Step CA for PKI (Tier-2).
+  bridge:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      BRIDGE_CONFIG: /app/config/bridge-stepca-e2e.yaml
+      BRIDGE_CN: bridge
+      BRIDGE_SANS: "bridge,bridge.local,localhost,127.0.0.1"
+      BRIDGE_CLIENT_CN: dev-client
+      STEP_CA_URL: "https://step-ca.local:9443"
+      STEP_CA_ROOT: "/step-ca/shared/root_ca.crt"
+      STEP_CA_PROVISIONER: "bridge-jwk"
+      STEP_CA_PROVISIONER_PASSWORD: "step-ca-e2e-password"
+    volumes:
+      - bridge-state:/home/bridge/.ai-agent-bridge
+      - ./bridge-stepca-e2e.yaml:/app/config/bridge-stepca-e2e.yaml:ro
+      - step-ca-data:/step-ca:ro
+    depends_on:
+      step-ca:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 30s
+    networks:
+      default:
+        aliases:
+          - bridge.local
+
+  # Test client — runs the step-ca e2e tests against the bridge.
+  test-client:
+    build:
+      context: ../..
+      dockerfile: e2e/step-ca/Dockerfile.test-client
+    depends_on:
+      bridge:
+        condition: service_healthy
+    volumes:
+      - bridge-state:/bridge-state:ro
+
+volumes:
+  step-ca-data:
+  bridge-state:

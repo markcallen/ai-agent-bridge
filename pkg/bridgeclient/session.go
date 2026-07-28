@@ -87,6 +87,18 @@ func (c *Client) ListProviders(ctx context.Context) (*bridgev1.ListProvidersResp
 	return resp, err
 }
 
+// RegisterJWTKey enrolls a client's Ed25519 public key for JWT authentication.
+// Requires mTLS; JWT auth is not needed for this call.
+func (c *Client) RegisterJWTKey(ctx context.Context, req *bridgev1.RegisterJWTKeyRequest) (*bridgev1.RegisterJWTKeyResponse, error) {
+	var resp *bridgev1.RegisterJWTKeyResponse
+	err := c.invoke(ctx, func(callCtx context.Context) error {
+		var callErr error
+		resp, callErr = c.rpc.RegisterJWTKey(callCtx, req)
+		return callErr
+	})
+	return resp, err
+}
+
 func (c *Client) ClaimWriter(ctx context.Context, req *bridgev1.ClaimWriterRequest) (*bridgev1.ClaimWriterResponse, error) {
 	var resp *bridgev1.ClaimWriterResponse
 	err := c.invoke(ctx, func(callCtx context.Context) error {

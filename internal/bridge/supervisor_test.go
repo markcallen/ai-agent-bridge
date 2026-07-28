@@ -92,7 +92,7 @@ func TestSupervisorSessionLifecycle(t *testing.T) {
 		t.Fatalf("size=%dx%d want 100x40", got.Cols, got.Rows)
 	}
 
-	if err := supervisor.Detach("session-a", "client-a"); err != nil {
+	if _, err := supervisor.Detach("session-a", "client-a"); err != nil {
 		t.Fatalf("Detach: %v", err)
 	}
 	replayState, err := supervisor.Attach("session-a", "client-b", 0, AttachRoleWriter)
@@ -102,7 +102,7 @@ func TestSupervisorSessionLifecycle(t *testing.T) {
 	if len(replayState.Replay) == 0 {
 		t.Fatal("Replay was empty, want buffered output")
 	}
-	if err := supervisor.Detach("session-a", "client-b"); err != nil {
+	if _, err := supervisor.Detach("session-a", "client-b"); err != nil {
 		t.Fatalf("Detach replay client: %v", err)
 	}
 
@@ -422,7 +422,7 @@ func TestSupervisorHistoryChunkReplay(t *testing.T) {
 		t.Fatalf("WriteInput: %v", err)
 	}
 	waitForChunk(t, state.Live, "hello")
-	if err := sup.Detach("replay-1", "client-a"); err != nil {
+	if _, err := sup.Detach("replay-1", "client-a"); err != nil {
 		t.Fatalf("Detach: %v", err)
 	}
 
@@ -1073,7 +1073,7 @@ func TestDetachClearsWriterSlot(t *testing.T) {
 	}
 	_ = state
 
-	if err := sup.Detach("detach-clear", "wr"); err != nil {
+	if _, err := sup.Detach("detach-clear", "wr"); err != nil {
 		t.Fatalf("Detach: %v", err)
 	}
 	info, err := sup.Get("detach-clear")

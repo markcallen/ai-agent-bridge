@@ -338,4 +338,3 @@ The proto file is at `proto/bridge/v1/bridge.proto` in this repository.
 
 - [Service reference](service.md) — Architecture and configuration
 - [Go SDK](go-sdk.md) — Typed Go wrapper
-- [Node.js SDK](node-sdk.md) — Node.js adapter

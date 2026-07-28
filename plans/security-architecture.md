@@ -161,6 +161,8 @@ On first `bridgectl server start --listen`, the server generates:
     ├── jwt-signing.key     Ed25519 JWT signing key for local CLI
     ├── jwt-signing.pub
     ├── ca-bundle.crt       Trust bundle (CA cert)
+    ├── jwt-clients/
+    │   └── <name>.pub      Server-side JWT public key (per issued client)
     └── clients/
         └── <name>/
             ├── <name>.crt  Per-client certificate
@@ -445,8 +447,8 @@ If Step CA is temporarily unavailable:
 Revocation
 
 Tier 1: revoke a client by deleting its JWT public key from
-`~/.ai-agent-bridge/certs/clients/<name>/` and restarting the server. The
-removed key is no longer loaded; subsequent tokens from that client are
+`~/.ai-agent-bridge/certs/jwt-clients/<name>.pub` and restarting the server.
+The removed key is no longer loaded; subsequent tokens from that client are
 rejected.
 
 Tier 2: revoke via Step CA + OIDC:

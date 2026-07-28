@@ -1,0 +1,170 @@
+import { useEffect, useRef } from 'react'
+import { Terminal as XTerm } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
+import { streamSession, writeInput, resizeSession } from '../api'
+
+interface Props {
+  sessionId: string
+  role: 'observer' | 'writer'
+  remote: string | undefined
+  onClose: () => void
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  wrapper: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    height: '600px',
+    background: '#000',
+  },
+  toolbar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    background: '#16213e',
+    borderBottom: '1px solid #0f3460',
+    padding: '8px 16px',
+    flexShrink: 0,
+  },
+  info: {
+    fontSize: '13px',
+    color: '#a0a0b0',
+    fontFamily: 'monospace',
+  },
+  closeBtn: {
+    background: 'transparent',
+    border: '1px solid #e94560',
+    borderRadius: '4px',
+    color: '#e94560',
+    padding: '4px 12px',
+    fontSize: '13px',
+    cursor: 'pointer',
+  },
+  termContainer: {
+    flex: 1,
+    overflow: 'hidden',
+    padding: '4px',
+  },
+}
+
+export default function Terminal({ sessionId, role, remote, onClose }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const xtermRef = useRef<XTerm | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
+  const clientId = useRef<string>(crypto.randomUUID())
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    if (!containerRef.current) return
+
+    const term = new XTerm({
+      theme: {
+        background: '#0d0d0d',
+        foreground: '#e0e0e0',
+        cursor: '#e94560',
+      },
+      fontFamily: 'monospace',
+      fontSize: 14,
+      cursorBlink: true,
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(containerRef.current)
+    fit.fit()
+    xtermRef.current = term
+    fitRef.current = fit
+
+    const abort = new AbortController()
+    abortRef.current = abort
+
+    // Stream output from server via SSE
+    streamSession(
+      sessionId,
+      role,
+      remote,
+      clientId.current,
+      (event) => {
+        if (event.type === 'output' && event.data) {
+          const bytes = Uint8Array.from(atob(event.data), (c) => c.charCodeAt(0))
+          term.write(bytes)
+        } else if (event.type === 'error' && event.message) {
+          term.writeln(`\r\n\x1b[31m[error] ${event.message}\x1b[0m`)
+        } else if (event.type === 'end') {
+          term.writeln('\r\n\x1b[33m[session ended]\x1b[0m')
+        }
+      },
+      abort.signal
+    )
+
+    // For writer role: send input
+    let inputDispose: { dispose(): void } | undefined
+    if (role === 'writer') {
+      inputDispose = term.onData((data) => {
+        const bytes = new TextEncoder().encode(data)
+        void writeInput(sessionId, clientId.current, bytes, remote).catch((err) => {
+          console.error('writeInput failed:', err)
+        })
+      })
+
+      // Send initial resize
+      const sendResize = () => {
+        const core = term as unknown as { _core?: { viewport?: { scrollBarWidth: number } } }
+        void resizeSession(
+          sessionId,
+          clientId.current,
+          term.cols,
+          term.rows,
+          remote
+        ).catch((err) => {
+          console.error('resizeSession failed:', err)
+          void core // suppress unused var warning
+        })
+      }
+
+      // Resize observer
+      const observer = new ResizeObserver(() => {
+        fit.fit()
+        sendResize()
+      })
+      if (containerRef.current) {
+        observer.observe(containerRef.current)
+      }
+      sendResize()
+
+      return () => {
+        abort.abort()
+        inputDispose?.dispose()
+        observer.disconnect()
+        term.dispose()
+      }
+    }
+
+    return () => {
+      abort.abort()
+      term.dispose()
+    }
+  }, [sessionId, role, remote])
+
+  const shortId = sessionId.length > 12 ? sessionId.slice(0, 8) + '…' : sessionId
+
+  return (
+    <div style={styles.wrapper}>
+      <div style={styles.toolbar}>
+        <span style={styles.info}>
+          Session: <strong>{shortId}</strong> &nbsp;|&nbsp; Mode:{' '}
+          <strong>{role}</strong>
+          {remote && (
+            <>
+              &nbsp;|&nbsp; Remote: <strong>{remote}</strong>
+            </>
+          )}
+        </span>
+        <button style={styles.closeBtn} onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div ref={containerRef} style={styles.termContainer} />
+    </div>
+  )
+}

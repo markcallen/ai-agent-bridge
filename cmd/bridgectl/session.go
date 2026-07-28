@@ -28,22 +28,41 @@ func newSessionCmd() *cobra.Command {
 	cmd.AddCommand(
 		newSessionListCmd(),
 		newSessionAttachCmd(),
+		newSessionWatchCmd(),
 		newSessionStopCmd(),
 	)
 
 	return cmd
 }
 
+// addRemoteFlags adds --remote, --cert, --key, and --jwt-key flags to cmd.
+// These are the standard flags for connecting to a remote bridge server.
+func addRemoteFlags(cmd *cobra.Command, remote, cert, key, jwtKey *string) {
+	cmd.Flags().StringVar(remote, "remote", "", "remote bridge server hostname (e.g. macbook.ts.net or macbook.ts.net:9445)")
+	cmd.Flags().StringVar(cert, "cert", "", "path to client certificate (auto-discovered from ~/.ai-agent-bridge/certs/ if omitted)")
+	cmd.Flags().StringVar(key, "key", "", "path to client private key (derived from --cert if omitted)")
+	cmd.Flags().StringVar(jwtKey, "jwt-key", "", "path to JWT signing key (auto-discovered from ~/.ai-agent-bridge/certs/ if omitted)")
+}
+
 func newSessionListCmd() *cobra.Command {
-	var project string
+	var (
+		project string
+		remote  string
+		cert    string
+		key     string
+		jwtKey  string
+	)
 
 	cmd := &cobra.Command{
 		Use:     "list",
 		Short:   "List active sessions",
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := connectClient("", 5*time.Second)
+			client, err := connectClientForHost(remote, 5*time.Second, cert, key, jwtKey)
 			if err != nil {
+				if remote != "" {
+					return err
+				}
 				fmt.Println("No ai-agent-bridge server running.")
 				return nil
 			}
@@ -80,6 +99,7 @@ func newSessionListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&project, "project", "local", "project ID to filter")
+	addRemoteFlags(cmd, &remote, &cert, &key, &jwtKey)
 	return cmd
 }
 
@@ -88,6 +108,10 @@ func newSessionAttachCmd() *cobra.Command {
 		observeOnly bool
 		takeOver    bool
 		release     bool
+		remote      string
+		cert        string
+		key         string
+		jwtKey      string
 	)
 
 	cmd := &cobra.Command{
@@ -97,24 +121,53 @@ func newSessionAttachCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
 			if release {
-				return releaseWriter(sessionID)
+				return releaseWriter(sessionID, remote, cert, key, jwtKey)
 			}
 			role := bridgev1.AttachRole_ATTACH_ROLE_WRITER
 			if observeOnly {
 				role = bridgev1.AttachRole_ATTACH_ROLE_OBSERVER
 			}
-			return attachSession(sessionID, role, takeOver)
+			return attachSession(sessionID, role, takeOver, remote, cert, key, jwtKey)
 		},
 	}
 
 	cmd.Flags().BoolVar(&observeOnly, "observe", false, "attach as read-only observer (no input)")
 	cmd.Flags().BoolVar(&takeOver, "take-over", false, "forcibly claim the writer slot from the current active writer")
 	cmd.Flags().BoolVar(&release, "release", false, "release the current active writer slot (affects whoever currently holds it)")
+	addRemoteFlags(cmd, &remote, &cert, &key, &jwtKey)
+	return cmd
+}
+
+func newSessionWatchCmd() *cobra.Command {
+	var (
+		remote string
+		cert   string
+		key    string
+		jwtKey string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "watch <session-id>",
+		Short: "Watch a running session (read-only)",
+		Long:  "Attach to a running session as a read-only observer. Shorthand for 'session attach <session-id> --observe'.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return attachSession(args[0], bridgev1.AttachRole_ATTACH_ROLE_OBSERVER, false, remote, cert, key, jwtKey)
+		},
+	}
+
+	addRemoteFlags(cmd, &remote, &cert, &key, &jwtKey)
 	return cmd
 }
 
 func newSessionStopCmd() *cobra.Command {
-	var force bool
+	var (
+		force  bool
+		remote string
+		cert   string
+		key    string
+		jwtKey string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "stop <session-id>",
@@ -123,7 +176,7 @@ func newSessionStopCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
 
-			client, err := connectClient("", 10*time.Second)
+			client, err := connectClientForHost(remote, 10*time.Second, cert, key, jwtKey)
 			if err != nil {
 				return err
 			}
@@ -144,11 +197,12 @@ func newSessionStopCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "force kill (SIGKILL)")
+	addRemoteFlags(cmd, &remote, &cert, &key, &jwtKey)
 	return cmd
 }
 
-func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool) error {
-	client, err := connectClient("", 30*time.Minute)
+func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, remote, cert, key, jwtKey string) error {
+	client, err := connectClientForHost(remote, 30*time.Minute, cert, key, jwtKey)
 	if err != nil {
 		return err
 	}
@@ -306,8 +360,8 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool) er
 // releaseWriter sends a ReleaseWriter RPC for sessionID targeting whoever
 // currently holds the active writer slot (not necessarily this client).
 // This is a fire-and-forget command: it doesn't attach a stream.
-func releaseWriter(sessionID string) error {
-	client, err := connectClient("", 10*time.Second)
+func releaseWriter(sessionID, remote, cert, key, jwtKey string) error {
+	client, err := connectClientForHost(remote, 10*time.Second, cert, key, jwtKey)
 	if err != nil {
 		return err
 	}

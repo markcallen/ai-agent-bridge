@@ -3,9 +3,14 @@
 /bridge
 /bridge-ca
 /chat
+/chat-ca
 /e2e-test
 /runprompt
 *.exe
+
+# JWT signing keypairs (generated locally)
+jwt-signing.key
+jwt-signing.pub
 
 # Local environment (load secrets with env-secrets)
 .env
@@ -16,6 +21,10 @@ certs/*.key
 certs/*.crt
 certs/*.pem
 certs/*.pub
+
+# Step CA local state (docker volumes handle persistence)
+step-ca/certs/
+step-ca/data/
 
 # Go
 vendor/

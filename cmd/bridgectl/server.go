@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/markcallen/ai-agent-bridge/internal/config"
 	"github.com/markcallen/ai-agent-bridge/internal/localserver"
 )
 
@@ -63,10 +64,12 @@ func newServerCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(
+		newServerInitCmd(),
 		newServerStartCmd(),
 		newServerStatusCmd(),
 		newServerStopCmd(),
 		newServerIssueClientCmd(),
+		newServerRenewCertCmd(),
 	)
 
 	return cmd
@@ -74,13 +77,17 @@ func newServerCmd() *cobra.Command {
 
 func newServerStartCmd() *cobra.Command {
 	var (
-		listenAddr string
-		serverSANs []string
-		configPath string
-		dbPath     string
-		globalRPS  float64
-		logLevel   string
-		logFormat  string
+		listenAddr                    string
+		serverSANs                    []string
+		configPath                    string
+		dbPath                        string
+		globalRPS                     float64
+		logLevel                      string
+		logFormat                     string
+		stepCAURL                     string
+		stepCARootPath                string
+		stepCAProvisioner             string
+		stepCAProvisionerPasswordFile string
 	)
 
 	cmd := &cobra.Command{
@@ -90,11 +97,24 @@ func newServerStartCmd() *cobra.Command {
 socket with no authentication. Use --listen to bind to a TCP address
 with mTLS + JWT for remote access (e.g. over a WireGuard VPN).
 
-In secure mode, PKI material (CA, server cert, JWT keypair) is
-auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
+Tier 1 (default): PKI material (CA, server cert, JWT keypair) is
+auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.
+
+Tier 2 (optional): Pass --step-ca-url and --step-ca-root to delegate
+certificate issuance to a Step CA instance instead of auto-generating.
+The 'step' CLI must be on PATH. Suitable for teams with existing OIDC
+infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if localserver.IsServerRunning("") {
 				return fmt.Errorf("server already running")
+			}
+
+			// Default config path to ~/.ai-agent-bridge/bridge.yaml when not set.
+			if configPath == "" {
+				defaultCfg := filepath.Join(localserver.StateDir(), "bridge.yaml")
+				if _, err := os.Stat(defaultCfg); err == nil {
+					configPath = defaultCfg
+				}
 			}
 
 			// Build logger from --log-level and --log-format.
@@ -121,11 +141,15 @@ auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
 			}
 
 			cfg := localserver.Config{
-				ListenAddr: listenAddr,
-				ServerSANs: serverSANs,
-				ConfigPath: configPath,
-				DBPath:     dbPath,
-				Logger:     logger,
+				ListenAddr:                    listenAddr,
+				ServerSANs:                    serverSANs,
+				ConfigPath:                    configPath,
+				DBPath:                        dbPath,
+				Logger:                        logger,
+				StepCAURL:                     stepCAURL,
+				StepCARootPath:                stepCARootPath,
+				StepCAProvisioner:             stepCAProvisioner,
+				StepCAProvisionerPasswordFile: stepCAProvisionerPasswordFile,
 			}
 			if globalRPS > 0 {
 				cfg.RateLimits.GlobalRPS = globalRPS
@@ -166,6 +190,10 @@ auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.`,
 	cmd.Flags().Float64Var(&globalRPS, "rate-limit-global-rps", 0, "override global RPS rate limit (default 100)")
 	cmd.Flags().StringVar(&logLevel, "log-level", "", "log level: debug, info, warn, error (default warn; info when --listen is set)")
 	cmd.Flags().StringVar(&logFormat, "log-format", "text", "log format: text or json")
+	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA URL for Tier-2 PKI (e.g. https://step-ca.internal:443); requires --step-ca-root")
+	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to the Step CA root certificate (required with --step-ca-url)")
+	cmd.Flags().StringVar(&stepCAProvisioner, "step-ca-provisioner", "", "Step CA provisioner name (e.g. acme, bridge-jwk); defaults to CA's default provisioner")
+	cmd.Flags().StringVar(&stepCAProvisionerPasswordFile, "step-ca-provisioner-password-file", "", "path to provisioner password file for non-interactive Step CA cert requests")
 
 	return cmd
 }
@@ -272,7 +300,14 @@ func newServerStopCmd() *cobra.Command {
 }
 
 func newServerIssueClientCmd() *cobra.Command {
-	var clientName string
+	var (
+		clientName     string
+		oidcProvider   string
+		stepCAURL      string
+		stepCARootPath string
+		bundleCreds    bool
+		deployTarget   string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "issue-client",
@@ -281,12 +316,20 @@ func newServerIssueClientCmd() *cobra.Command {
 Each client gets its own signing key so credentials can be rotated or
 revoked independently. The remote machine needs these files:
 
-  1. CA bundle      (ca-bundle.crt)   — to verify the server
-  2. Client cert    (<name>.crt)      — to authenticate to the server
-  3. Client key     (<name>.key)      — private key for the cert
+  1. CA bundle       (ca-bundle.crt)   — to verify the server
+  2. Client cert     (<name>.crt)      — to authenticate to the server
+  3. Client key      (<name>.key)      — private key for the cert
   4. JWT signing key (jwt-signing.key) — per-client key to mint tokens
 
-Copy these files to the remote machine and use them with the Go SDK.`,
+Use --bundle to create a .tar.gz of these files for easy transfer.
+Use --deploy <host:path> to scp the bundle to a remote machine directly.
+
+Tier 1 (default): The certificate is signed by the local auto-generated CA.
+Run 'bridgectl server start --listen' first to generate PKI.
+
+Tier 2 (Step CA + OIDC): Pass --oidc-provider, --step-ca-url, and
+--step-ca-root to enrol via an OIDC login flow. A browser window will open
+for interactive authentication. The 'step' CLI must be on PATH.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clientName == "" {
 				return fmt.Errorf("--name is required")
@@ -295,9 +338,23 @@ Copy these files to the remote machine and use them with the Go SDK.`,
 			stateDir := localserver.StateDir()
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-			certPath, keyPath, err := localserver.IssueClientCert(stateDir, clientName, logger)
-			if err != nil {
-				return err
+			var certPath, keyPath string
+			var issueErr error
+
+			if oidcProvider != "" {
+				// Tier 2: obtain cert from Step CA via OIDC.
+				stepCfg := &localserver.StepCAConfig{
+					URL:             stepCAURL,
+					RootPath:        stepCARootPath,
+					OIDCProviderURL: oidcProvider,
+				}
+				certPath, keyPath, issueErr = localserver.IssueClientCertViaOIDC(stateDir, clientName, stepCfg, logger)
+			} else {
+				// Tier 1: sign with local auto-generated CA.
+				certPath, keyPath, issueErr = localserver.IssueClientCert(stateDir, clientName, logger)
+			}
+			if issueErr != nil {
+				return issueErr
 			}
 
 			mat := localserver.LoadPKIMaterial(stateDir)
@@ -306,11 +363,34 @@ Copy these files to the remote machine and use them with the Go SDK.`,
 
 			fmt.Println("Client credentials issued successfully.")
 			fmt.Println()
-			fmt.Println("Copy these files to the remote machine:")
-			fmt.Printf("  CA bundle:       %s\n", mat.CABundlePath)
-			fmt.Printf("  Client cert:     %s\n", certPath)
-			fmt.Printf("  Client key:      %s\n", keyPath)
-			fmt.Printf("  JWT signing key: %s\n", clientJWTKey)
+			fmt.Println("  CA bundle:       " + mat.CABundlePath)
+			fmt.Println("  Client cert:     " + certPath)
+			fmt.Println("  Client key:      " + keyPath)
+			fmt.Println("  JWT signing key: " + clientJWTKey)
+
+			// --deploy implies --bundle.
+			if deployTarget != "" {
+				bundleCreds = true
+			}
+
+			if bundleCreds {
+				bundlePath := filepath.Join(clientDir, clientName+"-creds.tar.gz")
+				if err := localserver.BundleClientCreds(bundlePath, stateDir, clientName); err != nil {
+					return fmt.Errorf("bundle credentials: %w", err)
+				}
+				fmt.Println()
+				fmt.Println("  Credential bundle: " + bundlePath)
+
+				if deployTarget != "" {
+					fmt.Println()
+					fmt.Printf("Deploying to %s...\n", deployTarget)
+					if err := localserver.DeployBundle(bundlePath, deployTarget, logger); err != nil {
+						return fmt.Errorf("deploy credentials: %w", err)
+					}
+					fmt.Printf("Credentials deployed to %s\n", deployTarget)
+				}
+			}
+
 			fmt.Println()
 			fmt.Println("The server will accept tokens from this client on next restart.")
 			fmt.Println("If the server is already running, restart it to load the new key.")
@@ -338,6 +418,132 @@ Copy these files to the remote machine and use them with the Go SDK.`,
 
 	cmd.Flags().StringVar(&clientName, "name", "", "client name (used as cert CN and filenames)")
 	_ = cmd.MarkFlagRequired("name")
+	cmd.Flags().StringVar(&oidcProvider, "oidc-provider", "", "OIDC issuer URL for Step CA enrollment (e.g. https://accounts.google.com); enables Tier-2 flow")
+	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA server URL (required with --oidc-provider)")
+	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to Step CA root certificate (required with --oidc-provider)")
+	cmd.Flags().BoolVar(&bundleCreds, "bundle", false, "create a .tar.gz bundle of client credentials for easy transfer")
+	cmd.Flags().StringVar(&deployTarget, "deploy", "", "scp credential bundle to a remote host (e.g. do-dev2:~/bridge-creds/); implies --bundle")
+
+	return cmd
+}
+
+func newServerRenewCertCmd() *cobra.Command {
+	var (
+		configPath                    string
+		serverSANs                    []string
+		stepCAURL                     string
+		stepCARootPath                string
+		stepCAProvisioner             string
+		stepCAProvisionerPasswordFile string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "renew-cert",
+		Short: "Renew the server TLS certificate without restarting",
+		Long: `Re-issue the server TLS certificate using the existing CA (auto-PKI) or
+by requesting a new one from Step CA. The new certificate is written to
+the same file paths so the running server picks it up on the next TLS
+handshake — no restart required.
+
+Existing client connections are unaffected; only new connections use the
+renewed certificate. Client trust bundles do not need to change because
+the same CA signed both the old and new certificates.
+
+The running server also performs automatic background renewal when less
+than 1/3 of the certificate's lifetime remains. Use this command for
+immediate renewal (e.g. when the cert has already expired).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			stateDir := localserver.StateDir()
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+			// Load config file for SANs and Step CA settings.
+			if configPath == "" {
+				defaultCfg := filepath.Join(stateDir, "bridge.yaml")
+				if _, err := os.Stat(defaultCfg); err == nil {
+					configPath = defaultCfg
+				}
+			}
+			if configPath != "" {
+				fileCfg, err := config.Load(configPath)
+				if err != nil {
+					logger.Warn("could not load config file", "path", configPath, "error", err)
+				} else {
+					if len(serverSANs) == 0 && len(fileCfg.Server.SANs) > 0 {
+						serverSANs = fileCfg.Server.SANs
+					}
+					if stepCAURL == "" && fileCfg.StepCA.URL != "" {
+						stepCAURL = fileCfg.StepCA.URL
+					}
+					if stepCARootPath == "" && fileCfg.StepCA.Root != "" {
+						stepCARootPath = fileCfg.StepCA.Root
+					}
+					if stepCAProvisioner == "" && fileCfg.StepCA.Provisioner != "" {
+						stepCAProvisioner = fileCfg.StepCA.Provisioner
+					}
+					if stepCAProvisionerPasswordFile == "" && fileCfg.StepCA.ProvisionerPasswordFile != "" {
+						stepCAProvisionerPasswordFile = fileCfg.StepCA.ProvisionerPasswordFile
+					}
+					if len(serverSANs) == 0 && fileCfg.Server.Listen != "" {
+						serverSANs = localserver.BuildServerSANs(fileCfg.Server.Listen, nil)
+					}
+				}
+			}
+
+			// Ensure we have at least the default SANs.
+			if len(serverSANs) == 0 {
+				serverSANs = []string{"server", "127.0.0.1", "localhost"}
+			}
+
+			// Show current cert status.
+			mat := localserver.LoadPKIMaterial(stateDir)
+			_, notAfter, err := localserver.ServerCertExpiry(mat.ServerCertPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not read current cert: %v\n", err)
+			} else {
+				remaining := time.Until(notAfter)
+				if remaining <= 0 {
+					fmt.Fprintf(os.Stderr, "Current certificate EXPIRED %s ago.\n", (-remaining).Round(time.Second))
+				} else {
+					fmt.Fprintf(os.Stderr, "Current certificate expires in %s (%s).\n",
+						remaining.Round(time.Second), notAfter.Format(time.RFC3339))
+				}
+			}
+
+			var stepCA *localserver.StepCAConfig
+			if stepCAURL != "" {
+				stepCA = &localserver.StepCAConfig{
+					URL:                     stepCAURL,
+					RootPath:                stepCARootPath,
+					Provisioner:             stepCAProvisioner,
+					ProvisionerPasswordFile: stepCAProvisionerPasswordFile,
+				}
+			}
+
+			if err := localserver.RenewServerCert(stateDir, serverSANs, logger, stepCA); err != nil {
+				return fmt.Errorf("renew cert: %w", err)
+			}
+
+			// Show new cert status.
+			_, notAfter, err = localserver.ServerCertExpiry(mat.ServerCertPath)
+			if err != nil {
+				return fmt.Errorf("verify renewed cert: %w", err)
+			}
+
+			fmt.Fprintf(os.Stderr, "Certificate renewed. New expiry: %s (%s from now).\n",
+				notAfter.Format(time.RFC3339), time.Until(notAfter).Round(time.Second))
+			fmt.Fprintln(os.Stderr, "The running server will use the new certificate for all new TLS connections.")
+			fmt.Fprintln(os.Stderr, "Existing connections are unaffected.")
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&configPath, "config", "", "path to YAML config file (default: ~/.ai-agent-bridge/bridge.yaml)")
+	cmd.Flags().StringSliceVar(&serverSANs, "san", nil, "server cert SANs (overrides config file)")
+	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA URL (overrides config file)")
+	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "Step CA root cert path (overrides config file)")
+	cmd.Flags().StringVar(&stepCAProvisioner, "step-ca-provisioner", "", "Step CA provisioner name (overrides config file)")
+	cmd.Flags().StringVar(&stepCAProvisionerPasswordFile, "step-ca-provisioner-password-file", "", "provisioner password file (overrides config file)")
 
 	return cmd
 }

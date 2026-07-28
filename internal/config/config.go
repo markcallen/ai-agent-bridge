@@ -13,6 +13,7 @@ import (
 // Config is the top-level bridge daemon configuration.
 type Config struct {
 	Server       ServerConfig              `yaml:"server"`
+	StepCA       StepCAYAMLConfig          `yaml:"step_ca"`
 	TLS          TLSConfig                 `yaml:"tls"`
 	Auth         AuthConfig                `yaml:"auth"`
 	FeatureFlags FeatureFlagsConfig        `yaml:"feature_flags"`
@@ -36,7 +37,16 @@ type RuntimeConfig struct {
 }
 
 type ServerConfig struct {
-	Listen string `yaml:"listen"`
+	Listen string   `yaml:"listen"`
+	SANs   []string `yaml:"san"`
+}
+
+// StepCAYAMLConfig holds Step CA settings from the YAML config file.
+type StepCAYAMLConfig struct {
+	URL                     string `yaml:"url"`
+	Root                    string `yaml:"root"`
+	Provisioner             string `yaml:"provisioner"`
+	ProvisionerPasswordFile string `yaml:"provisioner_password_file"`
 }
 
 type TLSConfig struct {

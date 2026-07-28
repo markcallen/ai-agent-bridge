@@ -45,6 +45,15 @@ func GenerateJWTKeypair(outDir, baseName string) (pubPath, privPath string, err 
 	return pubPath, privPath, nil
 }
 
+// WritePublicKeyPEM writes an Ed25519 public key to a PEM file.
+func WritePublicKeyPEM(path string, pubKey ed25519.PublicKey) error {
+	pubDER, err := x509.MarshalPKIXPublicKey(pubKey)
+	if err != nil {
+		return fmt.Errorf("marshal public key: %w", err)
+	}
+	return writePEM(path, "PUBLIC KEY", pubDER, 0o644)
+}
+
 // LoadEd25519PrivateKey loads an Ed25519 private key from a PEM file.
 func LoadEd25519PrivateKey(path string) (ed25519.PrivateKey, error) {
 	data, err := os.ReadFile(path)

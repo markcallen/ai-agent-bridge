@@ -44,7 +44,11 @@ func mapError(err error) error {
 		}
 		return ErrSessionLimitReached
 	case codes.Unavailable:
-		return ErrProviderUnavailable
+		// Pass through as-is: transport failures (TLS, connection refused, DNS,
+		// timeout) and server-side "provider unavailable" both arrive as
+		// codes.Unavailable. Callers need the original message to diagnose the
+		// problem; swallowing it into a generic sentinel hides actionable detail.
+		return err
 	default:
 		return err
 	}

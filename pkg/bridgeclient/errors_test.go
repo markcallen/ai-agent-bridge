@@ -60,10 +60,28 @@ func TestMapError_ResourceExhausted_SessionLimit(t *testing.T) {
 	}
 }
 
-func TestMapError_Unavailable(t *testing.T) {
-	err := mapError(grpcErr(codes.Unavailable, "provider down"))
-	if !errors.Is(err, ErrProviderUnavailable) {
-		t.Fatalf("want ErrProviderUnavailable, got %v", err)
+// codes.Unavailable is always passed through — both transport failures (TLS,
+// connection refused, DNS, timeout, "all SubConns are in TransientFailure", …)
+// and server-side "provider unavailable" arrive with this code. Callers need
+// the original message to diagnose the problem.
+func TestMapError_Unavailable_PassesThrough(t *testing.T) {
+	cases := []string{
+		"provider down",
+		"transport: authentication handshake failed: tls: failed to verify certificate: x509: certificate signed by unknown authority",
+		`connection error: desc = "transport: Error while dialing: dial tcp 127.0.0.1:9445: connect: connection refused"`,
+		`connection error: desc = "transport: Error while dialing: dial tcp: lookup macbook.ts.net: no such host"`,
+		`connection error: desc = "transport: Error while dialing: dial tcp macbook.ts.net:9445: i/o timeout"`,
+		`connection error: desc = "something unexpected happened"`,
+		"all SubConns are in TransientFailure",
+	}
+	for _, msg := range cases {
+		err := mapError(grpcErr(codes.Unavailable, msg))
+		if err == nil {
+			t.Fatalf("mapError(Unavailable, %q) = nil, want non-nil", msg)
+		}
+		if errors.Is(err, ErrProviderUnavailable) {
+			t.Fatalf("mapError(Unavailable, %q) returned ErrProviderUnavailable sentinel; want raw gRPC error", msg)
+		}
 	}
 }
 

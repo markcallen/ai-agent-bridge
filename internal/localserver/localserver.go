@@ -73,6 +73,12 @@ type Server struct {
 	stateDir   string
 	mu         sync.Mutex
 	stopped    bool
+
+	// Certificate renewal (secure mode only).
+	renewCancel context.CancelFunc // cancels the renewal goroutine
+	serverSANs  []string           // SANs for cert re-issuance
+	stepCA      *StepCAConfig      // nil for auto-PKI mode
+	pkiMat      *PKIMaterial       // paths to cert/key files
 }
 
 // ServerMode represents how the server is running.
@@ -171,6 +177,25 @@ type Config struct {
 	// verification in explicit-cert mode. Populated from auth.jwt_public_keys
 	// in the config file.
 	JWTPublicKeys map[string]string
+
+	// StepCAURL enables Step CA integration. When set, auto-PKI generation is
+	// skipped and server certificates are obtained from the Step CA instance
+	// instead. The `step` CLI must be on PATH.
+	StepCAURL string
+	// StepCARootPath is the path to the Step CA root certificate. Required
+	// when StepCAURL is set.
+	StepCARootPath string
+	// StepCAOIDCProvider is the OIDC issuer URL configured as a Step CA
+	// provisioner. Used by `bridgectl server issue-client --oidc-provider`.
+	StepCAOIDCProvider string
+	// StepCAProvisioner is the name of the Step CA provisioner to use
+	// (e.g. "acme", "bridge-jwk"). When empty, the step CLI selects the
+	// default provisioner.
+	StepCAProvisioner string
+	// StepCAProvisionerPasswordFile is the path to a file containing the
+	// JWK provisioner password. When set, `step ca certificate` runs
+	// non-interactively (required in Docker/headless environments).
+	StepCAProvisionerPasswordFile string
 }
 
 // Start launches a local bridge gRPC server. In local mode (default) it
@@ -238,6 +263,21 @@ func Start(cfg Config) (*Server, error) {
 				for _, k := range fileCfg.Auth.JWTPublicKeys {
 					cfg.JWTPublicKeys[k.Issuer] = k.KeyPath
 				}
+			}
+			if len(cfg.ServerSANs) == 0 && len(fileCfg.Server.SANs) > 0 {
+				cfg.ServerSANs = fileCfg.Server.SANs
+			}
+			if cfg.StepCAURL == "" && fileCfg.StepCA.URL != "" {
+				cfg.StepCAURL = fileCfg.StepCA.URL
+			}
+			if cfg.StepCARootPath == "" && fileCfg.StepCA.Root != "" {
+				cfg.StepCARootPath = fileCfg.StepCA.Root
+			}
+			if cfg.StepCAProvisioner == "" && fileCfg.StepCA.Provisioner != "" {
+				cfg.StepCAProvisioner = fileCfg.StepCA.Provisioner
+			}
+			if cfg.StepCAProvisionerPasswordFile == "" && fileCfg.StepCA.ProvisionerPasswordFile != "" {
+				cfg.StepCAProvisionerPasswordFile = fileCfg.StepCA.ProvisionerPasswordFile
 			}
 		}
 	}
@@ -405,6 +445,13 @@ func Start(cfg Config) (*Server, error) {
 	// Determine server mode and build gRPC options accordingly.
 	mode := ModeLocal
 	var grpcOpts []grpc.ServerOption
+	var jwtVerifier *auth.JWTVerifier
+
+	// Renewal-related state; populated when secure mode is using managed PKI.
+	var serverSANs []string
+	var stepCAConfig *StepCAConfig
+	var pkiMat *PKIMaterial
+	explicitCerts := false
 
 	if cfg.ListenAddr != "" {
 		// Secure mode: TCP + mTLS + JWT.
@@ -421,8 +468,10 @@ func Start(cfg Config) (*Server, error) {
 		mode = ModeSecure
 
 		var mat *PKIMaterial
+
 		if cfg.CABundlePath != "" {
 			// Use pre-issued certificates from Config (e.g. provided via config file).
+			explicitCerts = true
 			if cfg.TLSCertPath == "" || cfg.TLSKeyPath == "" {
 				sup.Close()
 				if store != nil {
@@ -436,10 +485,19 @@ func Start(cfg Config) (*Server, error) {
 				ServerKeyPath:  cfg.TLSKeyPath,
 			}
 		} else {
-			// Auto-generate PKI material if not present.
-			sans := buildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
+			// Auto-generate PKI material if not present, or delegate to Step CA.
+			serverSANs = BuildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
+			if cfg.StepCAURL != "" {
+				stepCAConfig = &StepCAConfig{
+					URL:                     cfg.StepCAURL,
+					RootPath:                cfg.StepCARootPath,
+					OIDCProviderURL:         cfg.StepCAOIDCProvider,
+					Provisioner:             cfg.StepCAProvisioner,
+					ProvisionerPasswordFile: cfg.StepCAProvisionerPasswordFile,
+				}
+			}
 			var pkiErr error
-			mat, pkiErr = EnsurePKI(stateDir, sans, logger)
+			mat, pkiErr = EnsurePKI(stateDir, serverSANs, logger, stepCAConfig)
 			if pkiErr != nil {
 				sup.Close()
 				if store != nil {
@@ -448,8 +506,9 @@ func Start(cfg Config) (*Server, error) {
 				return nil, fmt.Errorf("ensure PKI: %w", pkiErr)
 			}
 		}
+		pkiMat = mat
 
-		secureOpts, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys)
+		secureOpts, verifier, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys)
 		if err != nil {
 			sup.Close()
 			if store != nil {
@@ -458,6 +517,7 @@ func Start(cfg Config) (*Server, error) {
 			return nil, fmt.Errorf("build secure gRPC options: %w", err)
 		}
 		grpcOpts = secureOpts
+		jwtVerifier = verifier
 	} else {
 		// Local mode: unix socket, anonymous passthrough auth.
 		grpcOpts = []grpc.ServerOption{
@@ -470,7 +530,7 @@ func Start(cfg Config) (*Server, error) {
 
 	providerFallbacks := cfg.ProviderFallbacks
 
-	bridgeServer := server.New(sup, registry, logger, cfg.RateLimits, instanceID, providerFallbacks)
+	bridgeServer := server.New(sup, registry, logger, cfg.RateLimits, instanceID, providerFallbacks, jwtVerifier, CertsDir(stateDir))
 	bridgev1.RegisterBridgeServiceServer(grpcServer, bridgeServer)
 
 	// Listen: TCP for secure mode, unix socket for local mode.
@@ -528,6 +588,19 @@ func Start(cfg Config) (*Server, error) {
 		stateDir:   stateDir,
 	}
 
+	// Start background certificate renewal for auto-PKI and Step CA modes.
+	// Explicit certs are managed externally; the CertReloader in the TLS
+	// config still picks up changes on disk, but we don't run the renewal
+	// loop ourselves.
+	if mode == ModeSecure && !explicitCerts {
+		s.serverSANs = serverSANs
+		s.stepCA = stepCAConfig
+		s.pkiMat = pkiMat
+		renewCtx, renewCancel := context.WithCancel(context.Background())
+		s.renewCancel = renewCancel
+		go s.certRenewalLoop(renewCtx)
+	}
+
 	go func() {
 		if err := grpcServer.Serve(ln); err != nil {
 			logger.Error("grpc serve", "error", err)
@@ -540,7 +613,7 @@ func Start(cfg Config) (*Server, error) {
 // buildSecureGRPCOpts returns gRPC server options for mTLS + JWT mode.
 // extraKeys maps issuer name to public key file path for JWT verification
 // when using pre-issued certificates instead of auto-PKI.
-func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string) ([]grpc.ServerOption, error) {
+func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string) ([]grpc.ServerOption, *auth.JWTVerifier, error) {
 	// TLS credentials with client cert verification.
 	tlsCfg, err := auth.ServerTLSConfig(auth.TLSConfig{
 		CABundlePath: mat.CABundlePath,
@@ -548,7 +621,7 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 		KeyPath:      mat.ServerKeyPath,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("server TLS config: %w", err)
+		return nil, nil, fmt.Errorf("server TLS config: %w", err)
 	}
 
 	// JWT verifier: load the local key plus any per-client keys.
@@ -559,7 +632,7 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 		for issuer, keyPath := range extraKeys {
 			pub, keyErr := pki.LoadEd25519PublicKey(keyPath)
 			if keyErr != nil {
-				return nil, fmt.Errorf("load JWT public key for issuer %q: %w", issuer, keyErr)
+				return nil, nil, fmt.Errorf("load JWT public key for issuer %q: %w", issuer, keyErr)
 			}
 			keys[issuer] = pub
 		}
@@ -567,7 +640,7 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 		// Auto-PKI mode: load the locally generated key as the "local" verifier.
 		localPub, keyErr := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
 		if keyErr != nil {
-			return nil, fmt.Errorf("load JWT public key: %w", keyErr)
+			return nil, nil, fmt.Errorf("load JWT public key: %w", keyErr)
 		}
 		keys["local"] = localPub
 	}
@@ -605,12 +678,12 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 			auth.StreamJWTInterceptor(verifier, logger),
 			auth.StreamAuditInterceptor(logger),
 		),
-	}, nil
+	}, verifier, nil
 }
 
-// buildServerSANs extracts the host from listenAddr and merges it with
+// BuildServerSANs extracts the host from listenAddr and merges it with
 // any additional SANs. Deduplicates entries.
-func buildServerSANs(listenAddr string, extra []string) []string {
+func BuildServerSANs(listenAddr string, extra []string) []string {
 	seen := make(map[string]bool)
 	var sans []string
 	add := func(s string) {
@@ -668,6 +741,11 @@ func (s *Server) Stop() {
 
 	s.logger.Info("stopping local server")
 
+	// Cancel the background cert renewal goroutine if running.
+	if s.renewCancel != nil {
+		s.renewCancel()
+	}
+
 	// Bounded graceful shutdown: try graceful first, then force-stop after
 	// 5 seconds. GracefulStop can block indefinitely if long-lived streams
 	// (e.g. AttachSession) are active.
@@ -697,6 +775,70 @@ func (s *Server) Stop() {
 	_ = os.Remove(filepath.Join(s.stateDir, "server.mode"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.sock"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.lock"))
+}
+
+// certRenewalCheckInterval is how often the renewal loop checks cert expiry.
+const certRenewalCheckInterval = 1 * time.Hour
+
+// certRenewalLoop periodically checks the server certificate's expiry and
+// renews it when less than 1/3 of the certificate's total lifetime remains.
+// Renewed certs are written to the same file paths; the CertReloader in the
+// TLS config picks them up on the next handshake. Existing gRPC connections
+// are unaffected — only new TLS handshakes use the renewed cert.
+func (s *Server) certRenewalLoop(ctx context.Context) {
+	// Check once at startup to handle already-expired certs.
+	s.checkAndRenew()
+
+	ticker := time.NewTicker(certRenewalCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.checkAndRenew()
+		}
+	}
+}
+
+func (s *Server) checkAndRenew() {
+	notBefore, notAfter, err := ServerCertExpiry(s.pkiMat.ServerCertPath)
+	if err != nil {
+		s.logger.Warn("cert renewal: failed to read server cert", "error", err)
+		return
+	}
+
+	lifetime := notAfter.Sub(notBefore)
+	remaining := time.Until(notAfter)
+	renewThreshold := lifetime / 3
+
+	if remaining > renewThreshold {
+		s.logger.Debug("cert renewal: certificate still valid",
+			"expires", notAfter.Format(time.RFC3339),
+			"remaining", remaining.Round(time.Minute),
+			"renew_at", time.Now().Add(remaining-renewThreshold).Format(time.RFC3339),
+		)
+		return
+	}
+
+	if remaining <= 0 {
+		s.logger.Warn("cert renewal: server certificate has EXPIRED, renewing now",
+			"expired", notAfter.Format(time.RFC3339),
+		)
+	} else {
+		s.logger.Info("cert renewal: server certificate approaching expiry, renewing",
+			"expires", notAfter.Format(time.RFC3339),
+			"remaining", remaining.Round(time.Minute),
+		)
+	}
+
+	if err := RenewServerCert(s.stateDir, s.serverSANs, s.logger, s.stepCA); err != nil {
+		s.logger.Error("cert renewal: failed to renew server certificate", "error", err)
+		return
+	}
+
+	s.logger.Info("cert renewal: server certificate renewed successfully — new connections will use the new cert")
 }
 
 // listen creates the appropriate listener for the platform.
