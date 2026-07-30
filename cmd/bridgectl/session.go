@@ -212,11 +212,12 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 	isObserver := role == bridgev1.AttachRole_ATTACH_ROLE_OBSERVER && !takeOver
 	var restore func()
 	if term.IsTerminal(fd) {
-		// Raw mode is required for both writers and observers. Writers need
-		// it for interactive input. Observers need it so that the terminal's
-		// output post-processing (OPOST/ONLCR) does not corrupt ANSI escape
-		// sequences from the session PTY — without raw mode, every \n in the
-		// PTY stream gets an extra \r prepended, garbling TUI output.
+		// When stdin is a TTY, enable raw mode for both writers and observers.
+		// Writers need it for interactive input. Observers need it so that
+		// the terminal's output post-processing (OPOST/ONLCR) does not
+		// corrupt ANSI escape sequences from the session PTY — without raw
+		// mode, every \n in the PTY stream gets an extra \r prepended,
+		// garbling TUI output. Non-TTY observers skip raw mode entirely.
 		oldState, err := term.MakeRaw(fd)
 		if err != nil {
 			return fmt.Errorf("set raw terminal: %w", err)
@@ -334,6 +335,7 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 				n, readErr := os.Stdin.Read(buf)
 				for i := 0; i < n; i++ {
 					if buf[i] == 0x03 || buf[i] == detachKey { // Ctrl+C or Ctrl+]
+						detached.Store(true)
 						cancel()
 						return
 					}
