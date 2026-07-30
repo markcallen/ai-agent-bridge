@@ -62,6 +62,59 @@ make chat-ca-opencode CHAT_REPO=/path/to/repo CHAT_CA_REMOTE=macbook.ts.net
 
 ---
 
+## `examples/orchestrator` — LLM-driven agent orchestration
+
+An OpenAI-powered orchestrator that drives an AI agent on a remote machine to task completion autonomously. It starts the agent, sends a task, then watches the output — periodically asking an LLM whether the agent is done, still working, or stuck. If stuck, the orchestrator re-attaches and sends corrective input, then detaches again. It repeats until the LLM declares the task complete.
+
+```bash
+go run ./examples/orchestrator \
+  --machine macbook.ts.net \
+  --task "Run the test suite and fix any failing tests" \
+  /home/dev/myproject
+# or
+make orchestrator-claude \
+  ORCHESTRATOR_MACHINE=macbook.ts.net \
+  ORCHESTRATOR_REPO=/home/dev/myproject \
+  ORCHESTRATOR_TASK="Run the test suite and fix any failing tests"
+```
+
+**Environment:**
+- `OPENAI_API_KEY` — required for the orchestrator LLM
+
+**Flags:**
+- `--machine` — remote hostname or `host:port` (required; port defaults to 9445)
+- `--task` — task description to send to the agent (required)
+- `--provider` — AI agent provider: `claude` | `opencode` | `codex` | `gemini` (default: `claude`)
+- `--project` — bridge project ID (default: `local`)
+- `--model` — OpenAI model for the orchestrator (default: `gpt-4o`)
+- `--interval` — how often to analyze buffered output (default: `15s`)
+- `--timeout` — total session lifetime (default: `30m`)
+- `--state-dir` — credential directory (default: `~/.ai-agent-bridge`)
+
+**Orchestration loop:**
+
+```
+StartSession → WriteInput(task)
+      ↓
+  [ watch loop ]
+  AttachSession(OBSERVER) → buffer output for --interval
+      ↓
+  OpenAI: analyze(task, buffered_output)
+      ↓
+  DONE    → StopSession → exit
+  WORKING → continue watching
+  STUCK   → WriteInput(corrective) → reset buffer → continue watching
+```
+
+**Files:**
+- `main.go` — flags, signal handling, wiring
+- `loop.go` — orchestration state machine (watch → analyze → act)
+- `analyzer.go` — OpenAI analysis: classifies output as done/working/stuck
+- `buffer.go` — thread-safe rolling output buffer with sequence cursor
+- `client.go` — remote bridge client construction (mTLS + JWT)
+
+---
+
 ## `examples/sessions` — List, watch, and attach to sessions
 
 Three subcommands for managing existing sessions on local or remote servers:
