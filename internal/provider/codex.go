@@ -89,8 +89,9 @@ func (p *CodexProvider) ensureAuthDir(contents string) (string, error) {
 
 	if p.authDir != "" {
 		// Update the file in case the env var changed between sessions.
-		authFile := filepath.Join(p.authDir, "auth.json")
-		if err := os.WriteFile(authFile, []byte(contents), 0o600); err != nil {
+		// Use atomic write (temp file + rename) so concurrent Codex
+		// subprocesses never read a partially-written file.
+		if err := atomicWriteFile(filepath.Join(p.authDir, "auth.json"), []byte(contents), 0o600); err != nil {
 			return "", fmt.Errorf("update codex auth file: %w", err)
 		}
 		return p.authDir, nil
@@ -107,6 +108,33 @@ func (p *CodexProvider) ensureAuthDir(contents string) (string, error) {
 	}
 	p.authDir = dir
 	return dir, nil
+}
+
+// atomicWriteFile writes data to a temp file in the same directory as path,
+// then renames it into place so readers never see a partial write.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".auth-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 // Cleanup removes the temporary auth directory, if one was created.
