@@ -211,11 +211,12 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 	fd := int(os.Stdin.Fd())
 	isObserver := role == bridgev1.AttachRole_ATTACH_ROLE_OBSERVER && !takeOver
 	var restore func()
-	if !isObserver {
-		// Writers need raw mode for interactive input; observers do not.
-		if !term.IsTerminal(fd) {
-			return fmt.Errorf("stdin is not a terminal")
-		}
+	if term.IsTerminal(fd) {
+		// Raw mode is required for both writers and observers. Writers need
+		// it for interactive input. Observers need it so that the terminal's
+		// output post-processing (OPOST/ONLCR) does not corrupt ANSI escape
+		// sequences from the session PTY — without raw mode, every \n in the
+		// PTY stream gets an extra \r prepended, garbling TUI output.
 		oldState, err := term.MakeRaw(fd)
 		if err != nil {
 			return fmt.Errorf("set raw terminal: %w", err)
@@ -227,6 +228,8 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 			})
 		}
 		defer restore()
+	} else if !isObserver {
+		return fmt.Errorf("stdin is not a terminal")
 	} else {
 		restore = func() {}
 	}
@@ -316,6 +319,24 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 						ClientId:  stream.ClientID(),
 						Data:      buf[:n],
 					})
+				}
+				if readErr != nil {
+					return
+				}
+			}
+		}()
+	} else if term.IsTerminal(fd) {
+		// In raw mode ISIG is disabled, so the terminal won't generate
+		// SIGINT for Ctrl+C. Read stdin and handle it manually.
+		go func() {
+			buf := make([]byte, 256)
+			for {
+				n, readErr := os.Stdin.Read(buf)
+				for i := 0; i < n; i++ {
+					if buf[i] == 0x03 || buf[i] == detachKey { // Ctrl+C or Ctrl+]
+						cancel()
+						return
+					}
 				}
 				if readErr != nil {
 					return
