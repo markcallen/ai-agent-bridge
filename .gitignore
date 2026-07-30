@@ -6,7 +6,11 @@
 /chat-ca
 /e2e-test
 /runprompt
+/orchestrator
 *.exe
+
+# Orchestrator logs
+orchestrator-*.log
 
 # JWT signing keypairs (generated locally)
 jwt-signing.key
@@ -14,7 +18,8 @@ jwt-signing.pub
 
 # Local environment (load secrets with env-secrets)
 .env
-.env.secrets
+.env.*
+!.env.example
 
 # Certificates (generated)
 certs/*.key

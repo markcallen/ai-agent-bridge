@@ -1,4 +1,4 @@
-.PHONY: build proto tools test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini sessions-list sessions-watch sessions-attach web-install web-dev web-build web-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
+.PHONY: build proto tools test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini sessions-list sessions-watch sessions-attach orchestrator-claude orchestrator-opencode web-install web-dev web-build web-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
@@ -180,6 +180,35 @@ chat-ca-codex: chat-ca-example
 
 chat-ca-gemini: CHAT_PROVIDER=gemini
 chat-ca-gemini: chat-ca-example
+
+# orchestrator example: LLM-driven agent orchestration on a remote machine
+ORCHESTRATOR_MACHINE  ?= macbook.tail6198c2.ts.net
+ORCHESTRATOR_REPO     ?= /repos/penduin
+ORCHESTRATOR_TASK     ?= "Run the test suite and fix any failing tests"
+ORCHESTRATOR_MODEL    ?= gpt-5.6
+ORCHESTRATOR_INTERVAL ?= 15s
+
+orchestrator-claude:
+	./scripts/with_env_secrets.sh go run ./examples/orchestrator \
+		--machine $(ORCHESTRATOR_MACHINE) \
+		--task $(ORCHESTRATOR_TASK) \
+		--provider claude \
+		--project $(CHAT_PROJECT) \
+		--model $(ORCHESTRATOR_MODEL) \
+		--interval $(ORCHESTRATOR_INTERVAL) \
+		--timeout 30m \
+		$(ORCHESTRATOR_REPO)
+
+orchestrator-opencode:
+	./scripts/with_env_secrets.sh go run ./examples/orchestrator \
+		--machine $(ORCHESTRATOR_MACHINE) \
+		--task $(ORCHESTRATOR_TASK) \
+		--provider opencode \
+		--project $(CHAT_PROJECT) \
+		--model $(ORCHESTRATOR_MODEL) \
+		--interval $(ORCHESTRATOR_INTERVAL) \
+		--timeout 30m \
+		$(ORCHESTRATOR_REPO)
 
 # sessions example: list / watch / attach subcommands
 SESSIONS_REMOTE ?=

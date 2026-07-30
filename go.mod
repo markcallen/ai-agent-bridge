@@ -7,6 +7,7 @@ require (
 	github.com/go-acme/lego/v4 v4.35.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
+	github.com/sashabaranov/go-openai v1.41.2
 	github.com/smallstep/certificates v0.30.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
