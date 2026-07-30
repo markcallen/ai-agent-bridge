@@ -56,7 +56,6 @@ providers:
     args: ["./node_modules/@openai/codex/bin/codex.js"]
     startup_timeout: "60s"
     startup_probe: "output"
-    required_env: ["OPENAI_API_KEY"]
     prompt_pattern: "(?m)(>\\s*$|›)"
   gemini:
     binary: "node"

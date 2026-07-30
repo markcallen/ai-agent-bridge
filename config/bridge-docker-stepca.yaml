@@ -50,7 +50,6 @@ providers:
     startup_timeout: "60s"
     validate_startup: false
     startup_probe: "output"
-    required_env: ["OPENAI_API_KEY"]
     prompt_pattern: "(?m)(>\\s*$|›)"
   gemini:
     binary: "node"
