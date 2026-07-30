@@ -185,7 +185,7 @@ chat-ca-gemini: chat-ca-example
 ORCHESTRATOR_MACHINE  ?= macbook.tail6198c2.ts.net
 ORCHESTRATOR_REPO     ?= /repos/penduin
 ORCHESTRATOR_TASK     ?= "Run the test suite and fix any failing tests"
-ORCHESTRATOR_MODEL    ?= gpt-4o
+ORCHESTRATOR_MODEL    ?= gpt-5.6
 ORCHESTRATOR_INTERVAL ?= 15s
 
 orchestrator-claude:

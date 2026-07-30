@@ -86,7 +86,7 @@ make orchestrator-claude \
 - `--task` — task description to send to the agent (required)
 - `--provider` — AI agent provider: `claude` | `opencode` | `codex` | `gemini` (default: `claude`)
 - `--project` — bridge project ID (default: `local`)
-- `--model` — OpenAI model for the orchestrator (default: `gpt-4o`)
+- `--model` — OpenAI model for the orchestrator (default: `gpt-5.6`)
 - `--interval` — how often to analyze buffered output (default: `15s`)
 - `--timeout` — total session lifetime (default: `30m`)
 - `--state-dir` — credential directory (default: `~/.ai-agent-bridge`)
