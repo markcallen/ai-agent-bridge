@@ -179,6 +179,10 @@ type Config struct {
 	// verification in explicit-cert mode. Populated from auth.jwt_public_keys
 	// in the config file.
 	JWTPublicKeys map[string]string
+	// StepCAClients declares Step CA-authenticated clients whose JWT public
+	// keys should be loaded at startup if present. Missing optional clients are
+	// logged and skipped; missing required clients fail secure startup.
+	StepCAClients []ConfiguredJWTClient
 
 	// StepCAURL enables Step CA integration. When set, auto-PKI generation is
 	// skipped and server certificates are obtained from the Step CA instance
@@ -271,6 +275,16 @@ func Start(cfg Config) (*Server, error) {
 				cfg.JWTPublicKeys = make(map[string]string, len(fileCfg.Auth.JWTPublicKeys))
 				for _, k := range fileCfg.Auth.JWTPublicKeys {
 					cfg.JWTPublicKeys[k.Issuer] = k.KeyPath
+				}
+			}
+			if cfg.StepCAClients == nil && len(fileCfg.StepCA.Clients) > 0 {
+				cfg.StepCAClients = make([]ConfiguredJWTClient, 0, len(fileCfg.StepCA.Clients))
+				for _, c := range fileCfg.StepCA.Clients {
+					cfg.StepCAClients = append(cfg.StepCAClients, ConfiguredJWTClient{
+						Issuer:   c.Issuer,
+						KeyPath:  c.KeyPath,
+						Required: c.Required,
+					})
 				}
 			}
 			if len(cfg.ServerSANs) == 0 && len(fileCfg.Server.SANs) > 0 {
@@ -523,7 +537,7 @@ func Start(cfg Config) (*Server, error) {
 		}
 		pkiMat = mat
 
-		secureOpts, verifier, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys)
+		secureOpts, verifier, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys, cfg.StepCAClients)
 		if err != nil {
 			sup.Close()
 			if store != nil {
@@ -630,7 +644,7 @@ func Start(cfg Config) (*Server, error) {
 // buildSecureGRPCOpts returns gRPC server options for mTLS + JWT mode.
 // extraKeys maps issuer name to public key file path for JWT verification
 // when using pre-issued certificates instead of auto-PKI.
-func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string) ([]grpc.ServerOption, *auth.JWTVerifier, error) {
+func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string, stepCAClients []ConfiguredJWTClient) ([]grpc.ServerOption, *auth.JWTVerifier, error) {
 	// TLS credentials with client cert verification.
 	tlsCfg, err := auth.ServerTLSConfig(auth.TLSConfig{
 		CABundlePath: mat.CABundlePath,
@@ -683,6 +697,9 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 		Keys:     keys,
 		Audience: "bridge",
 		MaxTTL:   10 * time.Minute,
+	}
+	if err := loadConfiguredJWTClients(verifier, stateDir, logger, stepCAClients); err != nil {
+		return nil, nil, err
 	}
 
 	return []grpc.ServerOption{

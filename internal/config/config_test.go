@@ -250,6 +250,72 @@ sessions:
 	}
 }
 
+func TestLoadStepCAClients(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bridge.yaml")
+	content := `
+server:
+  listen: "127.0.0.1:9445"
+step_ca:
+  url: "https://step-ca.example.internal"
+  root: "/etc/bridge/step-root.crt"
+  clients:
+    - issuer: "do-dev2"
+      key_path: "/etc/bridge/jwt-clients/do-dev2.pub"
+    - issuer: "laptop-a"
+      required: true
+providers:
+  echo:
+    binary: "cat"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := len(cfg.StepCA.Clients); got != 2 {
+		t.Fatalf("len(StepCA.Clients)=%d want 2", got)
+	}
+	if cfg.StepCA.Clients[0].Issuer != "do-dev2" {
+		t.Fatalf("first issuer=%q want do-dev2", cfg.StepCA.Clients[0].Issuer)
+	}
+	if cfg.StepCA.Clients[0].KeyPath != "/etc/bridge/jwt-clients/do-dev2.pub" {
+		t.Fatalf("first key_path=%q", cfg.StepCA.Clients[0].KeyPath)
+	}
+	if !cfg.StepCA.Clients[1].Required {
+		t.Fatal("second client should be required")
+	}
+}
+
+func TestLoadStepCAClientsValidateIssuer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bridge.yaml")
+	content := `
+server:
+  listen: "127.0.0.1:9445"
+step_ca:
+  clients:
+    - issuer: "../bad"
+providers:
+  echo:
+    binary: "cat"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "step_ca.clients[0].issuer") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestLoadRejectsDeprecatedPTYField(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bridge.yaml")

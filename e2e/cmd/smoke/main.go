@@ -18,6 +18,7 @@ func main() {
 	cert := flag.String("cert", "", "client cert path")
 	key := flag.String("key", "", "client key path")
 	jwtKey := flag.String("jwt-key", "", "JWT signing key path")
+	issuer := flag.String("issuer", "dev", "JWT issuer")
 	timeout := flag.Duration("timeout", 90*time.Second, "overall timeout")
 	flag.Parse()
 
@@ -32,7 +33,7 @@ func main() {
 		}),
 		bridgeclient.WithJWT(bridgeclient.JWTConfig{
 			PrivateKeyPath: *jwtKey,
-			Issuer:         "dev",
+			Issuer:         *issuer,
 			Audience:       "bridge",
 		}),
 	)

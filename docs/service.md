@@ -115,6 +115,15 @@ auth:
   jwt_audience: "bridge"
   jwt_max_ttl:  "5m"
 
+step_ca:
+  url: "https://step-ca.example.internal"
+  root: "certs/step-ca-root.crt"
+  clients:
+    - issuer: "laptop-a"
+      key_path: "certs/jwt-clients/laptop-a.pub"
+    - issuer: "build-runner"
+      required: true
+
 sessions:
   max_per_project:   5
   max_global:        20
@@ -173,6 +182,19 @@ logging:
 | `jwt_public_keys` | List of `{issuer, key_path}` entries. Multiple issuers are supported for key rotation. |
 | `jwt_audience` | Required `aud` claim value |
 | `jwt_max_ttl` | Maximum accepted token lifetime |
+
+#### `step_ca`
+| Field | Description |
+|-------|-------------|
+| `url` | Step CA URL used by server certificate issuance and renewal flows |
+| `root` | Step CA root certificate used for Step CA requests |
+| `provisioner` | Optional Step CA provisioner name |
+| `provisioner_password_file` | Optional file containing a JWK provisioner password for non-interactive issuance |
+| `clients` | Optional startup client registry. Each entry declares an `issuer`, optional `key_path`, and optional `required` flag. |
+
+`step_ca.clients` is for known clients whose mTLS certificates are issued by Step CA but whose bridge JWT public keys are already present on the server. The server loads these JWT public keys during secure startup. If `key_path` is omitted, the server checks `certs/jwt-clients/<issuer>.pub` under the bridge state directory. Missing optional entries are logged and skipped; entries with `required: true` fail startup if the public key is missing or invalid.
+
+Step CA certificate trust and bridge JWT trust are separate. A Step CA-issued client certificate can satisfy mTLS, but the client still needs a configured or enrolled Ed25519 JWT public key before it can call authenticated RPCs.
 
 #### `feature_flags`
 | Field | Default | Description |
