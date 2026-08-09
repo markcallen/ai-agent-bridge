@@ -45,10 +45,19 @@ type ServerConfig struct {
 
 // StepCAYAMLConfig holds Step CA settings from the YAML config file.
 type StepCAYAMLConfig struct {
-	URL                     string `yaml:"url"`
-	Root                    string `yaml:"root"`
-	Provisioner             string `yaml:"provisioner"`
-	ProvisionerPasswordFile string `yaml:"provisioner_password_file"`
+	URL                     string               `yaml:"url"`
+	Root                    string               `yaml:"root"`
+	Provisioner             string               `yaml:"provisioner"`
+	ProvisionerPasswordFile string               `yaml:"provisioner_password_file"`
+	Clients                 []StepCAClientConfig `yaml:"clients"`
+}
+
+// StepCAClientConfig declares a Step CA-authenticated client whose bridge JWT
+// public key should be loaded at startup when available.
+type StepCAClientConfig struct {
+	Issuer   string `yaml:"issuer"`
+	KeyPath  string `yaml:"key_path"`
+	Required bool   `yaml:"required"`
 }
 
 type TLSConfig struct {
@@ -277,6 +286,11 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("config: server.cert_renewal_check_interval must not be negative")
 		}
 	}
+	for i, client := range cfg.StepCA.Clients {
+		if !safeIssuerName(client.Issuer) {
+			return fmt.Errorf("config: step_ca.clients[%d].issuer must start with an alphanumeric character and contain only alphanumerics, hyphens, underscores, or dots", i)
+		}
+	}
 	if _, err := time.ParseDuration(cfg.Sessions.IdleTimeout); err != nil {
 		return fmt.Errorf("config: sessions.idle_timeout: %w", err)
 	}
@@ -326,4 +340,24 @@ func validate(cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+func safeIssuerName(issuer string) bool {
+	if issuer == "" {
+		return false
+	}
+	for i, r := range issuer {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return false
+		}
+		if i == 0 && (r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }

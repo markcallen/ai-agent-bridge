@@ -75,3 +75,37 @@
 
 - [ ] **GoReleaser Windows target**: `.goreleaser.yaml` includes `windows` for the CLI but `internal/provider/stdio.go` uses Unix-only APIs (`syscall.Kill`, `creack/pty`). Either add Windows build tags to the provider package or remove the Windows release target. (Pre-existing on parent branch.)
 - [ ] **Docker E2E cleanup trap**: `scripts/test-cli-e2e-docker.sh` doesn't install a trap for Ctrl-C — compose stack can be left behind on interrupt.
+# Startup Step CA Client Registry
+
+Mode: Approval-Required, approved by user request on 2026-08-09.
+
+Governing PRD section: `7.3 Authentication Layers` and `7.4 Key Management`.
+
+Scope:
+- Add startup configuration for Step CA-backed client issuers whose JWT public keys may already be present on the server.
+- Keep mTLS trust and JWT trust separate; Step CA verifies client certificates, bridge config loads JWT public keys.
+- Preserve existing `auth.jwt_public_keys` behavior for required explicit keys.
+- Add tests, documentation, and smoke coverage.
+
+Plan:
+- [x] Update PRD with startup client registry acceptance criteria.
+- [x] Add config parsing and validation tests for `step_ca.clients`.
+- [x] Add startup key-loading tests for optional and required clients.
+- [x] Implement config and server startup loading.
+- [x] Document the operator workflow.
+- [x] Extend smoke coverage.
+- [x] Run formatting, unit tests, coverage, smoke tests.
+- [x] Open PR and assign Copilot.
+
+Rollback:
+- Remove `step_ca.clients` entries from config. Existing `auth.jwt_public_keys` and `certs/jwt-clients/*.pub` startup loading continue to work.
+
+Evidence:
+- `go test ./internal/config ./internal/localserver ./e2e/cmd/smoke`
+- `go test ./...`
+- `GOCACHE=/home/marka/.cache/go-build GOMODCACHE=/home/marka/go/pkg/mod scripts/check-go-coverage.sh` -> coverage 78.3%, threshold 75.0%.
+- `make smoke` -> passed using `-issuer smoke-step-client`, which is loaded from `step_ca.clients` in `config/bridge-smoke.yaml`.
+- Copilot review comments addressed: optional configured clients now skip any key load error unless `required: true`; issuer validation error text now mentions the leading alphanumeric requirement.
+
+Note:
+- `scripts/test-go-coverage.sh` initially failed under sandboxed `/tmp` caches due blocked module downloads, then failed under elevated network because the filesystem was full. The maintained coverage gate passed after pruning Docker build cache and using existing home Go caches.

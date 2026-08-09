@@ -233,6 +233,19 @@ ai-agent-bridge-ca (root)
 - Certificate rotation: certs expire after 90 days; automated renewal via `ai-agent-bridge-ca renew`.
 - Revocation: CRL distribution point served by bridge daemon.
 
+#### Startup Client Registry
+
+When a bridge server is configured for Step CA-backed remote access, operators may declare known client issuers in the YAML config so the server attempts to trust their JWT public keys during startup.
+
+Acceptance criteria:
+
+- `step_ca.clients` entries identify a JWT `issuer` and an optional `key_path` for that issuer's Ed25519 public key.
+- If `key_path` is omitted, the server checks `certs/jwt-clients/<issuer>.pub` under the bridge state directory.
+- Optional client public keys that are missing, unreadable, or invalid are logged and skipped so servers can start before every client has enrolled.
+- Entries marked `required: true` fail startup if their public key is missing or invalid.
+- Startup-loaded client keys are added to the same JWT verifier used by normal RPC authentication.
+- Step CA certificate trust does not replace JWT trust; every configured client still needs a bridge JWT public key.
+
 ### 7.5 Defense in Depth
 
 - Bridge binds to configurable interface (default: private/localhost).
