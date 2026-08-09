@@ -79,6 +79,24 @@ func TestLoadConfiguredJWTClientsRequiredMissing(t *testing.T) {
 	require.Contains(t, err.Error(), "required-client")
 }
 
+func TestLoadConfiguredJWTClientsOptionalInvalid(t *testing.T) {
+	stateDir := t.TempDir()
+	keyPath := filepath.Join(stateDir, "invalid.pub")
+	require.NoError(t, os.WriteFile(keyPath, []byte("not a public key"), 0o644))
+
+	verifier := &auth.JWTVerifier{
+		Keys:     map[string]ed25519.PublicKey{},
+		Audience: "bridge",
+		MaxTTL:   10 * time.Minute,
+	}
+
+	err := loadConfiguredJWTClients(verifier, stateDir, testLogger(), []ConfiguredJWTClient{
+		{Issuer: "invalid-optional", KeyPath: keyPath},
+	})
+	require.NoError(t, err)
+	require.False(t, verifier.HasKey("invalid-optional"))
+}
+
 func TestBuildSecureGRPCOptsLoadsConfiguredJWTClients(t *testing.T) {
 	stateDir := t.TempDir()
 	logger := testLogger()

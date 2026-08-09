@@ -192,7 +192,7 @@ logging:
 | `provisioner_password_file` | Optional file containing a JWK provisioner password for non-interactive issuance |
 | `clients` | Optional startup client registry. Each entry declares an `issuer`, optional `key_path`, and optional `required` flag. |
 
-`step_ca.clients` is for known clients whose mTLS certificates are issued by Step CA but whose bridge JWT public keys are already present on the server. The server loads these JWT public keys during secure startup. If `key_path` is omitted, the server checks `certs/jwt-clients/<issuer>.pub` under the bridge state directory. Missing optional entries are logged and skipped; entries with `required: true` fail startup if the public key is missing or invalid.
+`step_ca.clients` is for known clients whose mTLS certificates are issued by Step CA but whose bridge JWT public keys are already present on the server. The server loads these JWT public keys during secure startup. If `key_path` is omitted, the server checks `certs/jwt-clients/<issuer>.pub` under the bridge state directory. Optional entries whose keys are missing, unreadable, or invalid are logged and skipped; entries with `required: true` fail startup if the public key is missing or invalid.
 
 Step CA certificate trust and bridge JWT trust are separate. A Step CA-issued client certificate can satisfy mTLS, but the client still needs a configured or enrolled Ed25519 JWT public key before it can call authenticated RPCs.
 

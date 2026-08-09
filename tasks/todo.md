@@ -105,6 +105,7 @@ Evidence:
 - `go test ./...`
 - `GOCACHE=/home/marka/.cache/go-build GOMODCACHE=/home/marka/go/pkg/mod scripts/check-go-coverage.sh` -> coverage 78.3%, threshold 75.0%.
 - `make smoke` -> passed using `-issuer smoke-step-client`, which is loaded from `step_ca.clients` in `config/bridge-smoke.yaml`.
+- Copilot review comments addressed: optional configured clients now skip any key load error unless `required: true`; issuer validation error text now mentions the leading alphanumeric requirement.
 
 Note:
 - `scripts/test-go-coverage.sh` initially failed under sandboxed `/tmp` caches due blocked module downloads, then failed under elevated network because the filesystem was full. The maintained coverage gate passed after pruning Docker build cache and using existing home Go caches.

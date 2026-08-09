@@ -288,7 +288,7 @@ func validate(cfg *Config) error {
 	}
 	for i, client := range cfg.StepCA.Clients {
 		if !safeIssuerName(client.Issuer) {
-			return fmt.Errorf("config: step_ca.clients[%d].issuer must be alphanumeric with hyphens, underscores, or dots", i)
+			return fmt.Errorf("config: step_ca.clients[%d].issuer must start with an alphanumeric character and contain only alphanumerics, hyphens, underscores, or dots", i)
 		}
 	}
 	if _, err := time.ParseDuration(cfg.Sessions.IdleTimeout); err != nil {

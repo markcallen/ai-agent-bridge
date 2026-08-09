@@ -2,10 +2,8 @@ package localserver
 
 import (
 	"crypto/ed25519"
-	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 
 	"github.com/markcallen/ai-agent-bridge/internal/auth"
@@ -31,9 +29,9 @@ func loadConfiguredJWTClients(verifier *auth.JWTVerifier, stateDir string, logge
 		}
 		pub, err := pki.LoadEd25519PublicKey(keyPath)
 		if err != nil {
-			if !client.Required && errors.Is(err, os.ErrNotExist) {
+			if !client.Required {
 				if logger != nil {
-					logger.Warn("configured Step CA client JWT key not available", "issuer", client.Issuer, "path", keyPath)
+					logger.Warn("configured Step CA client JWT key not available", "issuer", client.Issuer, "path", keyPath, "error", err)
 				}
 				continue
 			}

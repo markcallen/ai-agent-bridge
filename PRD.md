@@ -241,7 +241,7 @@ Acceptance criteria:
 
 - `step_ca.clients` entries identify a JWT `issuer` and an optional `key_path` for that issuer's Ed25519 public key.
 - If `key_path` is omitted, the server checks `certs/jwt-clients/<issuer>.pub` under the bridge state directory.
-- Missing optional client public keys are logged and skipped so servers can start before every client has enrolled.
+- Optional client public keys that are missing, unreadable, or invalid are logged and skipped so servers can start before every client has enrolled.
 - Entries marked `required: true` fail startup if their public key is missing or invalid.
 - Startup-loaded client keys are added to the same JWT verifier used by normal RPC authentication.
 - Step CA certificate trust does not replace JWT trust; every configured client still needs a bridge JWT public key.
