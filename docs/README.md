@@ -6,6 +6,7 @@ This is the canonical documentation index for the repository.
 
 - [install-ubuntu.md](install-ubuntu.md): apt repository installation, package contents, systemd behavior, and runtime prerequisites.
 - [service.md](service.md): daemon architecture, configuration, security model, Docker usage, and operational details.
+- [ai-desktops-step-ca-clients.md](ai-desktops-step-ca-clients.md): ai-desktops workflow for preloading Step CA client JWT public keys at server startup.
 - [grpc-api.md](grpc-api.md): protobuf RPC surface, message fields, error codes, and client generation details.
 - [go-sdk.md](go-sdk.md): Go SDK usage, client options, reconnect behavior, and API examples.
 
