@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
 
 func newSessionCmd() *cobra.Command {
@@ -77,6 +79,9 @@ func newSessionListCmd() *cobra.Command {
 				ProjectId: project,
 			})
 			if err != nil {
+				if hint := remoteAuthHint(err, remote, jwtKey); hint != "" {
+					return fmt.Errorf("list sessions: %w\n\n%s", err, hint)
+				}
 				return fmt.Errorf("list sessions: %w", err)
 			}
 
@@ -102,6 +107,26 @@ func newSessionListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&project, "project", "local", "project ID to filter")
 	addRemoteFlags(cmd, &remote, &cert, &key, &jwtKey, &serverName)
 	return cmd
+}
+
+func remoteAuthHint(err error, remote, jwtKey string) string {
+	if remote == "" || jwtKey != "" || !errors.Is(err, bridgeclient.ErrUnauthorized) {
+		return ""
+	}
+
+	localJWTKey, statErr := filepath.Abs("jwt-signing.key")
+	if statErr != nil {
+		localJWTKey = "jwt-signing.key"
+	}
+	if _, statErr := os.Stat(localJWTKey); statErr != nil {
+		return ""
+	}
+
+	return fmt.Sprintf(
+		"Found a JWT signing key in the current directory. Remote commands use JWT keys from ~/.ai-agent-bridge/certs/ or ~/.ai-agent-bridge unless --jwt-key is set. If this local key is intended, retry with:\n  bridgectl session list --remote %s --jwt-key %s",
+		remote,
+		localJWTKey,
+	)
 }
 
 func newSessionAttachCmd() *cobra.Command {
