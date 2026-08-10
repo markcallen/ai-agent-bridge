@@ -648,6 +648,10 @@ func Start(cfg Config) (*Server, error) {
 				}
 				return nil, fmt.Errorf("ensure PKI: %w", pkiErr)
 			}
+			// Derive the TLS server name from the actual certificate SANs.
+			// Step CA renewal or ACME provisioners may drop bare-hostname
+			// SANs like "server", so we must use whatever the cert contains.
+			tlsServerName = serverNameFromCert(mat.ServerCertPath)
 		}
 		pkiMat = mat
 
