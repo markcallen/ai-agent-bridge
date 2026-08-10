@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -138,6 +139,27 @@ func TestRunClientRenewRejectsExpiredCertificateBeforeRenewal(t *testing.T) {
 	}
 	if _, err := os.Stat(rootPath); !os.IsNotExist(err) {
 		t.Fatalf("root cert should not be fetched for an expired certificate")
+	}
+}
+
+func TestRenewAudienceUsesRenewEndpoint(t *testing.T) {
+	got, err := renewAudience("https://step-ca.example.com:9443")
+	if err != nil {
+		t.Fatalf("renewAudience() error = %v", err)
+	}
+	want := "https://step-ca.example.com:9443/renew"
+	if got != want {
+		t.Fatalf("renewAudience() = %q, want %q", got, want)
+	}
+}
+
+func TestIsTLSVerificationError(t *testing.T) {
+	err := fmt.Errorf("renew with token: %w", x509.UnknownAuthorityError{})
+	if !isTLSVerificationError(err) {
+		t.Fatal("isTLSVerificationError() = false, want true")
+	}
+	if isTLSVerificationError(fmt.Errorf("renew with token: unauthorized")) {
+		t.Fatal("isTLSVerificationError() = true for non-TLS error, want false")
 	}
 }
 

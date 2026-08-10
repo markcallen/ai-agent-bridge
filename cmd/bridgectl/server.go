@@ -212,10 +212,25 @@ func defaultServerConfigPath(stateDir string) string {
 
 func defaultServerConfigCandidates(stateDir string) []string {
 	candidates := []string{filepath.Join(stateDir, "bridge.yaml")}
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		candidates = append(candidates, filepath.Join(xdgConfigHome, "bridgectl", "config.yaml"))
+	}
 	if configDir, err := os.UserConfigDir(); err == nil && configDir != "" {
-		candidates = append(candidates, filepath.Join(configDir, "bridgectl", "config.yaml"))
+		path := filepath.Join(configDir, "bridgectl", "config.yaml")
+		if !stringSliceContains(candidates, path) {
+			candidates = append(candidates, path)
+		}
 	}
 	return candidates
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func newServerStatusCmd() *cobra.Command {

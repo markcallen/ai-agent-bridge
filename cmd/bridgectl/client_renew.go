@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -122,7 +123,7 @@ func runClientRenew(stepCAURL, rootPath string, rootExplicit bool, certPath, key
 		return err
 	}
 	if mode == renewModeNativeInsecureTLS {
-		if err := renewClientCertNative(stepCAURL, certPath, keyPath, true); err != nil {
+		if err := renewClientCertNativeWithVerifiedFallback(stepCAURL, certPath, keyPath); err != nil {
 			return fmt.Errorf("native token renew: %w", err)
 		}
 		return printRenewedCert(certPath)
@@ -211,6 +212,17 @@ func renewRootArg(stepCAURL, rootPath string, rootExplicit bool) (string, renewM
 	return "", renewModeNativeInsecureTLS, nil
 }
 
+func renewClientCertNativeWithVerifiedFallback(stepCAURL, certPath, keyPath string) error {
+	err := renewClientCertNative(stepCAURL, certPath, keyPath, false)
+	if err == nil {
+		return nil
+	}
+	if !isTLSVerificationError(err) {
+		return err
+	}
+	return renewClientCertNative(stepCAURL, certPath, keyPath, true)
+}
+
 func renewClientCertNative(stepCAURL, certPath, keyPath string, insecureTLS bool) error {
 	token, err := renewalToken(stepCAURL, certPath, keyPath)
 	if err != nil {
@@ -235,6 +247,19 @@ func renewClientCertNative(stepCAURL, certPath, keyPath string, insecureTLS bool
 		return fmt.Errorf("write renewed certificate: %w", err)
 	}
 	return nil
+}
+
+func isTLSVerificationError(err error) bool {
+	var unknownAuthority x509.UnknownAuthorityError
+	if errors.As(err, &unknownAuthority) {
+		return true
+	}
+	var hostnameError x509.HostnameError
+	if errors.As(err, &hostnameError) {
+		return true
+	}
+	var invalidCert x509.CertificateInvalidError
+	return errors.As(err, &invalidCert)
 }
 
 func renewalToken(stepCAURL, certPath, keyPath string) (string, error) {
@@ -293,7 +318,7 @@ func renewAudience(stepCAURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return u.ResolveReference(&url.URL{Path: "/1.0/renew"}).String(), nil
+	return u.ResolveReference(&url.URL{Path: "/renew"}).String(), nil
 }
 
 func signingAlgorithm(pub crypto.PublicKey) (jose.SignatureAlgorithm, error) {
