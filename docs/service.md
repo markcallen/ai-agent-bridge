@@ -115,6 +115,15 @@ auth:
   jwt_audience: "bridge"
   jwt_max_ttl:  "5m"
 
+step_ca:
+  url: "https://step-ca.example.internal"
+  root: "certs/step-ca-root.crt"
+  clients:
+    - issuer: "laptop-a"
+      key_path: "certs/jwt-clients/laptop-a.pub"
+    - issuer: "build-runner"
+      required: true
+
 sessions:
   max_per_project:   5
   max_global:        20
@@ -135,6 +144,12 @@ rate_limits:
 
 feature_flags:
   provider_fallbacks: true
+
+repo_setup:
+  enabled: true
+  config_path: ".ai-agent-bridge.yaml"
+  default_timeout: "2m"
+  max_timeout: "15m"
 
 providers:
   claude:
@@ -173,6 +188,19 @@ logging:
 | `jwt_public_keys` | List of `{issuer, key_path}` entries. Multiple issuers are supported for key rotation. |
 | `jwt_audience` | Required `aud` claim value |
 | `jwt_max_ttl` | Maximum accepted token lifetime |
+
+#### `step_ca`
+| Field | Description |
+|-------|-------------|
+| `url` | Step CA URL used by server certificate issuance and renewal flows |
+| `root` | Step CA root certificate used for Step CA requests |
+| `provisioner` | Optional Step CA provisioner name |
+| `provisioner_password_file` | Optional file containing a JWK provisioner password for non-interactive issuance |
+| `clients` | Optional startup client registry. Each entry declares an `issuer`, optional `key_path`, and optional `required` flag. |
+
+`step_ca.clients` is for known clients whose mTLS certificates are issued by Step CA but whose bridge JWT public keys are already present on the server. The server loads these JWT public keys during secure startup. If `key_path` is omitted, the server checks `certs/jwt-clients/<issuer>.pub` under the bridge state directory. Optional entries whose keys are missing, unreadable, or invalid are logged and skipped; entries with `required: true` fail startup if the public key is missing or invalid.
+
+Step CA certificate trust and bridge JWT trust are separate. A Step CA-issued client certificate can satisfy mTLS, but the client still needs a configured or enrolled Ed25519 JWT public key before it can call authenticated RPCs.
 
 #### `feature_flags`
 | Field | Default | Description |
@@ -221,6 +249,56 @@ providers:
 In this example, `./node_modules/@openai/codex/bin/codex.js` resolves to
 `/opt/ai-agent-bridge/node_modules/@openai/codex/bin/codex.js` regardless of
 where the daemon process is launched from.
+
+#### `repo_setup`
+
+Controls repo-local shell setup before provider launch. These settings are optional; omitting the `repo_setup` block enables the feature with the defaults below. Repositories opt in by placing `.ai-agent-bridge.yaml` at the repo root. Repos without that file keep the existing provider launch behavior.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `enabled` | `true` | When false, repo-local setup files are ignored. |
+| `config_path` | `.ai-agent-bridge.yaml` | Relative path under `repo_path` for the repo-owned setup config. Absolute paths and `..` components are rejected. |
+| `default_timeout` | `2m` | Setup timeout when the repo file omits `timeout`. Expiry cancels setup and prevents provider launch. |
+| `max_timeout` | `15m` | Upper bound for repo-declared `timeout`. Values above this fail fast instead of being clamped. |
+
+Repo setup runs on the bridge host as the bridge user with `cwd` set to the requested `repo_path`. The bridge captures the final shell environment and uses it for provider health checks and the provider subprocess. Setup is serialized per canonical repo path, so two session starts for the same repo share one in-flight setup run instead of running setup concurrently.
+
+Root-level repo config example for a Next.js app using nvm and pnpm via corepack:
+
+```yaml
+# .ai-agent-bridge.yaml
+version: 1
+shell: bash
+timeout: 5m
+
+setup:
+  - source "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+  - nvm use
+  - corepack enable
+  - corepack prepare pnpm@latest --activate
+  - export PATH="$PWD/node_modules/.bin:$PATH"
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+```
+
+Go repo example using a Makefile setup target:
+
+```yaml
+# .ai-agent-bridge.yaml
+version: 1
+shell: bash
+timeout: 5m
+
+setup:
+  - make setup
+  - export PATH="$PWD/bin:$PATH"
+
+env:
+  CGO_ENABLED: "1"
+```
+
+If setup exits non-zero, exceeds its effective timeout, or has an invalid config, `StartSession` fails with `FAILED_PRECONDITION` and the provider process is not started. Logs include setup start/success/failure metadata and configured redaction is applied to setup failure output before it is returned or logged.
 
 #### `providers`
 | Field | Description |

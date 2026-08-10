@@ -1,6 +1,12 @@
 server:
   listen: "0.0.0.0:9445"
 
+step_ca:
+  clients:
+    - issuer: "smoke-step-client"
+      key_path: "/run/bridge-certs/jwt-signing.pub"
+      required: true
+
 tls:
   ca_bundle: "/run/bridge-certs/ca-bundle.crt"
   cert: "/run/bridge-certs/bridge.local.crt"

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -189,6 +190,81 @@ func TestEchoSessionLifecycle(t *testing.T) {
 		info.Status == bridgev1.SessionStatus_SESSION_STATUS_STOPPED ||
 			info.Status == bridgev1.SessionStatus_SESSION_STATUS_FAILED,
 		"session should be stopped or failed, got %v", info.Status)
+}
+
+func TestRepoSetupConfigEnvironmentPropagation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+	repoDir := t.TempDir()
+	binDir := t.TempDir()
+	providerScript := filepath.Join(binDir, "print-setup-env.sh")
+	require.NoError(t, os.WriteFile(providerScript, []byte(`#!/bin/sh
+printf 'SETUP_VALUE=%s\n' "$BRIDGE_E2E_SETUP_VALUE"
+sleep 5
+`), 0o755))
+	configPath := filepath.Join(t.TempDir(), "bridge.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`
+providers:
+  setupenv:
+    binary: `+strconv.Quote(providerScript)+`
+    startup_probe: output
+    startup_timeout: 5s
+    required_env: ["BRIDGE_E2E_SETUP_VALUE"]
+repo_setup:
+  default_timeout: 5s
+  max_timeout: 30s
+`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, ".ai-agent-bridge.yaml"), []byte(`
+version: 1
+shell: bash
+setup:
+  - export BRIDGE_E2E_SETUP_VALUE=from-repo-setup
+`), 0o644))
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ConfigPath: configPath,
+	})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	client, err := bridgeclient.New(bridgeclient.WithTarget(srv.Target()))
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+	client.SetProject("test")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	sessionID := uuid.NewString()
+	_, err = client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId:   "test",
+		SessionId:   sessionID,
+		RepoPath:    repoDir,
+		Provider:    "setupenv",
+		InitialCols: 80,
+		InitialRows: 24,
+	})
+	require.NoError(t, err)
+
+	_, attached, getEvents, stopRecv := attachAndCollectEvents(t, ctx, client, sessionID, uuid.NewString(), bridgev1.AttachRole_ATTACH_ROLE_WRITER)
+	defer stopRecv()
+	waitForAttach(t, attached)
+
+	require.Eventually(t, func() bool {
+		for _, ev := range getEvents() {
+			if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT && strings.Contains(string(ev.Payload), "SETUP_VALUE=from-repo-setup") {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 100*time.Millisecond)
+
+	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{SessionId: sessionID, Force: true})
+	require.NoError(t, err)
 }
 
 // TestAutoServerDiscovery tests that a second client discovers the first server.

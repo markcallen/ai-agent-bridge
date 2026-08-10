@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/internal/redact"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"github.com/stretchr/testify/assert"
@@ -110,6 +112,22 @@ sessions:
 		ConfigPath: cfgFile,
 	})
 	assert.NotNil(t, srv)
+}
+
+func TestStartWithConfigFileWithoutListenStaysLocal(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "bridge.yaml")
+	require.NoError(t, os.WriteFile(cfgFile, []byte(`
+providers:
+  echo:
+    binary: "cat"
+`), 0o644))
+
+	srv := startLocalServer(t, Config{
+		StateDir:   dir,
+		ConfigPath: cfgFile,
+	})
+	assert.Equal(t, "unix", srv.listener.Addr().Network())
 }
 
 // TestStartConfigFileExplicitOverride verifies that an explicit flag value
@@ -249,6 +267,41 @@ func TestServerTarget(t *testing.T) {
 	assert.NotEmpty(t, srv.Target())
 }
 
+func TestLocalDialAddrNormalizesWildcard(t *testing.T) {
+	tests := []struct {
+		name string
+		addr string
+		want string
+	}{
+		{
+			name: "ipv4 wildcard",
+			addr: "0.0.0.0:9445",
+			want: "127.0.0.1:9445",
+		},
+		{
+			name: "ipv6 wildcard",
+			addr: "[::]:9445",
+			want: "[::1]:9445",
+		},
+		{
+			name: "concrete address",
+			addr: "10.0.0.1:9445",
+			want: "10.0.0.1:9445",
+		},
+		{
+			name: "unix target",
+			addr: "unix:///tmp/server.sock",
+			want: "unix:///tmp/server.sock",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, localDialAddr(tt.addr))
+		})
+	}
+}
+
 // TestIsServerRunningAndDiscoverTarget verifies that IsServerRunning and
 // DiscoverTarget correctly report a live server.
 func TestIsServerRunningAndDiscoverTarget(t *testing.T) {
@@ -338,6 +391,77 @@ func TestIsServerRunningSecureMode(t *testing.T) {
 
 	if !IsServerRunning(dir) {
 		t.Error("IsServerRunning returned false for a running secure server")
+	}
+
+	target, mode := DiscoverTarget(dir)
+	assert.NotEmpty(t, target)
+	assert.Equal(t, ModeSecure, mode)
+}
+
+func TestIsServerRunningSecureModeWithExplicitTLSCreatesLocalManagementPKI(t *testing.T) {
+	dir := t.TempDir()
+	tlsDir := filepath.Join(dir, "external-tls")
+	caCertPath, caKeyPath, err := pki.InitCA("external", tlsDir)
+	require.NoError(t, err)
+	caCert, caKey, err := pki.LoadCA(caCertPath, caKeyPath)
+	require.NoError(t, err)
+	serverCertPath, serverKeyPath, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "bridge-host", []string{"bridge-host", "127.0.0.1"}, tlsDir, 0)
+	require.NoError(t, err)
+
+	srv, err := Start(Config{
+		StateDir:     dir,
+		ListenAddr:   "127.0.0.1:0",
+		CABundlePath: caCertPath,
+		TLSCertPath:  serverCertPath,
+		TLSKeyPath:   serverKeyPath,
+	})
+	if err != nil {
+		t.Skipf("secure mode start failed: %v", err)
+	}
+	t.Cleanup(func() { srv.Stop() })
+
+	mat := LoadPKIMaterial(dir)
+	for _, path := range []string{
+		mat.CABundlePath,
+		mat.LocalClientCert,
+		mat.LocalClientKey,
+		mat.JWTSigningKey,
+		mat.JWTSigningPub,
+	} {
+		_, err := os.Stat(path)
+		require.NoError(t, err, "file should exist: %s", path)
+	}
+
+	assert.Equal(t, "bridge-host", DiscoverServerName(dir))
+	if !IsServerRunning(dir) {
+		t.Fatal("IsServerRunning returned false for explicit-TLS secure server")
+	}
+	target, mode := DiscoverTarget(dir)
+	assert.NotEmpty(t, target)
+	assert.Equal(t, ModeSecure, mode)
+}
+
+func TestDiscoverTargetSecureModeWithWildcardListen(t *testing.T) {
+	dir := t.TempDir()
+	srv, err := Start(Config{
+		StateDir:   dir,
+		ListenAddr: "0.0.0.0:0",
+	})
+	if err != nil {
+		t.Skipf("secure mode start failed: %v", err)
+	}
+	t.Cleanup(func() { srv.Stop() })
+
+	addrData, err := os.ReadFile(filepath.Join(dir, "server.addr"))
+	require.NoError(t, err)
+	host, _, err := net.SplitHostPort(string(bytes.TrimSpace(addrData)))
+	require.NoError(t, err)
+	ip := net.ParseIP(host)
+	require.NotNil(t, ip)
+	assert.True(t, ip.IsLoopback(), "server.addr host %q should be loopback", host)
+
+	if !IsServerRunning(dir) {
+		t.Error("IsServerRunning returned false for a secure wildcard listener")
 	}
 
 	target, mode := DiscoverTarget(dir)

@@ -136,6 +136,14 @@ The bridge runs as the login user inside an interactive or graphical session. Th
 
 **Remote access model**: when `--listen` is set, the server binds to the specified TCP address and generates PKI material in `~/.ai-agent-bridge/certs/` on first start. SDK clients authenticate with mTLS + JWT. Human operators authenticate using OIDC via `bridgectl server issue-client --oidc` (see Security Architecture). The server must be reachable via WireGuard or Tailscale; it must not be exposed to the public internet.
 
+Remote operator CLI acceptance criteria:
+- `bridgectl session` remote subcommands allow operators to override the TLS server name when a bridge server certificate is issued for a DNS name that differs from the dial address.
+- Remote credential discovery prefers the current host's client certificate before falling back to other client certificates in the cert directory.
+- `bridgectl server start` auto-loads the first available per-user config from `~/.ai-agent-bridge/bridge.yaml` or `$XDG_CONFIG_HOME/bridgectl/config.yaml` when `--config` is omitted, so local and remote operator commands target the same configured daemon.
+- Same-machine `bridgectl` commands discover an already-running secure TCP server from local state without requiring remote host, certificate, key, or JWT flags; wildcard bind addresses are recorded as loopback dial targets for local clients.
+- `bridgectl session list --remote` surfaces an actionable retry hint when JWT authentication fails and a `jwt-signing.key` in the current directory may be the intended credential.
+- `bridgectl client renew` handles Step CA deployments where the HTTPS serving certificate chain differs from the Step CA root used for bridge certificate issuance, while rejecting expired client certificates before attempting renewal.
+
 **Session persistence**: with `--db-path`, the server writes session metadata and PTY output chunks to a BoltDB file. On restart, `LoadHistory()` rehydrates sessions so SDK clients can reconnect and replay events they missed.
 
 #### Human Interjection
@@ -232,6 +240,19 @@ ai-agent-bridge-ca (root)
 - CA keys stored encrypted at rest (passphrase-protected PEM).
 - Certificate rotation: certs expire after 90 days; automated renewal via `ai-agent-bridge-ca renew`.
 - Revocation: CRL distribution point served by bridge daemon.
+
+#### Startup Client Registry
+
+When a bridge server is configured for Step CA-backed remote access, operators may declare known client issuers in the YAML config so the server attempts to trust their JWT public keys during startup.
+
+Acceptance criteria:
+
+- `step_ca.clients` entries identify a JWT `issuer` and an optional `key_path` for that issuer's Ed25519 public key.
+- If `key_path` is omitted, the server checks `certs/jwt-clients/<issuer>.pub` under the bridge state directory.
+- Optional client public keys that are missing, unreadable, or invalid are logged and skipped so servers can start before every client has enrolled.
+- Entries marked `required: true` fail startup if their public key is missing or invalid.
+- Startup-loaded client keys are added to the same JWT verifier used by normal RPC authentication.
+- Step CA certificate trust does not replace JWT trust; every configured client still needs a bridge JWT public key.
 
 ### 7.5 Defense in Depth
 

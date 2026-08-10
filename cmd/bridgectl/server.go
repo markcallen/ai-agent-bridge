@@ -111,12 +111,9 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 				return fmt.Errorf("server already running")
 			}
 
-			// Default config path to ~/.ai-agent-bridge/bridge.yaml when not set.
+			// Default config path to the first known per-user config when not set.
 			if configPath == "" {
-				defaultCfg := filepath.Join(localserver.StateDir(), "bridge.yaml")
-				if _, err := os.Stat(defaultCfg); err == nil {
-					configPath = defaultCfg
-				}
+				configPath = defaultServerConfigPath(localserver.StateDir())
 			}
 
 			// Build logger from --log-level and --log-format.
@@ -165,7 +162,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 			}
 
 			mode := "local (unix socket, no auth)"
-			if listenAddr != "" {
+			if localserver.DiscoverMode(localserver.StateDir()) == localserver.ModeSecure {
 				mode = fmt.Sprintf("secure (mTLS+JWT on %s)", srv.Addr())
 			}
 			fmt.Fprintf(os.Stderr, "ai-agent-bridge server listening — %s (pid %d)\n", mode, os.Getpid())
@@ -202,6 +199,38 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 	cmd.Flags().DurationVar(&certRenewalCheckInterval, "cert-renewal-check-interval", 0, "how often to check certificate expiry (e.g. 10m, 1h); default 1 hour")
 
 	return cmd
+}
+
+func defaultServerConfigPath(stateDir string) string {
+	for _, path := range defaultServerConfigCandidates(stateDir) {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
+func defaultServerConfigCandidates(stateDir string) []string {
+	candidates := []string{filepath.Join(stateDir, "bridge.yaml")}
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		candidates = append(candidates, filepath.Join(xdgConfigHome, "bridgectl", "config.yaml"))
+	}
+	if configDir, err := os.UserConfigDir(); err == nil && configDir != "" {
+		path := filepath.Join(configDir, "bridgectl", "config.yaml")
+		if !stringSliceContains(candidates, path) {
+			candidates = append(candidates, path)
+		}
+	}
+	return candidates
+}
+
+func stringSliceContains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func newServerStatusCmd() *cobra.Command {

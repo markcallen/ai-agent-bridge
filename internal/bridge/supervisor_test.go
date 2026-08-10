@@ -34,6 +34,42 @@ func (p *testProvider) BuildCommand(ctx context.Context, cfg SessionConfig) (*ex
 	return cmd, nil
 }
 
+type setupRunnerFunc func(context.Context, string, []string) ([]string, error)
+
+func (f setupRunnerFunc) Prepare(ctx context.Context, repoPath string, baseEnv []string) ([]string, error) {
+	return f(ctx, repoPath, baseEnv)
+}
+
+type envHealthProvider struct {
+	testProvider
+	requiredKey string
+}
+
+func (p *envHealthProvider) Health(context.Context) error {
+	return errors.New("HealthWithEnv was not used")
+}
+
+func (p *envHealthProvider) HealthWithEnv(_ context.Context, env []string) error {
+	for _, item := range env {
+		if strings.HasPrefix(item, p.requiredKey+"=") {
+			return nil
+		}
+	}
+	return errors.New("missing " + p.requiredKey)
+}
+
+type nilEnvProvider struct {
+	testProvider
+}
+
+func (p *nilEnvProvider) Health(context.Context) error {
+	return nil
+}
+
+func (p *nilEnvProvider) HealthWithEnv(context.Context, []string) error {
+	return errors.New("HealthWithEnv should not be used without prepared env")
+}
+
 func TestSupervisorSessionLifecycle(t *testing.T) {
 	registry := NewRegistry()
 	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
@@ -115,6 +151,90 @@ func TestSupervisorSessionLifecycle(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 	waitForStopped(t, supervisor, "session-a")
+}
+
+func TestSupervisorNilEnvUsesProviderHealth(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&nilEnvProvider{testProvider: testProvider{id: "nil-env"}}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	supervisor := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute)
+	defer supervisor.Close()
+
+	info, err := supervisor.Start(context.Background(), SessionConfig{
+		ProjectID: "project-a",
+		SessionID: "nil-env",
+		RepoPath:  t.TempDir(),
+		Options:   map[string]string{"provider": "nil-env"},
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if info.Provider != "nil-env" {
+		t.Fatalf("Provider=%q want nil-env", info.Provider)
+	}
+	_ = supervisor.Stop("nil-env", true)
+}
+
+func TestSupervisorRepoSetupRunnerProvidesProviderHealthEnv(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&envHealthProvider{
+		testProvider: testProvider{id: "env-provider"},
+		requiredKey:  "FROM_SETUP",
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	supervisor := NewSupervisor(
+		registry,
+		DefaultPolicy(),
+		1024,
+		time.Minute,
+		WithRepoSetupRunner(setupRunnerFunc(func(_ context.Context, _ string, _ []string) ([]string, error) {
+			return []string{"FROM_SETUP=1"}, nil
+		})),
+	)
+	defer supervisor.Close()
+
+	info, err := supervisor.Start(context.Background(), SessionConfig{
+		ProjectID: "project-a",
+		SessionID: "setup-env",
+		RepoPath:  t.TempDir(),
+		Options:   map[string]string{"provider": "env-provider"},
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if info.Provider != "env-provider" {
+		t.Fatalf("Provider=%q want env-provider", info.Provider)
+	}
+	_ = supervisor.Stop("setup-env", true)
+}
+
+func TestSupervisorRepoSetupRunnerFailure(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	supervisor := NewSupervisor(
+		registry,
+		DefaultPolicy(),
+		1024,
+		time.Minute,
+		WithRepoSetupRunner(setupRunnerFunc(func(context.Context, string, []string) ([]string, error) {
+			return nil, errors.New("repo setup failed: boom")
+		})),
+	)
+	defer supervisor.Close()
+
+	_, err := supervisor.Start(context.Background(), SessionConfig{
+		ProjectID: "project-a",
+		SessionID: "setup-fail",
+		RepoPath:  t.TempDir(),
+		Options:   map[string]string{"provider": "fake"},
+	})
+	if !errors.Is(err, ErrRepoSetupFailed) || strings.Contains(err.Error(), "repo setup failed: repo setup failed") {
+		t.Fatalf("Start error=%v want trimmed repo setup failure", err)
+	}
 }
 
 func TestSupervisorStartValidationAndLimits(t *testing.T) {

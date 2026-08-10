@@ -233,6 +233,7 @@ func TestMapBridgeErrorAndState(t *testing.T) {
 		{err: bridge.ErrClientMismatch, code: codes.PermissionDenied},
 		{err: bridge.ErrProviderUnavailable, code: codes.Unavailable},
 		{err: bridge.ErrSessionRecoveryUnavailable, code: codes.Unavailable},
+		{err: bridge.ErrRepoSetupFailed, code: codes.FailedPrecondition},
 		{err: bridge.ErrSessionLimitReached, code: codes.ResourceExhausted},
 		{err: errors.New("boom"), code: codes.Internal},
 	}

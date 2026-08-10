@@ -27,6 +27,7 @@ import (
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/internal/provider"
 	"github.com/markcallen/ai-agent-bridge/internal/redact"
+	"github.com/markcallen/ai-agent-bridge/internal/reposetup"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -60,6 +61,12 @@ func PIDPath() string {
 // AddrPath returns the path to the server address file (TCP fallback on Windows).
 func AddrPath() string {
 	return filepath.Join(StateDir(), "server.addr")
+}
+
+// ServerNamePath returns the path to the file recording the TLS name local
+// clients should use when probing or dialing a secure server.
+func ServerNamePath() string {
+	return filepath.Join(StateDir(), "server.name")
 }
 
 // Server wraps all the components needed for a local bridge server.
@@ -115,6 +122,42 @@ func DiscoverMode(stateDir string) ServerMode {
 	return ModeLocal
 }
 
+// DiscoverServerName reads the TLS server name recorded by secure startup.
+// Older state directories do not have this file, so auto-PKI's historical
+// "server" name remains the fallback.
+func DiscoverServerName(stateDir string) string {
+	if stateDir == "" {
+		stateDir = StateDir()
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "server.name"))
+	if err != nil {
+		return "server"
+	}
+	name := strings.TrimSpace(string(data))
+	if name == "" {
+		return "server"
+	}
+	return name
+}
+
+func serverNameFromCert(certPath string) string {
+	cert, err := pki.LoadCert(certPath)
+	if err != nil {
+		return "server"
+	}
+	for _, name := range cert.DNSNames {
+		if strings.TrimSpace(name) != "" {
+			return name
+		}
+	}
+	for _, ip := range cert.IPAddresses {
+		if ip != nil {
+			return ip.String()
+		}
+	}
+	return "server"
+}
+
 // Config controls local server behaviour.
 type Config struct {
 	// StateDir overrides the default ~/.ai-agent-bridge directory.
@@ -155,6 +198,13 @@ type Config struct {
 	// values from log output.
 	RedactPatterns []string
 
+	// RepoSetup controls repo-local pre-agent setup files. Nil means enabled
+	// with built-in defaults.
+	RepoSetupEnabled        *bool
+	RepoSetupConfigPath     string
+	RepoSetupDefaultTimeout time.Duration
+	RepoSetupMaxTimeout     time.Duration
+
 	// RateLimits overrides the default rate-limit config. Zero values keep
 	// the built-in defaults.
 	RateLimits server.RateLimitConfig
@@ -179,6 +229,10 @@ type Config struct {
 	// verification in explicit-cert mode. Populated from auth.jwt_public_keys
 	// in the config file.
 	JWTPublicKeys map[string]string
+	// StepCAClients declares Step CA-authenticated clients whose JWT public
+	// keys should be loaded at startup if present. Missing optional clients are
+	// logged and skipped; missing required clients fail secure startup.
+	StepCAClients []ConfiguredJWTClient
 
 	// StepCAURL enables Step CA integration. When set, auto-PKI generation is
 	// skipped and server certificates are obtained from the Step CA instance
@@ -216,7 +270,17 @@ func Start(cfg Config) (*Server, error) {
 	// its zero value.
 	var configProviderDefs map[string]config.ProviderConfig
 	var providerRoot string
+	repoSetupEnabled := true
+	repoSetupConfigPath := ".ai-agent-bridge.yaml"
+	repoSetupDefaultTimeout := 2 * time.Minute
+	repoSetupMaxTimeout := 15 * time.Minute
+	configHasServerListen := false
 	if cfg.ConfigPath != "" {
+		var err error
+		configHasServerListen, err = config.HasExplicitServerListen(cfg.ConfigPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect config %q: %w", cfg.ConfigPath, err)
+		}
 		fileCfg, err := config.Load(cfg.ConfigPath)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("load config %q: %w", cfg.ConfigPath, err)
@@ -226,6 +290,10 @@ func Start(cfg Config) (*Server, error) {
 				configProviderDefs = fileCfg.Providers
 			}
 			providerRoot = fileCfg.Runtime.ProviderRoot
+			repoSetupEnabled = fileCfg.RepoSetup.IsEnabled()
+			repoSetupConfigPath = fileCfg.RepoSetup.ConfigPath
+			repoSetupDefaultTimeout = config.ParseDuration(fileCfg.RepoSetup.DefaultTimeout, repoSetupDefaultTimeout)
+			repoSetupMaxTimeout = config.ParseDuration(fileCfg.RepoSetup.MaxTimeout, repoSetupMaxTimeout)
 			if cfg.DBPath == "" && fileCfg.Persistence.DBPath != "" {
 				cfg.DBPath = fileCfg.Persistence.DBPath
 			}
@@ -259,7 +327,7 @@ func Start(cfg Config) (*Server, error) {
 			if cfg.AllowedPaths == nil && len(fileCfg.AllowedPaths) > 0 {
 				cfg.AllowedPaths = fileCfg.AllowedPaths
 			}
-			if cfg.ListenAddr == "" && fileCfg.Server.Listen != "" {
+			if cfg.ListenAddr == "" && configHasServerListen && fileCfg.Server.Listen != "" {
 				cfg.ListenAddr = fileCfg.Server.Listen
 			}
 			if cfg.CABundlePath == "" && fileCfg.TLS.CABundle != "" {
@@ -271,6 +339,16 @@ func Start(cfg Config) (*Server, error) {
 				cfg.JWTPublicKeys = make(map[string]string, len(fileCfg.Auth.JWTPublicKeys))
 				for _, k := range fileCfg.Auth.JWTPublicKeys {
 					cfg.JWTPublicKeys[k.Issuer] = k.KeyPath
+				}
+			}
+			if cfg.StepCAClients == nil && len(fileCfg.StepCA.Clients) > 0 {
+				cfg.StepCAClients = make([]ConfiguredJWTClient, 0, len(fileCfg.StepCA.Clients))
+				for _, c := range fileCfg.StepCA.Clients {
+					cfg.StepCAClients = append(cfg.StepCAClients, ConfiguredJWTClient{
+						Issuer:   c.Issuer,
+						KeyPath:  c.KeyPath,
+						Required: c.Required,
+					})
 				}
 			}
 			if len(cfg.ServerSANs) == 0 && len(fileCfg.Server.SANs) > 0 {
@@ -322,6 +400,18 @@ func Start(cfg Config) (*Server, error) {
 	if cfg.IdleTimeout <= 0 {
 		cfg.IdleTimeout = 30 * time.Minute
 	}
+	if cfg.RepoSetupEnabled != nil {
+		repoSetupEnabled = *cfg.RepoSetupEnabled
+	}
+	if cfg.RepoSetupConfigPath != "" {
+		repoSetupConfigPath = cfg.RepoSetupConfigPath
+	}
+	if cfg.RepoSetupDefaultTimeout > 0 {
+		repoSetupDefaultTimeout = cfg.RepoSetupDefaultTimeout
+	}
+	if cfg.RepoSetupMaxTimeout > 0 {
+		repoSetupMaxTimeout = cfg.RepoSetupMaxTimeout
+	}
 
 	stateDir := cfg.StateDir
 	if stateDir == "" {
@@ -340,12 +430,14 @@ func Start(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	}
 
+	var logRedactor *redact.Redactor
 	// Apply log redaction when patterns are configured.
 	if len(cfg.RedactPatterns) > 0 {
 		redactor, err := redact.New(cfg.RedactPatterns)
 		if err != nil {
 			return nil, fmt.Errorf("compile redact patterns: %w", err)
 		}
+		logRedactor = redactor
 		logger = slog.New(&redactingHandler{inner: logger.Handler(), redactor: redactor})
 	}
 
@@ -356,6 +448,21 @@ func Start(cfg Config) (*Server, error) {
 	// Build provider registry. Config-file providers take precedence; the
 	// auto-detect path fills in any providers not explicitly configured.
 	registry := bridge.NewRegistry()
+	var redactFunc func(string) string
+	if logRedactor != nil {
+		redactFunc = logRedactor.Redact
+	}
+	repoSetupRunner := reposetup.NewCoordinator(reposetup.Options{
+		Enabled:        repoSetupEnabled,
+		ConfigPath:     repoSetupConfigPath,
+		DefaultTimeout: repoSetupDefaultTimeout,
+		MaxTimeout:     repoSetupMaxTimeout,
+		Logger:         logger,
+		Redact:         redactFunc,
+		BaseEnv: func() []string {
+			return provider.FilterEnv(os.Environ())
+		},
+	})
 
 	// Register providers explicitly declared in the config file.
 	for id, pc := range configProviderDefs {
@@ -449,6 +556,7 @@ func Start(cfg Config) (*Server, error) {
 
 	// Supervisor options: persistence store when DBPath is set.
 	var supOpts []bridge.SupervisorOption
+	supOpts = append(supOpts, bridge.WithRepoSetupRunner(repoSetupRunner))
 	var store bridge.SessionStore
 	if cfg.DBPath != "" {
 		var err error
@@ -479,6 +587,7 @@ func Start(cfg Config) (*Server, error) {
 	var stepCAConfig *StepCAConfig
 	var pkiMat *PKIMaterial
 	explicitCerts := false
+	tlsServerName := "server"
 
 	if cfg.ListenAddr != "" {
 		// Secure mode: TCP + mTLS + JWT.
@@ -506,11 +615,18 @@ func Start(cfg Config) (*Server, error) {
 				}
 				return nil, fmt.Errorf("CABundlePath requires TLSCertPath and TLSKeyPath to also be set")
 			}
-			mat = &PKIMaterial{
-				CABundlePath:   cfg.CABundlePath,
-				ServerCertPath: cfg.TLSCertPath,
-				ServerKeyPath:  cfg.TLSKeyPath,
+			var pkiErr error
+			mat, pkiErr = EnsureLocalManagementPKI(stateDir, cfg.CABundlePath, logger)
+			if pkiErr != nil {
+				sup.Close()
+				if store != nil {
+					_ = store.Close()
+				}
+				return nil, fmt.Errorf("ensure local management PKI: %w", pkiErr)
 			}
+			mat.ServerCertPath = cfg.TLSCertPath
+			mat.ServerKeyPath = cfg.TLSKeyPath
+			tlsServerName = serverNameFromCert(cfg.TLSCertPath)
 		} else {
 			// Auto-generate PKI material if not present, or delegate to Step CA.
 			serverSANs = BuildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
@@ -535,7 +651,7 @@ func Start(cfg Config) (*Server, error) {
 		}
 		pkiMat = mat
 
-		secureOpts, verifier, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys)
+		secureOpts, verifier, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys, cfg.StepCAClients)
 		if err != nil {
 			sup.Close()
 			if store != nil {
@@ -570,7 +686,7 @@ func Start(cfg Config) (*Server, error) {
 			sup.Close()
 			return nil, fmt.Errorf("listen tcp %s: %w", cfg.ListenAddr, err)
 		}
-		listenAddr = ln.Addr().String()
+		listenAddr = localDialAddr(ln.Addr().String())
 	} else {
 		ln, listenAddr, err = listen(stateDir)
 		if err != nil {
@@ -601,6 +717,14 @@ func Start(cfg Config) (*Server, error) {
 		_ = ln.Close()
 		sup.Close()
 		return nil, fmt.Errorf("write mode file: %w", err)
+	}
+	if mode == ModeSecure {
+		nameFile := filepath.Join(stateDir, "server.name")
+		if err := os.WriteFile(nameFile, []byte(tlsServerName), 0o644); err != nil {
+			_ = ln.Close()
+			sup.Close()
+			return nil, fmt.Errorf("write server name file: %w", err)
+		}
 	}
 
 	logger.Info("server starting", "mode", mode, "addr", listenAddr, "pid", os.Getpid())
@@ -642,7 +766,7 @@ func Start(cfg Config) (*Server, error) {
 // buildSecureGRPCOpts returns gRPC server options for mTLS + JWT mode.
 // extraKeys maps issuer name to public key file path for JWT verification
 // when using pre-issued certificates instead of auto-PKI.
-func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string) ([]grpc.ServerOption, *auth.JWTVerifier, error) {
+func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string, stepCAClients []ConfiguredJWTClient) ([]grpc.ServerOption, *auth.JWTVerifier, error) {
 	// TLS credentials with client cert verification.
 	tlsCfg, err := auth.ServerTLSConfig(auth.TLSConfig{
 		CABundlePath: mat.CABundlePath,
@@ -696,6 +820,9 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 		Audience: "bridge",
 		MaxTTL:   10 * time.Minute,
 	}
+	if err := loadConfiguredJWTClients(verifier, stateDir, logger, stepCAClients); err != nil {
+		return nil, nil, err
+	}
 
 	return []grpc.ServerOption{
 		grpc.Creds(credentials.NewTLS(tlsCfg)),
@@ -743,6 +870,21 @@ func BuildServerSANs(listenAddr string, extra []string) []string {
 		add(s)
 	}
 	return sans
+}
+
+func localDialAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	switch host {
+	case "0.0.0.0", "":
+		return net.JoinHostPort("127.0.0.1", port)
+	case "::":
+		return net.JoinHostPort("::1", port)
+	default:
+		return addr
+	}
 }
 
 // Addr returns the listener address (unix socket path or TCP address).
@@ -802,6 +944,7 @@ func (s *Server) Stop() {
 	_ = os.Remove(filepath.Join(s.stateDir, "server.pid"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.addr"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.mode"))
+	_ = os.Remove(filepath.Join(s.stateDir, "server.name"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.sock"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.lock"))
 }
@@ -1015,7 +1158,7 @@ func probeHealth(target string, mode ServerMode, stateDir string) bool {
 			CABundlePath: mat.CABundlePath,
 			CertPath:     mat.LocalClientCert,
 			KeyPath:      mat.LocalClientKey,
-			ServerName:   "server",
+			ServerName:   DiscoverServerName(stateDir),
 		})
 		if err != nil {
 			return false

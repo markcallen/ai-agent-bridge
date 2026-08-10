@@ -22,6 +22,7 @@ type Config struct {
 	RateLimits   RateLimitsConfig          `yaml:"rate_limits"`
 	Persistence  PersistenceConfig         `yaml:"persistence"`
 	Runtime      RuntimeConfig             `yaml:"runtime"`
+	RepoSetup    RepoSetupConfig           `yaml:"repo_setup"`
 	Providers    map[string]ProviderConfig `yaml:"providers"`
 	AllowedPaths []string                  `yaml:"allowed_paths"`
 	Logging      LoggingConfig             `yaml:"logging"`
@@ -36,6 +37,18 @@ type RuntimeConfig struct {
 	ProviderRoot string `yaml:"provider_root"`
 }
 
+// RepoSetupConfig controls repo-local pre-agent setup execution.
+type RepoSetupConfig struct {
+	Enabled        *bool  `yaml:"enabled"`
+	ConfigPath     string `yaml:"config_path"`
+	DefaultTimeout string `yaml:"default_timeout"`
+	MaxTimeout     string `yaml:"max_timeout"`
+}
+
+func (r RepoSetupConfig) IsEnabled() bool {
+	return r.Enabled == nil || *r.Enabled
+}
+
 type ServerConfig struct {
 	Listen                   string   `yaml:"listen"`
 	SANs                     []string `yaml:"san"`
@@ -45,10 +58,19 @@ type ServerConfig struct {
 
 // StepCAYAMLConfig holds Step CA settings from the YAML config file.
 type StepCAYAMLConfig struct {
-	URL                     string `yaml:"url"`
-	Root                    string `yaml:"root"`
-	Provisioner             string `yaml:"provisioner"`
-	ProvisionerPasswordFile string `yaml:"provisioner_password_file"`
+	URL                     string               `yaml:"url"`
+	Root                    string               `yaml:"root"`
+	Provisioner             string               `yaml:"provisioner"`
+	ProvisionerPasswordFile string               `yaml:"provisioner_password_file"`
+	Clients                 []StepCAClientConfig `yaml:"clients"`
+}
+
+// StepCAClientConfig declares a Step CA-authenticated client whose bridge JWT
+// public key should be loaded at startup when available.
+type StepCAClientConfig struct {
+	Issuer   string `yaml:"issuer"`
+	KeyPath  string `yaml:"key_path"`
+	Required bool   `yaml:"required"`
 }
 
 type TLSConfig struct {
@@ -156,6 +178,24 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// HasExplicitServerListen reports whether a YAML config file explicitly sets
+// server.listen, before defaults are applied by Load.
+func HasExplicitServerListen(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read config: %w", err)
+	}
+	var raw struct {
+		Server struct {
+			Listen *string `yaml:"listen"`
+		} `yaml:"server"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return false, fmt.Errorf("parse config: %w", err)
+	}
+	return raw.Server.Listen != nil && strings.TrimSpace(*raw.Server.Listen) != "", nil
+}
+
 // ParseDuration is a helper that parses a duration string with a fallback.
 func ParseDuration(s string, fallback time.Duration) time.Duration {
 	if s == "" {
@@ -226,6 +266,15 @@ func applyDefaults(cfg *Config) {
 	if cfg.Logging.Format == "" {
 		cfg.Logging.Format = "json"
 	}
+	if cfg.RepoSetup.ConfigPath == "" {
+		cfg.RepoSetup.ConfigPath = ".ai-agent-bridge.yaml"
+	}
+	if cfg.RepoSetup.DefaultTimeout == "" {
+		cfg.RepoSetup.DefaultTimeout = "2m"
+	}
+	if cfg.RepoSetup.MaxTimeout == "" {
+		cfg.RepoSetup.MaxTimeout = "15m"
+	}
 }
 
 func validate(cfg *Config) error {
@@ -256,6 +305,32 @@ func validate(cfg *Config) error {
 	if cfg.Runtime.ProviderRoot != "" && !filepath.IsAbs(cfg.Runtime.ProviderRoot) {
 		return fmt.Errorf("config: runtime.provider_root must be an absolute path, got %q", cfg.Runtime.ProviderRoot)
 	}
+	if cfg.RepoSetup.ConfigPath == "" {
+		return fmt.Errorf("config: repo_setup.config_path is required")
+	}
+	if filepath.IsAbs(cfg.RepoSetup.ConfigPath) {
+		return fmt.Errorf("config: repo_setup.config_path must be relative, got %q", cfg.RepoSetup.ConfigPath)
+	}
+	if hasParentPathComponent(cfg.RepoSetup.ConfigPath) {
+		return fmt.Errorf("config: repo_setup.config_path must not contain '..', got %q", cfg.RepoSetup.ConfigPath)
+	}
+	defaultSetupTimeout, err := time.ParseDuration(cfg.RepoSetup.DefaultTimeout)
+	if err != nil {
+		return fmt.Errorf("config: repo_setup.default_timeout: %w", err)
+	}
+	if defaultSetupTimeout <= 0 {
+		return fmt.Errorf("config: repo_setup.default_timeout must be > 0")
+	}
+	maxSetupTimeout, err := time.ParseDuration(cfg.RepoSetup.MaxTimeout)
+	if err != nil {
+		return fmt.Errorf("config: repo_setup.max_timeout: %w", err)
+	}
+	if maxSetupTimeout <= 0 {
+		return fmt.Errorf("config: repo_setup.max_timeout must be > 0")
+	}
+	if defaultSetupTimeout > maxSetupTimeout {
+		return fmt.Errorf("config: repo_setup.default_timeout must not exceed repo_setup.max_timeout")
+	}
 	if _, err := time.ParseDuration(cfg.Auth.JWTMaxTTL); err != nil {
 		return fmt.Errorf("config: auth.jwt_max_ttl: %w", err)
 	}
@@ -275,6 +350,11 @@ func validate(cfg *Config) error {
 		}
 		if d < 0 {
 			return fmt.Errorf("config: server.cert_renewal_check_interval must not be negative")
+		}
+	}
+	for i, client := range cfg.StepCA.Clients {
+		if !safeIssuerName(client.Issuer) {
+			return fmt.Errorf("config: step_ca.clients[%d].issuer must start with an alphanumeric character and contain only alphanumerics, hyphens, underscores, or dots", i)
 		}
 	}
 	if _, err := time.ParseDuration(cfg.Sessions.IdleTimeout); err != nil {
@@ -326,4 +406,33 @@ func validate(cfg *Config) error {
 		}
 	}
 	return nil
+}
+
+func hasParentPathComponent(path string) bool {
+	for _, part := range strings.Split(filepath.Clean(path), string(os.PathSeparator)) {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func safeIssuerName(issuer string) bool {
+	if issuer == "" {
+		return false
+	}
+	for i, r := range issuer {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return false
+		}
+		if i == 0 && (r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }

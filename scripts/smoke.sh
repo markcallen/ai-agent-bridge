@@ -19,4 +19,5 @@ go run ./e2e/cmd/smoke \
   -cacert certs/ca-bundle.crt \
   -cert certs/dev-client.crt \
   -key certs/dev-client.key \
-  -jwt-key certs/jwt-signing.key
+  -jwt-key certs/jwt-signing.key \
+  -issuer smoke-step-client
