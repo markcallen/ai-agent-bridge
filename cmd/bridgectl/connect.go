@@ -267,7 +267,7 @@ func dialClient(target string, mode localserver.ServerMode, stateDir string, tim
 				CABundlePath: mat.CABundlePath,
 				CertPath:     mat.LocalClientCert,
 				KeyPath:      mat.LocalClientKey,
-				ServerName:   "server",
+				ServerName:   localserver.DiscoverServerName(stateDir),
 			}),
 			bridgeclient.WithJWT(bridgeclient.JWTConfig{
 				PrivateKeyPath: mat.JWTSigningKey,

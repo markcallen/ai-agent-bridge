@@ -62,6 +62,12 @@ func AddrPath() string {
 	return filepath.Join(StateDir(), "server.addr")
 }
 
+// ServerNamePath returns the path to the file recording the TLS name local
+// clients should use when probing or dialing a secure server.
+func ServerNamePath() string {
+	return filepath.Join(StateDir(), "server.name")
+}
+
 // Server wraps all the components needed for a local bridge server.
 type Server struct {
 	grpcServer *grpc.Server
@@ -113,6 +119,42 @@ func DiscoverMode(stateDir string) ServerMode {
 		return ModeSecure
 	}
 	return ModeLocal
+}
+
+// DiscoverServerName reads the TLS server name recorded by secure startup.
+// Older state directories do not have this file, so auto-PKI's historical
+// "server" name remains the fallback.
+func DiscoverServerName(stateDir string) string {
+	if stateDir == "" {
+		stateDir = StateDir()
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "server.name"))
+	if err != nil {
+		return "server"
+	}
+	name := strings.TrimSpace(string(data))
+	if name == "" {
+		return "server"
+	}
+	return name
+}
+
+func serverNameFromCert(certPath string) string {
+	cert, err := pki.LoadCert(certPath)
+	if err != nil {
+		return "server"
+	}
+	for _, name := range cert.DNSNames {
+		if strings.TrimSpace(name) != "" {
+			return name
+		}
+	}
+	for _, ip := range cert.IPAddresses {
+		if ip != nil {
+			return ip.String()
+		}
+	}
+	return "server"
 }
 
 // Config controls local server behaviour.
@@ -481,6 +523,7 @@ func Start(cfg Config) (*Server, error) {
 	var stepCAConfig *StepCAConfig
 	var pkiMat *PKIMaterial
 	explicitCerts := false
+	tlsServerName := "server"
 
 	if cfg.ListenAddr != "" {
 		// Secure mode: TCP + mTLS + JWT.
@@ -508,11 +551,18 @@ func Start(cfg Config) (*Server, error) {
 				}
 				return nil, fmt.Errorf("CABundlePath requires TLSCertPath and TLSKeyPath to also be set")
 			}
-			mat = &PKIMaterial{
-				CABundlePath:   cfg.CABundlePath,
-				ServerCertPath: cfg.TLSCertPath,
-				ServerKeyPath:  cfg.TLSKeyPath,
+			var pkiErr error
+			mat, pkiErr = EnsureLocalManagementPKI(stateDir, cfg.CABundlePath, logger)
+			if pkiErr != nil {
+				sup.Close()
+				if store != nil {
+					_ = store.Close()
+				}
+				return nil, fmt.Errorf("ensure local management PKI: %w", pkiErr)
 			}
+			mat.ServerCertPath = cfg.TLSCertPath
+			mat.ServerKeyPath = cfg.TLSKeyPath
+			tlsServerName = serverNameFromCert(cfg.TLSCertPath)
 		} else {
 			// Auto-generate PKI material if not present, or delegate to Step CA.
 			serverSANs = BuildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
@@ -603,6 +653,14 @@ func Start(cfg Config) (*Server, error) {
 		_ = ln.Close()
 		sup.Close()
 		return nil, fmt.Errorf("write mode file: %w", err)
+	}
+	if mode == ModeSecure {
+		nameFile := filepath.Join(stateDir, "server.name")
+		if err := os.WriteFile(nameFile, []byte(tlsServerName), 0o644); err != nil {
+			_ = ln.Close()
+			sup.Close()
+			return nil, fmt.Errorf("write server name file: %w", err)
+		}
 	}
 
 	logger.Info("server starting", "mode", mode, "addr", listenAddr, "pid", os.Getpid())
@@ -822,6 +880,7 @@ func (s *Server) Stop() {
 	_ = os.Remove(filepath.Join(s.stateDir, "server.pid"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.addr"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.mode"))
+	_ = os.Remove(filepath.Join(s.stateDir, "server.name"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.sock"))
 	_ = os.Remove(filepath.Join(s.stateDir, "server.lock"))
 }
@@ -1035,7 +1094,7 @@ func probeHealth(target string, mode ServerMode, stateDir string) bool {
 			CABundlePath: mat.CABundlePath,
 			CertPath:     mat.LocalClientCert,
 			KeyPath:      mat.LocalClientKey,
-			ServerName:   "server",
+			ServerName:   DiscoverServerName(stateDir),
 		})
 		if err != nil {
 			return false

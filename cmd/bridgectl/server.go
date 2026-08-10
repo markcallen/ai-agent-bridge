@@ -162,7 +162,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 			}
 
 			mode := "local (unix socket, no auth)"
-			if listenAddr != "" {
+			if localserver.DiscoverMode(localserver.StateDir()) == localserver.ModeSecure {
 				mode = fmt.Sprintf("secure (mTLS+JWT on %s)", srv.Addr())
 			}
 			fmt.Fprintf(os.Stderr, "ai-agent-bridge server listening — %s (pid %d)\n", mode, os.Getpid())
