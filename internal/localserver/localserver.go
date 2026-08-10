@@ -758,7 +758,7 @@ func localDialAddr(addr string) string {
 	switch host {
 	case "0.0.0.0", "":
 		return net.JoinHostPort("127.0.0.1", port)
-	case "::", "[::]":
+	case "::":
 		return net.JoinHostPort("::1", port)
 	default:
 		return addr
