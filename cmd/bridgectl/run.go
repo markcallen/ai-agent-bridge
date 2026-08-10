@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -18,6 +19,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 	"github.com/markcallen/ai-agent-bridge/internal/localserver"
@@ -111,7 +114,7 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 		InitialCols: cols,
 		InitialRows: rows,
 	}); err != nil {
-		return fmt.Errorf("start session: %w", err)
+		return formatStartSessionError(err)
 	}
 
 	// Put terminal in raw mode.
@@ -295,7 +298,7 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 		InitialCols: 80,
 		InitialRows: 24,
 	}); err != nil {
-		return fmt.Errorf("start session: %w", err)
+		return formatStartSessionError(err)
 	}
 
 	stream, err := client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
@@ -362,6 +365,50 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 		return fmt.Errorf("session ended: %w", err)
 	}
 	return nil
+}
+
+// formatStartSessionError reformats gRPC errors from StartSession into
+// user-friendly multi-line output. Repo setup failures in particular get
+// structured with the exit code and indented script output.
+func formatStartSessionError(err error) error {
+	s, ok := status.FromError(err)
+	if !ok {
+		return fmt.Errorf("start session: %w", err)
+	}
+	if s.Code() != codes.FailedPrecondition {
+		return fmt.Errorf("start session: %s", s.Message())
+	}
+	msg := strings.TrimPrefix(s.Message(), "start session: ")
+	const marker = "repo setup failed: "
+	idx := strings.Index(msg, marker)
+	if idx < 0 {
+		return fmt.Errorf("start session: %s", msg)
+	}
+	detail := msg[idx+len(marker):]
+
+	var b strings.Builder
+	b.WriteString("repo setup failed\n\n")
+
+	switch {
+	case strings.HasPrefix(detail, "setup timed out"):
+		b.WriteString("  " + detail + "\n")
+	case strings.HasPrefix(detail, "command failed: "):
+		rest := detail[len("command failed: "):]
+		if outIdx := strings.Index(rest, "; output: "); outIdx >= 0 {
+			fmt.Fprintf(&b, "  %s\n\n", rest[:outIdx])
+			output := strings.TrimSpace(rest[outIdx+len("; output: "):])
+			b.WriteString("  Output:\n")
+			for _, line := range strings.Split(output, "\n") {
+				b.WriteString("    " + line + "\n")
+			}
+		} else {
+			b.WriteString("  " + rest + "\n")
+		}
+	default:
+		b.WriteString("  " + detail + "\n")
+	}
+
+	return errors.New(strings.TrimRight(b.String(), "\n"))
 }
 
 func currentTTYSize() (uint32, uint32) {

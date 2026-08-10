@@ -531,6 +531,46 @@ func TestDiscoverTargetSecureModeServerNameFromCert(t *testing.T) {
 	assert.Equal(t, ModeSecure, mode)
 }
 
+// TestServerNameFromCertSkipsWildcard verifies that serverNameFromCert skips
+// wildcard DNS SANs and returns the first concrete DNS name.
+func TestServerNameFromCertSkipsWildcard(t *testing.T) {
+	dir := t.TempDir()
+	caCertPath, caKeyPath, err := pki.InitCA("test-ca", dir)
+	require.NoError(t, err)
+	caCert, caKey, err := pki.LoadCA(caCertPath, caKeyPath)
+	require.NoError(t, err)
+
+	certPath, _, err := pki.IssueCert(
+		caCert, caKey, pki.CertTypeServer, "wildcard-test",
+		[]string{"*.example.com", "concrete.example.com", "127.0.0.1"}, dir, 0,
+	)
+	require.NoError(t, err)
+
+	name := serverNameFromCert(certPath)
+	assert.Equal(t, "concrete.example.com", name,
+		"should skip wildcard SAN and return the first concrete DNS name")
+}
+
+// TestServerNameFromCertWildcardOnlyFallsBackToIP verifies that when all DNS
+// SANs are wildcards, serverNameFromCert falls back to the first IP SAN.
+func TestServerNameFromCertWildcardOnlyFallsBackToIP(t *testing.T) {
+	dir := t.TempDir()
+	caCertPath, caKeyPath, err := pki.InitCA("test-ca", dir)
+	require.NoError(t, err)
+	caCert, caKey, err := pki.LoadCA(caCertPath, caKeyPath)
+	require.NoError(t, err)
+
+	certPath, _, err := pki.IssueCert(
+		caCert, caKey, pki.CertTypeServer, "wildcard-only",
+		[]string{"*.example.com", "10.0.0.1"}, dir, 0,
+	)
+	require.NoError(t, err)
+
+	name := serverNameFromCert(certPath)
+	assert.Equal(t, "10.0.0.1", name,
+		"should fall back to IP SAN when all DNS SANs are wildcards")
+}
+
 // TestRedactingHandlerRedactsMessage verifies that the redactingHandler wraps
 // the underlying handler and redacts sensitive values from log messages and
 // string attributes without altering non-string attributes.

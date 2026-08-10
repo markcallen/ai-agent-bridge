@@ -146,7 +146,7 @@ func serverNameFromCert(certPath string) string {
 		return "server"
 	}
 	for _, name := range cert.DNSNames {
-		if strings.TrimSpace(name) != "" {
+		if strings.TrimSpace(name) != "" && !strings.HasPrefix(name, "*.") {
 			return name
 		}
 	}
