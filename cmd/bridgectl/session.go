@@ -302,6 +302,7 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 
 	isWriter := role == bridgev1.AttachRole_ATTACH_ROLE_WRITER || takeOver
 	var detached atomic.Bool
+	var sessionExit string
 
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
@@ -309,20 +310,15 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 	defer signal.Stop(sigCh)
 
 	go func() {
-		for sig := range sigCh {
-			if isSigwinch(sig) && isWriter {
-				c, r := currentTTYSize()
-				_, _ = client.ResizeSession(context.Background(), &bridgev1.ResizeSessionRequest{
-					SessionId: sessionID,
-					ClientId:  stream.ClientID(),
-					Cols:      c,
-					Rows:      r,
-				})
-				continue
-			}
-			cancel()
-			return
-		}
+		handleAttachSignals(ctx, sigCh, isWriter, func() {
+			c, r := currentTTYSize()
+			_, _ = client.ResizeSession(context.Background(), &bridgev1.ResizeSessionRequest{
+				SessionId: sessionID,
+				ClientId:  stream.ClientID(),
+				Cols:      c,
+				Rows:      r,
+			})
+		}, cancel)
 	}()
 
 	if isWriter {
@@ -386,6 +382,9 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
 			return errors.New(ev.Error)
+		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_SESSION_EXIT:
+			sessionExit = sessionExitMessage(ev)
+			return errSessionExit
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED:
 			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[ai-agent-bridge] writer claimed by %s\r\n", ev.WriterClientId)
 			return writeErr
@@ -401,6 +400,10 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 	if detached.Load() {
 		fmt.Fprintf(os.Stderr, "\r\nDetached from session %s\r\n", sessionID)
 		fmt.Fprintf(os.Stderr, "Reattach with: bridgectl session attach %s\r\n", sessionID)
+		return nil
+	}
+	if sessionExit != "" {
+		fmt.Fprintf(os.Stderr, "\r\n%s\r\n", sessionExit)
 		return nil
 	}
 	if err != nil {
