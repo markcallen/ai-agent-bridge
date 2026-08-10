@@ -469,6 +469,68 @@ func TestDiscoverTargetSecureModeWithWildcardListen(t *testing.T) {
 	assert.Equal(t, ModeSecure, mode)
 }
 
+// TestDiscoverTargetSecureModeServerNameFromCert verifies that when a server
+// cert lacks the default "server" SAN (as happens with Step CA renewal or ACME
+// provisioners), DiscoverTarget still finds the running server because
+// server.name is derived from the actual certificate SANs, not hardcoded.
+func TestDiscoverTargetSecureModeServerNameFromCert(t *testing.T) {
+	dir := t.TempDir()
+	certsDir := CertsDir(dir)
+	require.NoError(t, os.MkdirAll(certsDir, 0o700))
+
+	// Create a CA and issue a server cert with only "custom.example.com" — no "server" SAN.
+	// This simulates what happens after Step CA mTLS renewal drops bare-hostname SANs.
+	caCertPath, caKeyPath, err := pki.InitCA("test-ca", certsDir)
+	require.NoError(t, err)
+	caCert, caKey, err := pki.LoadCA(caCertPath, caKeyPath)
+	require.NoError(t, err)
+
+	// CN is "server" so the file is named server.crt (matching LoadPKIMaterial),
+	// but the SANs only contain "custom.example.com" — no "server" DNS SAN.
+	_, _, err = pki.IssueCert(
+		caCert, caKey, pki.CertTypeServer, "server",
+		[]string{"custom.example.com", "127.0.0.1"}, certsDir, 0,
+	)
+	require.NoError(t, err)
+
+	// Issue a local-client cert (used by probeHealth for mTLS).
+	_, _, err = pki.IssueCert(caCert, caKey, pki.CertTypeClient, "local-client", nil, certsDir, 0)
+	require.NoError(t, err)
+
+	// Create JWT keypair.
+	_, _, err = pki.GenerateJWTKeypair(certsDir, "jwt-signing")
+	require.NoError(t, err)
+
+	// Write a ca-bundle.crt that includes the CA cert (same as both server and client CA here).
+	caData, err := os.ReadFile(caCertPath)
+	require.NoError(t, err)
+	bundlePath := filepath.Join(certsDir, "ca-bundle.crt")
+	require.NoError(t, os.WriteFile(bundlePath, caData, 0o644))
+
+	// Mark PKI mode as auto so EnsurePKI returns early (certs already exist).
+	require.NoError(t, writePKIMode(certsDir, pkiModeAuto))
+
+	// Start the server. The auto-PKI path should derive tlsServerName from the cert.
+	srv, err := Start(Config{
+		StateDir:   dir,
+		ListenAddr: "127.0.0.1:0",
+	})
+	if err != nil {
+		t.Fatalf("secure mode start failed: %v", err)
+	}
+	t.Cleanup(func() { srv.Stop() })
+
+	// server.name must reflect the actual cert SAN, not the default "server".
+	actualName := DiscoverServerName(dir)
+	assert.Equal(t, "custom.example.com", actualName,
+		"server.name should be derived from the cert SAN, not the default 'server'")
+
+	// DiscoverTarget must find the running server despite the non-default SAN.
+	target, mode := DiscoverTarget(dir)
+	assert.NotEmpty(t, target, "DiscoverTarget should find the running secure server")
+	assert.Equal(t, ModeSecure, mode)
+}
+
 // TestRedactingHandlerRedactsMessage verifies that the redactingHandler wraps
 // the underlying handler and redacts sensitive values from log messages and
 // string attributes without altering non-string attributes.
