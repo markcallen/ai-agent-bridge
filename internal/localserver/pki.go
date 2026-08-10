@@ -189,15 +189,36 @@ func EnsureLocalManagementPKI(stateDir, externalCABundle string, logger *slog.Lo
 		logger.Info("generated JWT signing keypair", "pub", pubPath)
 	}
 
-	if err := copyFile(externalCABundle, mat.CABundlePath); err != nil {
-		return nil, fmt.Errorf("copy external CA bundle: %w", err)
-	}
-	if err := pki.AppendBundle(mat.CABundlePath, mat.CACertPath); err != nil {
-		return nil, fmt.Errorf("append local management CA to bundle: %w", err)
+	if err := writeLocalManagementBundle(externalCABundle, mat.CABundlePath, mat.CACertPath); err != nil {
+		return nil, err
 	}
 	_ = writePKIMode(certsDir, pkiModeTLS)
 
 	return mat, nil
+}
+
+func writeLocalManagementBundle(externalCABundle, outPath, localCACertPath string) error {
+	bundle, err := os.ReadFile(externalCABundle)
+	if err != nil {
+		return fmt.Errorf("read external CA bundle: %w", err)
+	}
+	localCA, err := os.ReadFile(localCACertPath)
+	if err != nil {
+		return fmt.Errorf("read local management CA: %w", err)
+	}
+	if !strings.HasSuffix(string(bundle), "\n") {
+		bundle = append(bundle, '\n')
+	}
+	if !strings.Contains(string(bundle), strings.TrimSpace(string(localCA))) {
+		bundle = append(bundle, localCA...)
+		if !strings.HasSuffix(string(bundle), "\n") {
+			bundle = append(bundle, '\n')
+		}
+	}
+	if err := os.WriteFile(outPath, bundle, 0o644); err != nil {
+		return fmt.Errorf("write local management CA bundle: %w", err)
+	}
+	return nil
 }
 
 func filesExist(paths ...string) bool {
