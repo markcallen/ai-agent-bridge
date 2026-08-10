@@ -136,6 +136,12 @@ The bridge runs as the login user inside an interactive or graphical session. Th
 
 **Remote access model**: when `--listen` is set, the server binds to the specified TCP address and generates PKI material in `~/.ai-agent-bridge/certs/` on first start. SDK clients authenticate with mTLS + JWT. Human operators authenticate using OIDC via `bridgectl server issue-client --oidc` (see Security Architecture). The server must be reachable via WireGuard or Tailscale; it must not be exposed to the public internet.
 
+Remote operator CLI acceptance criteria:
+- `bridgectl session` remote subcommands allow operators to override the TLS server name when a bridge server certificate is issued for a DNS name that differs from the dial address.
+- Remote credential discovery prefers the current host's client certificate before falling back to other client certificates in the cert directory.
+- `bridgectl server start` auto-loads the first available per-user config from `~/.ai-agent-bridge/bridge.yaml` or `$XDG_CONFIG_HOME/bridgectl/config.yaml` when `--config` is omitted, so local and remote operator commands target the same configured daemon.
+- `bridgectl client renew` handles Step CA deployments where the HTTPS serving certificate chain differs from the Step CA root used for bridge certificate issuance, while rejecting expired client certificates before attempting renewal.
+
 **Session persistence**: with `--db-path`, the server writes session metadata and PTY output chunks to a BoltDB file. On restart, `LoadHistory()` rehydrates sessions so SDK clients can reconnect and replay events they missed.
 
 #### Human Interjection
