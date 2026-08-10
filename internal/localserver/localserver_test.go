@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/internal/redact"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"github.com/stretchr/testify/assert"
@@ -376,6 +377,49 @@ func TestIsServerRunningSecureMode(t *testing.T) {
 		t.Error("IsServerRunning returned false for a running secure server")
 	}
 
+	target, mode := DiscoverTarget(dir)
+	assert.NotEmpty(t, target)
+	assert.Equal(t, ModeSecure, mode)
+}
+
+func TestIsServerRunningSecureModeWithExplicitTLSCreatesLocalManagementPKI(t *testing.T) {
+	dir := t.TempDir()
+	tlsDir := filepath.Join(dir, "external-tls")
+	caCertPath, caKeyPath, err := pki.InitCA("external", tlsDir)
+	require.NoError(t, err)
+	caCert, caKey, err := pki.LoadCA(caCertPath, caKeyPath)
+	require.NoError(t, err)
+	serverCertPath, serverKeyPath, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "bridge-host", []string{"bridge-host", "127.0.0.1"}, tlsDir, 0)
+	require.NoError(t, err)
+
+	srv, err := Start(Config{
+		StateDir:     dir,
+		ListenAddr:   "127.0.0.1:0",
+		CABundlePath: caCertPath,
+		TLSCertPath:  serverCertPath,
+		TLSKeyPath:   serverKeyPath,
+	})
+	if err != nil {
+		t.Skipf("secure mode start failed: %v", err)
+	}
+	t.Cleanup(func() { srv.Stop() })
+
+	mat := LoadPKIMaterial(dir)
+	for _, path := range []string{
+		mat.CABundlePath,
+		mat.LocalClientCert,
+		mat.LocalClientKey,
+		mat.JWTSigningKey,
+		mat.JWTSigningPub,
+	} {
+		_, err := os.Stat(path)
+		require.NoError(t, err, "file should exist: %s", path)
+	}
+
+	assert.Equal(t, "bridge-host", DiscoverServerName(dir))
+	if !IsServerRunning(dir) {
+		t.Fatal("IsServerRunning returned false for explicit-TLS secure server")
+	}
 	target, mode := DiscoverTarget(dir)
 	assert.NotEmpty(t, target)
 	assert.Equal(t, ModeSecure, mode)

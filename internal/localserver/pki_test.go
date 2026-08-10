@@ -135,6 +135,40 @@ func TestEnsurePKI_Idempotent(t *testing.T) {
 	assert.Equal(t, ca1, ca2, "CA cert should not be regenerated on second call")
 }
 
+func TestEnsureLocalManagementPKIHandlesStateDirCABundle(t *testing.T) {
+	stateDir := t.TempDir()
+	certsDir := CertsDir(stateDir)
+	require.NoError(t, os.MkdirAll(certsDir, 0o700))
+
+	externalDir := filepath.Join(stateDir, "external")
+	externalCAPath, _, err := pki.InitCA("external", externalDir)
+	require.NoError(t, err)
+	externalCA, err := os.ReadFile(externalCAPath)
+	require.NoError(t, err)
+
+	bundlePath := filepath.Join(certsDir, "ca-bundle.crt")
+	require.NoError(t, os.WriteFile(bundlePath, externalCA, 0o644))
+
+	mat, err := EnsureLocalManagementPKI(stateDir, bundlePath, testLogger())
+	require.NoError(t, err)
+	require.Equal(t, bundlePath, mat.CABundlePath)
+
+	firstBundle, err := os.ReadFile(bundlePath)
+	require.NoError(t, err)
+	require.Contains(t, string(firstBundle), strings.TrimSpace(string(externalCA)))
+	localCA, err := os.ReadFile(mat.CACertPath)
+	require.NoError(t, err)
+	localCAPEM := strings.TrimSpace(string(localCA))
+	require.Equal(t, 1, strings.Count(string(firstBundle), localCAPEM))
+
+	_, err = EnsureLocalManagementPKI(stateDir, bundlePath, testLogger())
+	require.NoError(t, err)
+	secondBundle, err := os.ReadFile(bundlePath)
+	require.NoError(t, err)
+	require.Contains(t, string(secondBundle), strings.TrimSpace(string(externalCA)))
+	require.Equal(t, 1, strings.Count(string(secondBundle), localCAPEM))
+}
+
 func TestIssueClientCert(t *testing.T) {
 	stateDir := t.TempDir()
 	logger := testLogger()

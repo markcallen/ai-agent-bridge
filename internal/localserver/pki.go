@@ -20,6 +20,7 @@ var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 const (
 	pkiModeAuto   = "auto"
 	pkiModeStepCA = "step-ca"
+	pkiModeTLS    = "tls"
 	pkiModeFile   = ".pki-mode"
 )
 
@@ -143,6 +144,93 @@ func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger, stepCA
 		return ensurePKIStepCA(stateDir, serverSANs, logger, stepCA, mat, certsDir, certValidity)
 	}
 	return ensurePKIAutoGen(stateDir, serverSANs, logger, mat, certsDir, certValidity)
+}
+
+// EnsureLocalManagementPKI creates the local-only client credentials needed by
+// same-machine bridgectl commands when the server uses externally managed TLS
+// certificates. The returned CA bundle is a state-directory copy of the
+// external server CA bundle plus the generated local management CA.
+func EnsureLocalManagementPKI(stateDir, externalCABundle string, logger *slog.Logger) (*PKIMaterial, error) {
+	mat := LoadPKIMaterial(stateDir)
+	certsDir := CertsDir(stateDir)
+	if err := os.MkdirAll(certsDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create certs dir: %w", err)
+	}
+
+	if !filesExist(mat.CACertPath, mat.CAKeyPath, mat.LocalClientCert, mat.LocalClientKey) {
+		logger.Info("generating local management PKI material", "dir", certsDir)
+		localCACert, localCAKey, err := pki.InitCA("ai-agent-bridge-local", certsDir)
+		if err != nil {
+			return nil, fmt.Errorf("init local management CA: %w", err)
+		}
+		mat.CACertPath = localCACert
+		mat.CAKeyPath = localCAKey
+
+		localCA, localKey, err := pki.LoadCA(localCACert, localCAKey)
+		if err != nil {
+			return nil, fmt.Errorf("load local management CA: %w", err)
+		}
+		clientCert, clientKey, err := pki.IssueCert(localCA, localKey, pki.CertTypeClient, "local-client", nil, certsDir, 0)
+		if err != nil {
+			return nil, fmt.Errorf("issue local-client cert: %w", err)
+		}
+		mat.LocalClientCert = clientCert
+		mat.LocalClientKey = clientKey
+		logger.Info("generated local-client cert", "cert", clientCert)
+	}
+
+	if !filesExist(mat.JWTSigningKey, mat.JWTSigningPub) {
+		pubPath, privPath, err := pki.GenerateJWTKeypair(certsDir, "jwt-signing")
+		if err != nil {
+			return nil, fmt.Errorf("generate JWT keypair: %w", err)
+		}
+		mat.JWTSigningPub = pubPath
+		mat.JWTSigningKey = privPath
+		logger.Info("generated JWT signing keypair", "pub", pubPath)
+	}
+
+	if err := writeLocalManagementBundle(externalCABundle, mat.CABundlePath, mat.CACertPath); err != nil {
+		return nil, err
+	}
+	_ = writePKIMode(certsDir, pkiModeTLS)
+
+	return mat, nil
+}
+
+func writeLocalManagementBundle(externalCABundle, outPath, localCACertPath string) error {
+	bundle, err := os.ReadFile(externalCABundle)
+	if err != nil {
+		return fmt.Errorf("read external CA bundle: %w", err)
+	}
+	localCA, err := os.ReadFile(localCACertPath)
+	if err != nil {
+		return fmt.Errorf("read local management CA: %w", err)
+	}
+	if !strings.HasSuffix(string(bundle), "\n") {
+		bundle = append(bundle, '\n')
+	}
+	if !strings.Contains(string(bundle), strings.TrimSpace(string(localCA))) {
+		bundle = append(bundle, localCA...)
+		if !strings.HasSuffix(string(bundle), "\n") {
+			bundle = append(bundle, '\n')
+		}
+	}
+	if err := os.WriteFile(outPath, bundle, 0o644); err != nil {
+		return fmt.Errorf("write local management CA bundle: %w", err)
+	}
+	return nil
+}
+
+func filesExist(paths ...string) bool {
+	for _, path := range paths {
+		if path == "" {
+			return false
+		}
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // ensurePKIAutoGen generates a self-signed CA and all derived material.
