@@ -572,7 +572,7 @@ func Start(cfg Config) (*Server, error) {
 			sup.Close()
 			return nil, fmt.Errorf("listen tcp %s: %w", cfg.ListenAddr, err)
 		}
-		listenAddr = ln.Addr().String()
+		listenAddr = localDialAddr(ln.Addr().String())
 	} else {
 		ln, listenAddr, err = listen(stateDir)
 		if err != nil {
@@ -748,6 +748,21 @@ func BuildServerSANs(listenAddr string, extra []string) []string {
 		add(s)
 	}
 	return sans
+}
+
+func localDialAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	switch host {
+	case "0.0.0.0", "":
+		return net.JoinHostPort("127.0.0.1", port)
+	case "::", "[::]":
+		return net.JoinHostPort("::1", port)
+	default:
+		return addr
+	}
 }
 
 // Addr returns the listener address (unix socket path or TCP address).

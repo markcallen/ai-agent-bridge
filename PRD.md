@@ -140,6 +140,7 @@ Remote operator CLI acceptance criteria:
 - `bridgectl session` remote subcommands allow operators to override the TLS server name when a bridge server certificate is issued for a DNS name that differs from the dial address.
 - Remote credential discovery prefers the current host's client certificate before falling back to other client certificates in the cert directory.
 - `bridgectl server start` auto-loads the first available per-user config from `~/.ai-agent-bridge/bridge.yaml` or `$XDG_CONFIG_HOME/bridgectl/config.yaml` when `--config` is omitted, so local and remote operator commands target the same configured daemon.
+- Same-machine `bridgectl` commands discover an already-running secure TCP server from local state without requiring remote host, certificate, key, or JWT flags; wildcard bind addresses are recorded as loopback dial targets for local clients.
 - `bridgectl client renew` handles Step CA deployments where the HTTPS serving certificate chain differs from the Step CA root used for bridge certificate issuance, while rejecting expired client certificates before attempting renewal.
 
 **Session persistence**: with `--db-path`, the server writes session metadata and PTY output chunks to a BoltDB file. On restart, `LoadHistory()` rehydrates sessions so SDK clients can reconnect and replay events they missed.
