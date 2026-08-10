@@ -548,9 +548,10 @@ func TestRenewServerCertStepCA_UsesMTLS(t *testing.T) {
 	}
 }
 
-// TestRenewServerCertStepCA_MTLSError verifies that an mTLS renewal failure
-// is propagated correctly.
-func TestRenewServerCertStepCA_MTLSError(t *testing.T) {
+// TestRenewServerCertStepCA_MTLSError_FallsBackToJWK verifies that when mTLS
+// renewal fails (e.g. expired cert), the renewal falls back to the JWK
+// provisioner and succeeds.
+func TestRenewServerCertStepCA_MTLSError_FallsBackToJWK(t *testing.T) {
 	stateDir := t.TempDir()
 	certsDir := filepath.Join(stateDir, "certs")
 	require.NoError(t, os.MkdirAll(certsDir, 0o700))
@@ -565,9 +566,117 @@ func TestRenewServerCertStepCA_MTLSError(t *testing.T) {
 
 	oldMTLS := renewCertMTLSFn
 	renewCertMTLSFn = func(_ *StepCAConfig, _, _ string, _ *slog.Logger) error {
-		return fmt.Errorf("connection refused")
+		return fmt.Errorf("missing client certificate")
 	}
 	t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+	jwkCalled := false
+	oldJWK := requestCertJWKFn
+	requestCertJWKFn = func(_ *StepCAConfig, _ []string, certPath, _ string, _ *slog.Logger) error {
+		jwkCalled = true
+		require.NoError(t, os.WriteFile(certPath, []byte("JWK-RENEWED-CERT"), 0o644))
+		return nil
+	}
+	t.Cleanup(func() { requestCertJWKFn = oldJWK })
+
+	mat := &PKIMaterial{
+		ServerCertPath: serverCert,
+		ServerKeyPath:  serverKey,
+	}
+	stepCfg := &StepCAConfig{
+		URL:      "https://ca.example.com",
+		RootPath: rootPath,
+	}
+
+	err := renewServerCertStepCA(mat, []string{"server"}, testLogger(), stepCfg)
+	require.NoError(t, err)
+	assert.True(t, jwkCalled, "JWK fallback should have been called")
+
+	data, err := os.ReadFile(serverCert)
+	require.NoError(t, err)
+	assert.Equal(t, "JWK-RENEWED-CERT", string(data))
+}
+
+// TestRenewServerCertStepCA_MTLSError_FallsBackToACME verifies that when mTLS
+// renewal fails and the provisioner is ACME, the renewal falls back to ACME.
+func TestRenewServerCertStepCA_MTLSError_FallsBackToACME(t *testing.T) {
+	stateDir := t.TempDir()
+	certsDir := filepath.Join(stateDir, "certs")
+	require.NoError(t, os.MkdirAll(certsDir, 0o700))
+
+	rootPath := filepath.Join(t.TempDir(), "root.crt")
+	require.NoError(t, os.WriteFile(rootPath, []byte("FAKE-ROOT"), 0o644))
+
+	serverCert := filepath.Join(certsDir, "server.crt")
+	serverKey := filepath.Join(certsDir, "server.key")
+	require.NoError(t, os.WriteFile(serverCert, []byte("OLD-CERT"), 0o644))
+	require.NoError(t, os.WriteFile(serverKey, []byte("OLD-KEY"), 0o600))
+
+	oldMTLS := renewCertMTLSFn
+	renewCertMTLSFn = func(_ *StepCAConfig, _, _ string, _ *slog.Logger) error {
+		return fmt.Errorf("missing client certificate")
+	}
+	t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+	acmeCalled := false
+	oldACME := requestCertACMEFn
+	requestCertACMEFn = func(_ *StepCAConfig, sans []string, certPath, _ string, _ *slog.Logger) error {
+		acmeCalled = true
+		// Verify ACME SAN filtering was applied.
+		assert.NotContains(t, sans, "localhost")
+		assert.NotContains(t, sans, "127.0.0.1")
+		assert.Contains(t, sans, "server")
+		require.NoError(t, os.WriteFile(certPath, []byte("ACME-RENEWED-CERT"), 0o644))
+		return nil
+	}
+	t.Cleanup(func() { requestCertACMEFn = oldACME })
+
+	mat := &PKIMaterial{
+		ServerCertPath: serverCert,
+		ServerKeyPath:  serverKey,
+	}
+	stepCfg := &StepCAConfig{
+		URL:         "https://ca.example.com",
+		RootPath:    rootPath,
+		Provisioner: "acme",
+	}
+
+	err := renewServerCertStepCA(mat, []string{"server", "localhost", "127.0.0.1"}, testLogger(), stepCfg)
+	require.NoError(t, err)
+	assert.True(t, acmeCalled, "ACME fallback should have been called")
+
+	data, err := os.ReadFile(serverCert)
+	require.NoError(t, err)
+	assert.Equal(t, "ACME-RENEWED-CERT", string(data))
+}
+
+// TestRenewServerCertStepCA_MTLSAndFallbackBothFail verifies that when both
+// mTLS renewal and the provisioner fallback fail, the error from the fallback
+// is returned.
+func TestRenewServerCertStepCA_MTLSAndFallbackBothFail(t *testing.T) {
+	stateDir := t.TempDir()
+	certsDir := filepath.Join(stateDir, "certs")
+	require.NoError(t, os.MkdirAll(certsDir, 0o700))
+
+	rootPath := filepath.Join(t.TempDir(), "root.crt")
+	require.NoError(t, os.WriteFile(rootPath, []byte("FAKE-ROOT"), 0o644))
+
+	serverCert := filepath.Join(certsDir, "server.crt")
+	serverKey := filepath.Join(certsDir, "server.key")
+	require.NoError(t, os.WriteFile(serverCert, []byte("OLD-CERT"), 0o644))
+	require.NoError(t, os.WriteFile(serverKey, []byte("OLD-KEY"), 0o600))
+
+	oldMTLS := renewCertMTLSFn
+	renewCertMTLSFn = func(_ *StepCAConfig, _, _ string, _ *slog.Logger) error {
+		return fmt.Errorf("missing client certificate")
+	}
+	t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+	oldJWK := requestCertJWKFn
+	requestCertJWKFn = func(_ *StepCAConfig, _ []string, _, _ string, _ *slog.Logger) error {
+		return fmt.Errorf("provisioner password incorrect")
+	}
+	t.Cleanup(func() { requestCertJWKFn = oldJWK })
 
 	mat := &PKIMaterial{
 		ServerCertPath: serverCert,
@@ -580,8 +689,8 @@ func TestRenewServerCertStepCA_MTLSError(t *testing.T) {
 
 	err := renewServerCertStepCA(mat, []string{"server"}, testLogger(), stepCfg)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "mTLS")
-	assert.Contains(t, err.Error(), "connection refused")
+	assert.Contains(t, err.Error(), "JWK fallback")
+	assert.Contains(t, err.Error(), "provisioner password incorrect")
 }
 
 // TestEnsurePKI_ACMEKeepsServerSAN verifies that the ACME provisioner path does
