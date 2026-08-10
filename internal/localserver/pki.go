@@ -320,29 +320,7 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	// Dispatch to the native certificate request function based on provisioner type.
 	switch strings.ToLower(stepCA.Provisioner) {
 	case "acme":
-		// ACME / public CAs reject bare hostnames like "localhost" and raw
-		// IPs like "127.0.0.1" during HTTP-01 or DNS-01 challenges. Strip
-		// those but keep "server": all bridgectl clients hard-code
-		// ServerName "server" for TLS verification, so the server cert must
-		// include it regardless of provisioner type.
-		var sans []string
-		for _, s := range serverSANs {
-			switch s {
-			case "localhost", "127.0.0.1":
-				continue
-			default:
-				sans = append(sans, s)
-			}
-		}
-		if len(sans) == 0 {
-			hostname, _ := os.Hostname()
-			if hostname != "" {
-				sans = []string{hostname}
-			} else {
-				sans = []string{"bridge"}
-			}
-		}
-		if err := requestCertACMEFn(stepCA, sans, serverCert, serverKey, logger); err != nil {
+		if err := requestCertACMEFn(stepCA, acmeSANs(serverSANs), serverCert, serverKey, logger); err != nil {
 			return nil, fmt.Errorf("obtain server cert from Step CA (ACME): %w", err)
 		}
 	default:
@@ -401,6 +379,32 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	return mat, nil
 }
 
+// acmeSANs filters serverSANs for ACME compatibility. ACME / public CAs
+// reject bare hostnames like "localhost" and raw IPs like "127.0.0.1" during
+// HTTP-01 or DNS-01 challenges. This strips those but keeps "server": all
+// bridgectl clients hard-code ServerName "server" for TLS verification, so
+// the server cert must include it regardless of provisioner type.
+func acmeSANs(serverSANs []string) []string {
+	var sans []string
+	for _, s := range serverSANs {
+		switch s {
+		case "localhost", "127.0.0.1":
+			continue
+		default:
+			sans = append(sans, s)
+		}
+	}
+	if len(sans) == 0 {
+		hostname, _ := os.Hostname()
+		if hostname != "" {
+			sans = []string{hostname}
+		} else {
+			sans = []string{"bridge"}
+		}
+	}
+	return sans
+}
+
 // RenewServerCert re-issues the server certificate in-place. For auto-PKI it
 // re-signs using the existing CA; for Step CA it requests a new cert from the
 // CA server. The new cert is written to the same file paths so the
@@ -431,11 +435,25 @@ func renewServerCertAutoGen(mat *PKIMaterial, serverSANs []string, logger *slog.
 }
 
 func renewServerCertStepCA(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig) error {
-	// Use mTLS-based renewal: present the existing cert/key to the Step CA
+	// Try mTLS-based renewal first: present the existing cert/key to the Step CA
 	// /renew endpoint. This works for any provisioner type (JWK, ACME, etc.)
 	// and does not require the provisioner password or an HTTP-01 challenge.
 	if err := renewCertMTLSFn(stepCA, mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
-		return fmt.Errorf("renew server cert (mTLS): %w", err)
+		// mTLS renewal fails when the existing certificate has expired past
+		// Step CA's acceptance window. Fall back to a full provisioner-based
+		// certificate request (JWK or ACME) which authenticates independently.
+		logger.Warn("mTLS renewal failed, falling back to provisioner-based certificate request", "error", err)
+
+		switch strings.ToLower(stepCA.Provisioner) {
+		case "acme":
+			if err := requestCertACMEFn(stepCA, acmeSANs(serverSANs), mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
+				return fmt.Errorf("renew server cert (ACME fallback after mTLS failure): %w", err)
+			}
+		default:
+			if err := requestCertJWKFn(stepCA, serverSANs, mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
+				return fmt.Errorf("renew server cert (JWK fallback after mTLS failure): %w", err)
+			}
+		}
 	}
 
 	logger.Info("renewed server certificate (Step CA)", "cert", mat.ServerCertPath)

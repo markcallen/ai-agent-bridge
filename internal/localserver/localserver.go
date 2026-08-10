@@ -467,7 +467,7 @@ func Start(cfg Config) (*Server, error) {
 	// Register providers explicitly declared in the config file.
 	for id, pc := range configProviderDefs {
 		timeout := config.ParseDuration(pc.StartupTimeout, 60*time.Second)
-		p := provider.NewStdioProvider(provider.StdioConfig{
+		sc := provider.StdioConfig{
 			ProviderID:     id,
 			Binary:         pc.Binary,
 			DefaultArgs:    pc.Args,
@@ -479,7 +479,13 @@ func Start(cfg Config) (*Server, error) {
 			StreamJSON:     pc.StreamJSON,
 			StripANSI:      pc.StripANSI,
 			ProviderRoot:   providerRoot,
-		})
+		}
+		var p bridge.Provider
+		if id == "codex" {
+			p = provider.NewCodexProvider(sc)
+		} else {
+			p = provider.NewStdioProvider(sc)
+		}
 		if err := registry.Register(p); err != nil {
 			logger.Warn("skip config provider", "provider", id, "error", err)
 			continue
@@ -504,7 +510,7 @@ func Start(cfg Config) (*Server, error) {
 		if _, err := registry.Get(pd.ID); err == nil {
 			continue // already registered from config
 		}
-		p := provider.NewStdioProvider(provider.StdioConfig{
+		sc := provider.StdioConfig{
 			ProviderID:     pd.ID,
 			Binary:         pd.Binary,
 			DefaultArgs:    pd.Args,
@@ -514,7 +520,13 @@ func Start(cfg Config) (*Server, error) {
 			PromptPattern:  pd.PromptPattern,
 			RequiredEnv:    pd.RequiredEnv,
 			StreamJSON:     pd.StreamJSON,
-		})
+		}
+		var p bridge.Provider
+		if pd.ID == "codex" {
+			p = provider.NewCodexProvider(sc)
+		} else {
+			p = provider.NewStdioProvider(sc)
+		}
 		if err := registry.Register(p); err != nil {
 			logger.Warn("skip provider", "provider", pd.ID, "error", err)
 			continue

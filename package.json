@@ -20,9 +20,9 @@
     "typescript-eslint": "^8.62.0"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.162",
-    "@google/gemini-cli": "0.45.0",
-    "@openai/codex": "0.136.0",
-    "opencode-ai": "1.16.2"
+    "@anthropic-ai/claude-code": "2.1.220",
+    "@google/gemini-cli": "0.53.0",
+    "@openai/codex": "0.146.0",
+    "opencode-ai": "1.18.10"
   }
 }
