@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
 
 func TestDiscoverClientCertForHostnamePrefersLocalHostname(t *testing.T) {
@@ -76,6 +79,58 @@ func TestDiscoverClientCertForHostnameFallsBackToSingleCandidate(t *testing.T) {
 	}
 	if key != filepath.Join(certsDir, "fallback.key") {
 		t.Fatalf("key = %q, want fallback key", key)
+	}
+}
+
+func TestRemoteAuthHintSuggestsLocalJWTKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	touchFile(t, filepath.Join(dir, "jwt-signing.key"))
+
+	hint := remoteAuthHint(bridgeclient.ErrUnauthorized, "example.ts.net", "")
+	if !strings.Contains(hint, "bridgectl session list --remote example.ts.net --jwt-key") {
+		t.Fatalf("hint = %q, want retry command", hint)
+	}
+	if !strings.Contains(hint, filepath.Join(dir, "jwt-signing.key")) {
+		t.Fatalf("hint = %q, want absolute local key path", hint)
+	}
+}
+
+func TestRemoteAuthHintSkippedWhenNotApplicable(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	touchFile(t, filepath.Join(dir, "jwt-signing.key"))
+
+	tests := []struct {
+		name   string
+		err    error
+		remote string
+		jwtKey string
+	}{
+		{
+			name:   "local command",
+			err:    bridgeclient.ErrUnauthorized,
+			remote: "",
+		},
+		{
+			name:   "explicit jwt key",
+			err:    bridgeclient.ErrUnauthorized,
+			remote: "example.ts.net",
+			jwtKey: "/tmp/jwt-signing.key",
+		},
+		{
+			name:   "different error",
+			err:    errors.New("connection refused"),
+			remote: "example.ts.net",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if hint := remoteAuthHint(tt.err, tt.remote, tt.jwtKey); hint != "" {
+				t.Fatalf("remoteAuthHint() = %q, want empty", hint)
+			}
+		})
 	}
 }
 
