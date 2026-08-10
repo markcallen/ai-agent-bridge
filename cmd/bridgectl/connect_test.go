@@ -91,6 +91,9 @@ func TestRemoteAuthHintSuggestsLocalJWTKey(t *testing.T) {
 	if !strings.Contains(hint, "bridgectl session list --remote example.ts.net --jwt-key") {
 		t.Fatalf("hint = %q, want retry command", hint)
 	}
+	if !strings.Contains(hint, "Remote commands use JWT keys from ~/.ai-agent-bridge/certs/ or ~/.ai-agent-bridge unless --jwt-key is set") {
+		t.Fatalf("hint = %q, want credential discovery explanation", hint)
+	}
 	if !strings.Contains(hint, filepath.Join(dir, "jwt-signing.key")) {
 		t.Fatalf("hint = %q, want absolute local key path", hint)
 	}

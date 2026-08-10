@@ -123,7 +123,7 @@ func remoteAuthHint(err error, remote, jwtKey string) string {
 	}
 
 	return fmt.Sprintf(
-		"Found a JWT signing key in the current directory. Remote commands auto-discover JWT keys from ~/.ai-agent-bridge/certs/ before the current directory, so this command may be using an older key. Retry with:\n  bridgectl session list --remote %s --jwt-key %s",
+		"Found a JWT signing key in the current directory. Remote commands use JWT keys from ~/.ai-agent-bridge/certs/ or ~/.ai-agent-bridge unless --jwt-key is set. If this local key is intended, retry with:\n  bridgectl session list --remote %s --jwt-key %s",
 		remote,
 		localJWTKey,
 	)
