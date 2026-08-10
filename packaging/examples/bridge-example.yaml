@@ -65,6 +65,12 @@ persistence:
 runtime:
   provider_root: "/opt/ai-agent-bridge"
 
+repo_setup:
+  enabled: true
+  config_path: ".ai-agent-bridge.yaml"
+  default_timeout: "2m"
+  max_timeout: "15m"
+
 # Enable one or more providers below. Credentials are read from the environment
 # (injected via /etc/ai-agent-bridge/agents.env at service startup).
 #

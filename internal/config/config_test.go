@@ -250,6 +250,143 @@ sessions:
 	}
 }
 
+func TestLoadRepoSetupDefaultsAndValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{
+			name: "defaults",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+providers:
+  echo:
+    binary: "cat"
+`,
+		},
+		{
+			name: "explicit valid config",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+repo_setup:
+  enabled: false
+  config_path: ".ai-agent-bridge.yaml"
+  default_timeout: "1m"
+  max_timeout: "10m"
+providers:
+  echo:
+    binary: "cat"
+`,
+		},
+		{
+			name: "absolute path rejected",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+repo_setup:
+  config_path: "/tmp/setup.yaml"
+providers:
+  echo:
+    binary: "cat"
+`,
+			wantErr: "config_path must be relative",
+		},
+		{
+			name: "parent component rejected",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+repo_setup:
+  config_path: "../setup.yaml"
+providers:
+  echo:
+    binary: "cat"
+`,
+			wantErr: "must not contain '..'",
+		},
+		{
+			name: "default exceeds max",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+repo_setup:
+  default_timeout: "20m"
+  max_timeout: "10m"
+providers:
+  echo:
+    binary: "cat"
+`,
+			wantErr: "default_timeout must not exceed",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "bridge.yaml")
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			cfg, err := Load(path)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load error=%v want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.RepoSetup.ConfigPath != ".ai-agent-bridge.yaml" {
+				t.Fatalf("ConfigPath=%q want .ai-agent-bridge.yaml", cfg.RepoSetup.ConfigPath)
+			}
+			if cfg.RepoSetup.DefaultTimeout == "" || cfg.RepoSetup.MaxTimeout == "" {
+				t.Fatalf("repo setup timeouts not defaulted: %+v", cfg.RepoSetup)
+			}
+		})
+	}
+}
+
+func TestRepoSetupIsEnabled(t *testing.T) {
+	if !(RepoSetupConfig{}).IsEnabled() {
+		t.Fatal("nil enabled should default true")
+	}
+	disabled := false
+	if (RepoSetupConfig{Enabled: &disabled}).IsEnabled() {
+		t.Fatal("explicit false should disable repo setup")
+	}
+}
+
+func TestHasExplicitServerListen(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "missing", body: "providers: {}\n", want: false},
+		{name: "empty", body: "server:\n  listen: \"\"\n", want: false},
+		{name: "set", body: "server:\n  listen: \"127.0.0.1:9445\"\n", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "bridge.yaml")
+			if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			got, err := HasExplicitServerListen(path)
+			if err != nil {
+				t.Fatalf("HasExplicitServerListen: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("HasExplicitServerListen=%v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadStepCAClients(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bridge.yaml")

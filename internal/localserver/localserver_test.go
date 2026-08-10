@@ -114,6 +114,22 @@ sessions:
 	assert.NotNil(t, srv)
 }
 
+func TestStartWithConfigFileWithoutListenStaysLocal(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "bridge.yaml")
+	require.NoError(t, os.WriteFile(cfgFile, []byte(`
+providers:
+  echo:
+    binary: "cat"
+`), 0o644))
+
+	srv := startLocalServer(t, Config{
+		StateDir:   dir,
+		ConfigPath: cfgFile,
+	})
+	assert.Equal(t, "unix", srv.listener.Addr().Network())
+}
+
 // TestStartConfigFileExplicitOverride verifies that an explicit flag value
 // takes precedence over the same value in the config file.
 func TestStartConfigFileExplicitOverride(t *testing.T) {

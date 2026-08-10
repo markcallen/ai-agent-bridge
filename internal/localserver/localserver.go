@@ -27,6 +27,7 @@ import (
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/internal/provider"
 	"github.com/markcallen/ai-agent-bridge/internal/redact"
+	"github.com/markcallen/ai-agent-bridge/internal/reposetup"
 	"github.com/markcallen/ai-agent-bridge/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -197,6 +198,13 @@ type Config struct {
 	// values from log output.
 	RedactPatterns []string
 
+	// RepoSetup controls repo-local pre-agent setup files. Nil means enabled
+	// with built-in defaults.
+	RepoSetupEnabled        *bool
+	RepoSetupConfigPath     string
+	RepoSetupDefaultTimeout time.Duration
+	RepoSetupMaxTimeout     time.Duration
+
 	// RateLimits overrides the default rate-limit config. Zero values keep
 	// the built-in defaults.
 	RateLimits server.RateLimitConfig
@@ -262,7 +270,17 @@ func Start(cfg Config) (*Server, error) {
 	// its zero value.
 	var configProviderDefs map[string]config.ProviderConfig
 	var providerRoot string
+	repoSetupEnabled := true
+	repoSetupConfigPath := ".ai-agent-bridge.yaml"
+	repoSetupDefaultTimeout := 2 * time.Minute
+	repoSetupMaxTimeout := 15 * time.Minute
+	configHasServerListen := false
 	if cfg.ConfigPath != "" {
+		var err error
+		configHasServerListen, err = config.HasExplicitServerListen(cfg.ConfigPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect config %q: %w", cfg.ConfigPath, err)
+		}
 		fileCfg, err := config.Load(cfg.ConfigPath)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("load config %q: %w", cfg.ConfigPath, err)
@@ -272,6 +290,10 @@ func Start(cfg Config) (*Server, error) {
 				configProviderDefs = fileCfg.Providers
 			}
 			providerRoot = fileCfg.Runtime.ProviderRoot
+			repoSetupEnabled = fileCfg.RepoSetup.IsEnabled()
+			repoSetupConfigPath = fileCfg.RepoSetup.ConfigPath
+			repoSetupDefaultTimeout = config.ParseDuration(fileCfg.RepoSetup.DefaultTimeout, repoSetupDefaultTimeout)
+			repoSetupMaxTimeout = config.ParseDuration(fileCfg.RepoSetup.MaxTimeout, repoSetupMaxTimeout)
 			if cfg.DBPath == "" && fileCfg.Persistence.DBPath != "" {
 				cfg.DBPath = fileCfg.Persistence.DBPath
 			}
@@ -305,7 +327,7 @@ func Start(cfg Config) (*Server, error) {
 			if cfg.AllowedPaths == nil && len(fileCfg.AllowedPaths) > 0 {
 				cfg.AllowedPaths = fileCfg.AllowedPaths
 			}
-			if cfg.ListenAddr == "" && fileCfg.Server.Listen != "" {
+			if cfg.ListenAddr == "" && configHasServerListen && fileCfg.Server.Listen != "" {
 				cfg.ListenAddr = fileCfg.Server.Listen
 			}
 			if cfg.CABundlePath == "" && fileCfg.TLS.CABundle != "" {
@@ -378,6 +400,18 @@ func Start(cfg Config) (*Server, error) {
 	if cfg.IdleTimeout <= 0 {
 		cfg.IdleTimeout = 30 * time.Minute
 	}
+	if cfg.RepoSetupEnabled != nil {
+		repoSetupEnabled = *cfg.RepoSetupEnabled
+	}
+	if cfg.RepoSetupConfigPath != "" {
+		repoSetupConfigPath = cfg.RepoSetupConfigPath
+	}
+	if cfg.RepoSetupDefaultTimeout > 0 {
+		repoSetupDefaultTimeout = cfg.RepoSetupDefaultTimeout
+	}
+	if cfg.RepoSetupMaxTimeout > 0 {
+		repoSetupMaxTimeout = cfg.RepoSetupMaxTimeout
+	}
 
 	stateDir := cfg.StateDir
 	if stateDir == "" {
@@ -396,12 +430,14 @@ func Start(cfg Config) (*Server, error) {
 		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	}
 
+	var logRedactor *redact.Redactor
 	// Apply log redaction when patterns are configured.
 	if len(cfg.RedactPatterns) > 0 {
 		redactor, err := redact.New(cfg.RedactPatterns)
 		if err != nil {
 			return nil, fmt.Errorf("compile redact patterns: %w", err)
 		}
+		logRedactor = redactor
 		logger = slog.New(&redactingHandler{inner: logger.Handler(), redactor: redactor})
 	}
 
@@ -412,6 +448,21 @@ func Start(cfg Config) (*Server, error) {
 	// Build provider registry. Config-file providers take precedence; the
 	// auto-detect path fills in any providers not explicitly configured.
 	registry := bridge.NewRegistry()
+	var redactFunc func(string) string
+	if logRedactor != nil {
+		redactFunc = logRedactor.Redact
+	}
+	repoSetupRunner := reposetup.NewCoordinator(reposetup.Options{
+		Enabled:        repoSetupEnabled,
+		ConfigPath:     repoSetupConfigPath,
+		DefaultTimeout: repoSetupDefaultTimeout,
+		MaxTimeout:     repoSetupMaxTimeout,
+		Logger:         logger,
+		Redact:         redactFunc,
+		BaseEnv: func() []string {
+			return provider.FilterEnv(os.Environ())
+		},
+	})
 
 	// Register providers explicitly declared in the config file.
 	for id, pc := range configProviderDefs {
@@ -493,6 +544,7 @@ func Start(cfg Config) (*Server, error) {
 
 	// Supervisor options: persistence store when DBPath is set.
 	var supOpts []bridge.SupervisorOption
+	supOpts = append(supOpts, bridge.WithRepoSetupRunner(repoSetupRunner))
 	var store bridge.SessionStore
 	if cfg.DBPath != "" {
 		var err error

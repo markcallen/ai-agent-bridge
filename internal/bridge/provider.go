@@ -20,12 +20,25 @@ type Provider interface {
 	Version(ctx context.Context) (string, error)
 }
 
+// EnvHealthProvider is implemented by providers that can evaluate runtime
+// availability against a prepared session environment.
+type EnvHealthProvider interface {
+	HealthWithEnv(ctx context.Context, env []string) error
+}
+
+// RepoSetupRunner prepares a repository-specific environment before provider
+// selection and launch.
+type RepoSetupRunner interface {
+	Prepare(ctx context.Context, repoPath string, baseEnv []string) ([]string, error)
+}
+
 // SessionConfig holds configuration for starting a new provider session.
 type SessionConfig struct {
 	ProjectID string
 	SessionID string
 	RepoPath  string
 	Options   map[string]string
+	Env       []string
 	// Fallbacks is an ordered list of provider IDs to try if the primary
 	// provider (Options["provider"]) is unavailable. At most 2 entries are
 	// meaningful; extras are silently ignored.

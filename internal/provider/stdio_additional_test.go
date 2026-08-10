@@ -52,6 +52,11 @@ func TestHealthRequiredEnv(t *testing.T) {
 	if err := p.Health(context.Background()); err != nil {
 		t.Fatalf("Health with env set: %v", err)
 	}
+
+	_ = os.Unsetenv(key)
+	if err := p.HealthWithEnv(context.Background(), []string{"PATH=" + os.Getenv("PATH"), key + "=from-setup"}); err != nil {
+		t.Fatalf("HealthWithEnv with setup env: %v", err)
+	}
 }
 
 func TestValidateStartupRequiredEnv(t *testing.T) {
