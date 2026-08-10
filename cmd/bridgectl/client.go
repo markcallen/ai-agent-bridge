@@ -5,7 +5,9 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -28,12 +30,13 @@ func newClientCmd() *cobra.Command {
 
 func newClientEnrollCmd() *cobra.Command {
 	var (
-		target   string
-		caBundle string
-		cert     string
-		key      string
-		name     string
-		outDir   string
+		target     string
+		caBundle   string
+		cert       string
+		key        string
+		name       string
+		outDir     string
+		serverName string
 	)
 
 	cmd := &cobra.Command{
@@ -72,6 +75,9 @@ with a cert signed by the server's trusted CA can enroll.`,
 			if outDir == "" {
 				outDir = "."
 			}
+			if serverName == "" {
+				serverName = defaultServerNameFromTarget(target)
+			}
 
 			// Generate JWT keypair locally.
 			pubPath, privPath, err := pki.GenerateJWTKeypair(outDir, "jwt-signing")
@@ -93,15 +99,13 @@ with a cert signed by the server's trusted CA can enroll.`,
 			}
 
 			// Connect with mTLS only (no JWT — we're enrolling to get JWT auth).
-			// ServerName "server" matches the SAN that buildServerSANs always
-			// adds to every bridge server cert regardless of PKI mode.
 			client, err := bridgeclient.New(
 				bridgeclient.WithTarget(target),
 				bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
 					CABundlePath: caBundle,
 					CertPath:     cert,
 					KeyPath:      key,
-					ServerName:   "server",
+					ServerName:   serverName,
 				}),
 				bridgeclient.WithTimeout(10*time.Second),
 			)
@@ -130,7 +134,7 @@ with a cert signed by the server's trusted CA can enroll.`,
 			fmt.Printf("      CABundlePath: %q,\n", caBundle)
 			fmt.Printf("      CertPath:     %q,\n", cert)
 			fmt.Printf("      KeyPath:      %q,\n", key)
-			fmt.Printf("      ServerName:   \"server\",\n")
+			fmt.Printf("      ServerName:   %q,\n", serverName)
 			fmt.Printf("    }),\n")
 			fmt.Printf("    bridgeclient.WithJWT(bridgeclient.JWTConfig{\n")
 			fmt.Printf("      PrivateKeyPath: %q,\n", privPath)
@@ -153,8 +157,23 @@ with a cert signed by the server's trusted CA can enroll.`,
 	_ = cmd.MarkFlagRequired("key")
 	cmd.Flags().StringVar(&name, "name", "", "issuer name for JWT tokens (defaults to cert CN)")
 	cmd.Flags().StringVar(&outDir, "out", "", "output directory for JWT keypair (defaults to current directory)")
+	cmd.Flags().StringVar(&serverName, "server-name", "", "TLS server name to verify (defaults to host from --target)")
 
 	return cmd
+}
+
+func defaultServerNameFromTarget(target string) string {
+	if strings.HasPrefix(target, "unix://") {
+		return "server"
+	}
+	host, _, err := net.SplitHostPort(target)
+	if err == nil {
+		return strings.Trim(host, "[]")
+	}
+	if strings.Contains(target, ":") && !strings.Contains(target, "://") {
+		return "server"
+	}
+	return target
 }
 
 // extractCN reads a PEM certificate file and returns its Common Name.

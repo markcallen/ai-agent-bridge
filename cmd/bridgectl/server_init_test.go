@@ -138,3 +138,41 @@ func TestVerifyStepCARoot_missingFile(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestDefaultServerConfigPathUsesStateDirFirst(t *testing.T) {
+	stateDir := t.TempDir()
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	stateConfig := filepath.Join(stateDir, "bridge.yaml")
+	writeFile(t, stateConfig)
+	xdgConfig := filepath.Join(configHome, "bridgectl", "config.yaml")
+	writeFile(t, xdgConfig)
+
+	if got := defaultServerConfigPath(stateDir); got != stateConfig {
+		t.Fatalf("defaultServerConfigPath() = %q, want %q", got, stateConfig)
+	}
+}
+
+func TestDefaultServerConfigPathFallsBackToXDGConfig(t *testing.T) {
+	stateDir := t.TempDir()
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+
+	xdgConfig := filepath.Join(configHome, "bridgectl", "config.yaml")
+	writeFile(t, xdgConfig)
+
+	if got := defaultServerConfigPath(stateDir); got != xdgConfig {
+		t.Fatalf("defaultServerConfigPath() = %q, want %q", got, xdgConfig)
+	}
+}
+
+func writeFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}

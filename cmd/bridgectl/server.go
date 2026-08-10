@@ -111,12 +111,9 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 				return fmt.Errorf("server already running")
 			}
 
-			// Default config path to ~/.ai-agent-bridge/bridge.yaml when not set.
+			// Default config path to the first known per-user config when not set.
 			if configPath == "" {
-				defaultCfg := filepath.Join(localserver.StateDir(), "bridge.yaml")
-				if _, err := os.Stat(defaultCfg); err == nil {
-					configPath = defaultCfg
-				}
+				configPath = defaultServerConfigPath(localserver.StateDir())
 			}
 
 			// Build logger from --log-level and --log-format.
@@ -202,6 +199,23 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 	cmd.Flags().DurationVar(&certRenewalCheckInterval, "cert-renewal-check-interval", 0, "how often to check certificate expiry (e.g. 10m, 1h); default 1 hour")
 
 	return cmd
+}
+
+func defaultServerConfigPath(stateDir string) string {
+	for _, path := range defaultServerConfigCandidates(stateDir) {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
+func defaultServerConfigCandidates(stateDir string) []string {
+	candidates := []string{filepath.Join(stateDir, "bridge.yaml")}
+	if configDir, err := os.UserConfigDir(); err == nil && configDir != "" {
+		candidates = append(candidates, filepath.Join(configDir, "bridgectl", "config.yaml"))
+	}
+	return candidates
 }
 
 func newServerStatusCmd() *cobra.Command {

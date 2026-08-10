@@ -45,7 +45,7 @@ func connectClient(stateDir string, timeout time.Duration) (*bridgeclient.Client
 //
 // Discovery rules:
 //   - CA bundle: step-ca-root.crt in certsDir
-//   - Client cert: the first non-CA *.crt in certsDir (override with --cert)
+//   - Client cert: <local-hostname>.crt or <short-hostname>.crt, then the first non-CA *.crt in certsDir (override with --cert)
 //   - JWT key: jwt-signing.key in certsDir, then stateDir (override with --jwt-key)
 //   - Issuer: CN extracted from the client cert
 func resolveRemoteCredentials(certOverride, keyOverride, jwtKeyOverride string) (*remoteCredentials, error) {
@@ -98,9 +98,30 @@ func resolveRemoteCredentials(certOverride, keyOverride, jwtKeyOverride string) 
 	return creds, nil
 }
 
-// discoverClientCert finds the first non-CA *.crt file in certsDir and
-// returns the cert path and its matching *.key path.
+// discoverClientCert prefers a certificate/key pair named after the local
+// hostname, then falls back to the first non-CA *.crt file in certsDir.
 func discoverClientCert(certsDir string) (cert, key string, err error) {
+	hostname, _ := os.Hostname()
+	return discoverClientCertForHostname(certsDir, hostname)
+}
+
+func discoverClientCertForHostname(certsDir, hostname string) (cert, key string, err error) {
+	for _, name := range hostnameCandidates(hostname) {
+		certPath := filepath.Join(certsDir, name+".crt")
+		keyPath := filepath.Join(certsDir, name+".key")
+		if _, statErr := os.Stat(certPath); statErr == nil {
+			if _, keyErr := os.Stat(keyPath); keyErr != nil {
+				return "", "", fmt.Errorf(
+					"client certificate %s was selected from local hostname %q, but matching key %s was not found\n\nSpecify the key with --key or re-issue the client certificate",
+					certPath, hostname, keyPath,
+				)
+			}
+			return certPath, keyPath, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", "", fmt.Errorf("stat client certificate %s: %w", certPath, statErr)
+		}
+	}
+
 	entries, err := os.ReadDir(certsDir)
 	if err != nil {
 		return "", "", fmt.Errorf(
@@ -150,6 +171,18 @@ func discoverClientCert(certsDir string) (cert, key string, err error) {
 	}
 }
 
+func hostnameCandidates(hostname string) []string {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return nil
+	}
+	candidates := []string{hostname}
+	if short, _, ok := strings.Cut(hostname, "."); ok && short != "" && short != hostname {
+		candidates = append(candidates, short)
+	}
+	return candidates
+}
+
 // findJWTKey returns the path to jwt-signing.key, checking certsDir then
 // stateDir. Returns empty string if not found in either location.
 func findJWTKey(certsDir, stateDir string) string {
@@ -168,10 +201,14 @@ func findJWTKey(certsDir, stateDir string) string {
 //
 // hostname may include a port (e.g. "macbook.ts.net:9445"); if no port is
 // present, defaultRemotePort is used.
-func connectRemoteClient(hostname string, timeout time.Duration, certOverride, keyOverride, jwtKeyOverride string) (*bridgeclient.Client, error) {
+func connectRemoteClient(hostname string, timeout time.Duration, certOverride, keyOverride, jwtKeyOverride, serverNameOverride string) (*bridgeclient.Client, error) {
 	target := hostname
 	if !strings.Contains(hostname, ":") {
 		target = hostname + ":" + defaultRemotePort
+	}
+	serverName := serverNameOverride
+	if serverName == "" {
+		serverName = defaultServerNameFromTarget(target)
 	}
 
 	creds, err := resolveRemoteCredentials(certOverride, keyOverride, jwtKeyOverride)
@@ -189,7 +226,7 @@ func connectRemoteClient(hostname string, timeout time.Duration, certOverride, k
 			CABundlePath: creds.caBundle,
 			CertPath:     creds.cert,
 			KeyPath:      creds.key,
-			ServerName:   "server",
+			ServerName:   serverName,
 		}),
 		bridgeclient.WithJWT(bridgeclient.JWTConfig{
 			PrivateKeyPath: creds.jwtKey,
@@ -208,9 +245,9 @@ func connectRemoteClient(hostname string, timeout time.Duration, certOverride, k
 
 // connectClientForHost returns a client for a remote hostname (when non-empty)
 // or falls back to the local server.
-func connectClientForHost(remote string, timeout time.Duration, certOverride, keyOverride, jwtKeyOverride string) (*bridgeclient.Client, error) {
+func connectClientForHost(remote string, timeout time.Duration, certOverride, keyOverride, jwtKeyOverride, serverNameOverride string) (*bridgeclient.Client, error) {
 	if remote != "" {
-		return connectRemoteClient(remote, timeout, certOverride, keyOverride, jwtKeyOverride)
+		return connectRemoteClient(remote, timeout, certOverride, keyOverride, jwtKeyOverride, serverNameOverride)
 	}
 	return connectClient("", timeout)
 }
