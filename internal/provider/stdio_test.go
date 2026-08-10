@@ -39,6 +39,26 @@ func TestBuildCommandIncludesProviderArgs(t *testing.T) {
 	}
 }
 
+func TestBuildCommandUsesPreparedEnvironment(t *testing.T) {
+	p := NewStdioProvider(StdioConfig{
+		ProviderID: "fake",
+		Binary:     "/bin/echo",
+	})
+
+	cmd, err := p.BuildCommand(context.Background(), bridge.SessionConfig{
+		ProjectID: "test",
+		SessionID: "session",
+		RepoPath:  ".",
+		Env:       []string{"FROM_SETUP=1"},
+	})
+	if err != nil {
+		t.Fatalf("BuildCommand: %v", err)
+	}
+	if len(cmd.Env) != 1 || cmd.Env[0] != "FROM_SETUP=1" {
+		t.Fatalf("Env=%v want prepared environment", cmd.Env)
+	}
+}
+
 func TestBuildCommandAbsolutizesRelativeScriptArgForNode(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {

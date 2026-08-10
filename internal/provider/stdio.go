@@ -102,7 +102,11 @@ func (p *StdioProvider) BuildCommand(ctx context.Context, cfg bridge.SessionConf
 	}
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = cfg.RepoPath
-	cmd.Env = filterEnv(os.Environ())
+	if cfg.Env != nil {
+		cmd.Env = append([]string(nil), cfg.Env...)
+	} else {
+		cmd.Env = FilterEnv(os.Environ())
+	}
 	return cmd, nil
 }
 
@@ -253,6 +257,10 @@ func (p *StdioProvider) Version(ctx context.Context) (string, error) {
 }
 
 func (p *StdioProvider) Health(ctx context.Context) error {
+	return p.HealthWithEnv(ctx, FilterEnv(os.Environ()))
+}
+
+func (p *StdioProvider) HealthWithEnv(ctx context.Context, env []string) error {
 	p.mu.RLock()
 	unavailErr := p.unavailableErr
 	p.mu.RUnlock()
@@ -271,7 +279,7 @@ func (p *StdioProvider) Health(ctx context.Context) error {
 		return fmt.Errorf("binary %q is not executable", path)
 	}
 	for _, envName := range p.cfg.RequiredEnv {
-		if strings.TrimSpace(os.Getenv(envName)) == "" {
+		if strings.TrimSpace(envValue(env, envName)) == "" {
 			return fmt.Errorf("required env var %s not set", envName)
 		}
 	}
@@ -384,9 +392,9 @@ func versionProbeEnv() []string {
 	return env
 }
 
-// filterEnv returns a filtered environment excluding sensitive variables and
+// FilterEnv returns a filtered environment excluding sensitive variables and
 // variables that interfere with subprocess behaviour.
-func filterEnv(env []string) []string {
+func FilterEnv(env []string) []string {
 	blocked := map[string]bool{
 		"AWS_SECRET_ACCESS_KEY": true,
 		"AWS_SESSION_TOKEN":     true,
@@ -410,6 +418,20 @@ func filterEnv(env []string) []string {
 		filtered = append(filtered, "COLORTERM=truecolor")
 	}
 	return filtered
+}
+
+func filterEnv(env []string) []string {
+	return FilterEnv(env)
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return strings.TrimPrefix(item, prefix)
+		}
+	}
+	return ""
 }
 
 func hasEnvKey(env []string, key string) bool {

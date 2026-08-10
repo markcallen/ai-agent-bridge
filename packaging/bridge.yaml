@@ -37,6 +37,12 @@ rate_limits:
 persistence:
   # db_path: "~/.ai-agent-bridge/sessions.db"
 
+repo_setup:
+  enabled: true
+  config_path: ".ai-agent-bridge.yaml"
+  default_timeout: "2m"
+  max_timeout: "15m"
+
 providers: {}
 
 allowed_paths:

@@ -419,6 +419,8 @@ func mapBridgeError(err error, op string) error {
 		return status.Errorf(codes.PermissionDenied, "%s: %v", op, err)
 	case errors.Is(err, bridge.ErrProviderUnavailable), errors.Is(err, bridge.ErrSessionRecoveryUnavailable):
 		return status.Errorf(codes.Unavailable, "%s: %v", op, err)
+	case errors.Is(err, bridge.ErrRepoSetupFailed):
+		return status.Errorf(codes.FailedPrecondition, "%s: %v", op, err)
 	case errors.Is(err, bridge.ErrSessionLimitReached):
 		return status.Errorf(codes.ResourceExhausted, "%s: %v", op, err)
 	default:

@@ -16,6 +16,12 @@ auth:
 feature_flags:
   provider_fallbacks: true
 
+repo_setup:
+  enabled: true
+  config_path: ".ai-agent-bridge.yaml"
+  default_timeout: "2m"
+  max_timeout: "15m"
+
 sessions:
   max_per_project: 5
   max_global: 20

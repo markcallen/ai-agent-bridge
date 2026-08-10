@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -69,6 +70,12 @@ func WithStore(store SessionStore) SupervisorOption {
 	}
 }
 
+func WithRepoSetupRunner(runner RepoSetupRunner) SupervisorOption {
+	return func(s *Supervisor) {
+		s.repoSetup = runner
+	}
+}
+
 // Supervisor manages the lifecycle of PTY-backed provider sessions.
 type Supervisor struct {
 	registry        *Registry
@@ -81,9 +88,10 @@ type Supervisor struct {
 	sessions map[string]*managedSession
 	done     chan struct{}
 
-	store   SessionStore
-	histMu  sync.RWMutex
-	history map[string]SessionInfo
+	store     SessionStore
+	repoSetup RepoSetupRunner
+	histMu    sync.RWMutex
+	history   map[string]SessionInfo
 }
 
 type managedSession struct {
@@ -340,7 +348,7 @@ func (s *Supervisor) cleanupLoop() {
 // resolveProvider tries the primary provider ID, then each fallback in order,
 // returning the first one that is registered and passes its Health check. If
 // no candidate succeeds, the last error is returned.
-func (s *Supervisor) resolveProvider(ctx context.Context, primary string, fallbacks []string) (Provider, error) {
+func (s *Supervisor) resolveProvider(ctx context.Context, primary string, fallbacks []string, env []string) (Provider, error) {
 	candidates := make([]string, 0, 1+len(fallbacks))
 	candidates = append(candidates, primary)
 	candidates = append(candidates, fallbacks...)
@@ -351,9 +359,15 @@ func (s *Supervisor) resolveProvider(ctx context.Context, primary string, fallba
 			lastErr = err
 			continue
 		}
-		if err := p.Health(ctx); err != nil {
-			lastErr = fmt.Errorf("%w: %v", ErrProviderUnavailable, err)
-			slog.Warn("provider unavailable, trying fallback", "provider", id, "error", err)
+		var healthErr error
+		if hp, ok := p.(EnvHealthProvider); ok && env != nil {
+			healthErr = hp.HealthWithEnv(ctx, env)
+		} else {
+			healthErr = p.Health(ctx)
+		}
+		if healthErr != nil {
+			lastErr = fmt.Errorf("%w: %v", ErrProviderUnavailable, healthErr)
+			slog.Warn("provider unavailable, trying fallback", "provider", id, "error", healthErr)
 			continue
 		}
 		if id != primary {
@@ -362,6 +376,11 @@ func (s *Supervisor) resolveProvider(ctx context.Context, primary string, fallba
 		return p, nil
 	}
 	return nil, lastErr
+}
+
+func trimSetupError(err error) string {
+	msg := err.Error()
+	return strings.TrimPrefix(msg, ErrRepoSetupFailed.Error()+": ")
 }
 
 func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo, error) {
@@ -399,7 +418,15 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	}
 	s.mu.Unlock()
 
-	provider, err := s.resolveProvider(ctx, cfg.Options["provider"], cfg.Fallbacks)
+	if s.repoSetup != nil {
+		env, err := s.repoSetup.Prepare(ctx, cfg.RepoPath, cfg.Env)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrRepoSetupFailed, trimSetupError(err))
+		}
+		cfg.Env = env
+	}
+
+	provider, err := s.resolveProvider(ctx, cfg.Options["provider"], cfg.Fallbacks, cfg.Env)
 	if err != nil {
 		return nil, err
 	}
