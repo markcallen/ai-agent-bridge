@@ -84,10 +84,11 @@ type Supervisor struct {
 	idleTimeout     time.Duration
 	cleanupInterval time.Duration
 
-	mu        sync.RWMutex
-	sessions  map[string]*managedSession
-	done      chan struct{}
-	closeOnce sync.Once
+	mu           sync.RWMutex
+	sessions     map[string]*managedSession
+	done         chan struct{}
+	closeOnce    sync.Once
+	shuttingDown bool
 
 	store     SessionStore
 	repoSetup RepoSetupRunner
@@ -399,6 +400,10 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 	}
 
 	s.mu.Lock()
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return nil, ErrSupervisorShuttingDown
+	}
 	if _, exists := s.sessions[cfg.SessionID]; exists {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("%w: %q", ErrSessionAlreadyExists, cfg.SessionID)
@@ -513,6 +518,14 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		ms.stdin = stdinPipe
 		ms.info.ProcessID = cmd.Process.Pid
 		s.mu.Lock()
+		if s.shuttingDown {
+			s.mu.Unlock()
+			cancel()
+			_ = stdinPipe.Close()
+			_ = stdoutPipe.Close()
+			_ = cmd.Wait()
+			return nil, ErrSupervisorShuttingDown
+		}
 		if _, exists := s.sessions[cfg.SessionID]; exists {
 			s.mu.Unlock()
 			cancel()
@@ -535,6 +548,13 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 		ms.ptmx = ptmx
 		ms.info.ProcessID = cmd.Process.Pid
 		s.mu.Lock()
+		if s.shuttingDown {
+			s.mu.Unlock()
+			cancel()
+			_ = ptmx.Close()
+			_ = cmd.Wait()
+			return nil, ErrSupervisorShuttingDown
+		}
 		if _, exists := s.sessions[cfg.SessionID]; exists {
 			s.mu.Unlock()
 			cancel()
@@ -1147,47 +1167,54 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 		close(s.done)
 	})
 
-	s.mu.RLock()
-	ids := make([]string, 0, len(s.sessions))
-	for id := range s.sessions {
-		ids = append(ids, id)
-	}
-	s.mu.RUnlock()
+	s.mu.Lock()
+	s.shuttingDown = true
+	s.mu.Unlock()
 
-	for _, id := range ids {
-		if err := s.Stop(id, false); err != nil && !errors.Is(err, ErrSessionNotFound) {
-			slog.Warn("graceful session stop failed", "session_id", id, "error", err)
-		}
-	}
-
-	if err := s.waitForSessions(ctx, ids); err != nil {
-		for _, id := range ids {
-			_ = s.Stop(id, true)
-		}
+	s.stopSessions(s.nonTerminalSessionIDs(), false)
+	if err := s.waitForAllSessions(ctx); err != nil {
+		s.stopSessions(s.nonTerminalSessionIDs(), true)
+		s.waitBestEffort(2 * time.Second)
 		return err
 	}
 	return nil
 }
 
-func (s *Supervisor) waitForSessions(ctx context.Context, ids []string) error {
+func (s *Supervisor) nonTerminalSessionIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.sessions))
+	for id, ms := range s.sessions {
+		info := ms.snapshotInfo()
+		if info.State == SessionStateStopped || info.State == SessionStateFailed {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (s *Supervisor) stopSessions(ids []string, force bool) {
+	for _, id := range ids {
+		if err := s.Stop(id, force); err != nil && !errors.Is(err, ErrSessionNotFound) {
+			slog.Warn("session stop failed", "session_id", id, "force", force, "error", err)
+		}
+	}
+}
+
+func (s *Supervisor) waitBestEffort(timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := s.waitForAllSessions(ctx); err != nil {
+		slog.Warn("timed out waiting for forced sessions to persist terminal state", "error", err)
+	}
+}
+
+func (s *Supervisor) waitForAllSessions(ctx context.Context) error {
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		allStopped := true
-		for _, id := range ids {
-			info, err := s.Get(id)
-			if errors.Is(err, ErrSessionNotFound) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if info.State != SessionStateStopped && info.State != SessionStateFailed {
-				allStopped = false
-				break
-			}
-		}
-		if allStopped {
+		if len(s.nonTerminalSessionIDs()) == 0 {
 			return nil
 		}
 		select {
@@ -1202,6 +1229,10 @@ func (s *Supervisor) Close() {
 	s.closeOnce.Do(func() {
 		close(s.done)
 	})
+	s.mu.Lock()
+	s.shuttingDown = true
+	s.mu.Unlock()
+
 	s.mu.RLock()
 	ids := make([]string, 0, len(s.sessions))
 	for id := range s.sessions {

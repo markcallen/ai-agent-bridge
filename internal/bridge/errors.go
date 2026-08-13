@@ -13,6 +13,7 @@ var (
 	ErrClientMismatch             = errors.New("client does not own attached session")
 	ErrProviderUnavailable        = errors.New("provider unavailable")
 	ErrRepoSetupFailed            = errors.New("repo setup failed")
+	ErrSupervisorShuttingDown     = errors.New("supervisor shutting down")
 	ErrSessionLimitReached        = errors.New("session limit reached")
 	ErrInputTooLarge              = errors.New("input too large")
 	// ErrWriterConflict is returned by ClaimWriter when another client already

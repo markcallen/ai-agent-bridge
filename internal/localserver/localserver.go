@@ -99,7 +99,7 @@ const (
 	// ModeSecure uses TCP + mTLS + JWT for remote access.
 	ModeSecure ServerMode = "secure"
 
-	gracefulServerShutdownTimeout = 30 * time.Second
+	sessionDrainShutdownTimeout = 30 * time.Second
 )
 
 // ModePath returns the path to the server mode file.
@@ -942,7 +942,7 @@ func (s *Server) Stop() {
 		close(done)
 	}()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), gracefulServerShutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), sessionDrainShutdownTimeout)
 	if err := s.supervisor.Shutdown(shutdownCtx); err != nil {
 		s.logger.Warn("graceful session shutdown timed out, forced remaining sessions", "error", err)
 	}
