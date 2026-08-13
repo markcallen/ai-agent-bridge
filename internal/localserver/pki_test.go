@@ -584,8 +584,9 @@ func TestRenewServerCertStepCA_MTLSError_FallsBackToJWK(t *testing.T) {
 		ServerKeyPath:  serverKey,
 	}
 	stepCfg := &StepCAConfig{
-		URL:      "https://ca.example.com",
-		RootPath: rootPath,
+		URL:                     "https://ca.example.com",
+		RootPath:                rootPath,
+		ProvisionerPasswordFile: filepath.Join(t.TempDir(), "password"),
 	}
 
 	err := renewServerCertStepCA(mat, []string{"server"}, testLogger(), stepCfg)
@@ -595,6 +596,46 @@ func TestRenewServerCertStepCA_MTLSError_FallsBackToJWK(t *testing.T) {
 	data, err := os.ReadFile(serverCert)
 	require.NoError(t, err)
 	assert.Equal(t, "JWK-RENEWED-CERT", string(data))
+}
+
+func TestRenewServerCertStepCA_MTLSErrorWithoutPasswordFileFailsFast(t *testing.T) {
+	stateDir := t.TempDir()
+	certsDir := filepath.Join(stateDir, "certs")
+	require.NoError(t, os.MkdirAll(certsDir, 0o700))
+
+	rootPath := filepath.Join(t.TempDir(), "root.crt")
+	require.NoError(t, os.WriteFile(rootPath, []byte("FAKE-ROOT"), 0o644))
+
+	serverCert := filepath.Join(certsDir, "server.crt")
+	serverKey := filepath.Join(certsDir, "server.key")
+	require.NoError(t, os.WriteFile(serverCert, []byte("OLD-CERT"), 0o644))
+	require.NoError(t, os.WriteFile(serverKey, []byte("OLD-KEY"), 0o600))
+
+	oldMTLS := renewCertMTLSFn
+	renewCertMTLSFn = func(_ *StepCAConfig, _, _ string, _ *slog.Logger) error {
+		return fmt.Errorf("certificate expired")
+	}
+	t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+	oldJWK := requestCertJWKFn
+	requestCertJWKFn = func(_ *StepCAConfig, _ []string, _, _ string, _ *slog.Logger) error {
+		t.Fatal("requestCertJWKFn should not be called without a password file")
+		return nil
+	}
+	t.Cleanup(func() { requestCertJWKFn = oldJWK })
+
+	mat := &PKIMaterial{
+		ServerCertPath: serverCert,
+		ServerKeyPath:  serverKey,
+	}
+	stepCfg := &StepCAConfig{
+		URL:      "https://ca.example.com",
+		RootPath: rootPath,
+	}
+
+	err := renewServerCertStepCA(mat, []string{"server"}, testLogger(), stepCfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provisioner_password_file")
 }
 
 // TestRenewServerCertStepCA_MTLSError_FallsBackToACME verifies that when mTLS
@@ -683,8 +724,9 @@ func TestRenewServerCertStepCA_MTLSAndFallbackBothFail(t *testing.T) {
 		ServerKeyPath:  serverKey,
 	}
 	stepCfg := &StepCAConfig{
-		URL:      "https://ca.example.com",
-		RootPath: rootPath,
+		URL:                     "https://ca.example.com",
+		RootPath:                rootPath,
+		ProvisionerPasswordFile: filepath.Join(t.TempDir(), "password"),
 	}
 
 	err := renewServerCertStepCA(mat, []string{"server"}, testLogger(), stepCfg)

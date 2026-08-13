@@ -1088,7 +1088,7 @@ func (s *Server) checkAndRenew() {
 		)
 	}
 
-	if err := RenewServerCert(s.stateDir, s.serverSANs, s.logger, s.stepCA, s.certValidity); err != nil {
+	if err := RenewServerCertMaterial(s.pkiMat, s.serverSANs, s.logger, s.stepCA, s.certValidity); err != nil {
 		s.logger.Error("cert renewal: failed to renew server certificate", "error", err)
 		return
 	}

@@ -518,6 +518,45 @@ func TestStartExplicitTLSExpiredWithoutStepCAFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "expired")
 }
 
+func TestCheckAndRenewUsesConfiguredPKIMaterial(t *testing.T) {
+	dir := t.TempDir()
+	tlsDir := filepath.Join(dir, "external-tls")
+	caCertPath, caKeyPath, err := pki.InitCA("external", tlsDir)
+	require.NoError(t, err)
+	caCert, caKey, err := pki.LoadCA(caCertPath, caKeyPath)
+	require.NoError(t, err)
+	serverCertPath, serverKeyPath, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "bridge-host", []string{"bridge-host"}, tlsDir, time.Nanosecond)
+	require.NoError(t, err)
+	time.Sleep(10 * time.Millisecond)
+
+	oldMTLS := renewCertMTLSFn
+	renewCertMTLSFn = func(_ *StepCAConfig, certPath, keyPath string, _ *slog.Logger) error {
+		require.Equal(t, serverCertPath, certPath)
+		require.Equal(t, serverKeyPath, keyPath)
+		require.NoError(t, os.WriteFile(certPath, []byte("EXPLICIT-CERT-RENEWED"), 0o644))
+		return nil
+	}
+	t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+	srv := &Server{
+		logger:     testLogger(),
+		stateDir:   dir,
+		pkiMat:     &PKIMaterial{ServerCertPath: serverCertPath, ServerKeyPath: serverKeyPath},
+		serverSANs: []string{"bridge-host"},
+		stepCA:     &StepCAConfig{URL: "https://ca.example.internal"},
+	}
+
+	srv.checkAndRenew()
+
+	data, err := os.ReadFile(serverCertPath)
+	require.NoError(t, err)
+	assert.Equal(t, "EXPLICIT-CERT-RENEWED", string(data))
+
+	stateMat := LoadPKIMaterial(dir)
+	assert.NoFileExists(t, stateMat.ServerCertPath)
+	assert.NoFileExists(t, stateMat.ServerKeyPath)
+}
+
 func TestDiscoverTargetSecureModeWithWildcardListen(t *testing.T) {
 	dir := t.TempDir()
 	srv, err := Start(Config{

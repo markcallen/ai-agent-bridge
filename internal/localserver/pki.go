@@ -456,6 +456,9 @@ func renewServerCertStepCA(mat *PKIMaterial, serverSANs []string, logger *slog.L
 				return fmt.Errorf("renew server cert (ACME fallback after mTLS failure): %w", err)
 			}
 		default:
+			if stepCA.ProvisionerPasswordFile == "" {
+				return fmt.Errorf("renew server cert (JWK fallback after mTLS failure): step_ca.provisioner_password_file is required for non-interactive renewal")
+			}
 			if err := requestCertJWKFn(stepCA, serverSANs, mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
 				return fmt.Errorf("renew server cert (JWK fallback after mTLS failure): %w", err)
 			}

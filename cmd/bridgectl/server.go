@@ -505,10 +505,11 @@ immediate renewal (e.g. when the cert has already expired).`,
 				if err != nil {
 					logger.Warn("could not load config file", "path", configPath, "error", err)
 				} else {
+					if (fileCfg.TLS.Cert == "") != (fileCfg.TLS.Key == "") {
+						return fmt.Errorf("config %q must set both tls.cert and tls.key or neither", configPath)
+					}
 					if fileCfg.TLS.Cert != "" {
 						mat.ServerCertPath = fileCfg.TLS.Cert
-					}
-					if fileCfg.TLS.Key != "" {
 						mat.ServerKeyPath = fileCfg.TLS.Key
 					}
 					if len(serverSANs) == 0 && len(fileCfg.Server.SANs) > 0 {
