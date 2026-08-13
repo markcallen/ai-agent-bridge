@@ -587,6 +587,7 @@ func Start(cfg Config) (*Server, error) {
 	var stepCAConfig *StepCAConfig
 	var pkiMat *PKIMaterial
 	explicitCerts := false
+	renewExplicitCerts := false
 	tlsServerName := "server"
 
 	if cfg.ListenAddr != "" {
@@ -604,6 +605,17 @@ func Start(cfg Config) (*Server, error) {
 		mode = ModeSecure
 
 		var mat *PKIMaterial
+
+		serverSANs = BuildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
+		if cfg.StepCAURL != "" {
+			stepCAConfig = &StepCAConfig{
+				URL:                     cfg.StepCAURL,
+				RootPath:                cfg.StepCARootPath,
+				OIDCProviderURL:         cfg.StepCAOIDCProvider,
+				Provisioner:             cfg.StepCAProvisioner,
+				ProvisionerPasswordFile: cfg.StepCAProvisionerPasswordFile,
+			}
+		}
 
 		if cfg.CABundlePath != "" {
 			// Use pre-issued certificates from Config (e.g. provided via config file).
@@ -626,19 +638,19 @@ func Start(cfg Config) (*Server, error) {
 			}
 			mat.ServerCertPath = cfg.TLSCertPath
 			mat.ServerKeyPath = cfg.TLSKeyPath
+			if stepCAConfig != nil {
+				renewExplicitCerts = true
+			}
+			if err := ensureExplicitServerCertFresh(mat, serverSANs, logger, stepCAConfig); err != nil {
+				sup.Close()
+				if store != nil {
+					_ = store.Close()
+				}
+				return nil, err
+			}
 			tlsServerName = serverNameFromCert(cfg.TLSCertPath)
 		} else {
 			// Auto-generate PKI material if not present, or delegate to Step CA.
-			serverSANs = BuildServerSANs(cfg.ListenAddr, cfg.ServerSANs)
-			if cfg.StepCAURL != "" {
-				stepCAConfig = &StepCAConfig{
-					URL:                     cfg.StepCAURL,
-					RootPath:                cfg.StepCARootPath,
-					OIDCProviderURL:         cfg.StepCAOIDCProvider,
-					Provisioner:             cfg.StepCAProvisioner,
-					ProvisionerPasswordFile: cfg.StepCAProvisionerPasswordFile,
-				}
-			}
 			var pkiErr error
 			mat, pkiErr = EnsurePKI(stateDir, serverSANs, logger, stepCAConfig, cfg.CertValidity)
 			if pkiErr != nil {
@@ -743,11 +755,10 @@ func Start(cfg Config) (*Server, error) {
 		stateDir:   stateDir,
 	}
 
-	// Start background certificate renewal for auto-PKI and Step CA modes.
-	// Explicit certs are managed externally; the CertReloader in the TLS
-	// config still picks up changes on disk, but we don't run the renewal
-	// loop ourselves.
-	if mode == ModeSecure && !explicitCerts {
+	// Start background certificate renewal for managed PKI. Explicit certs are
+	// normally externally managed, but when Step CA settings are also present
+	// we can safely renew the configured cert/key paths in-place.
+	if mode == ModeSecure && (!explicitCerts || renewExplicitCerts) {
 		s.serverSANs = serverSANs
 		s.stepCA = stepCAConfig
 		s.pkiMat = pkiMat
@@ -953,6 +964,70 @@ func (s *Server) Stop() {
 	_ = os.Remove(filepath.Join(s.stateDir, "server.lock"))
 }
 
+func ensureExplicitServerCertFresh(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig) error {
+	notBefore, notAfter, err := ServerCertExpiry(mat.ServerCertPath)
+	if err != nil {
+		if stepCA == nil || stepCA.URL == "" {
+			return fmt.Errorf("read explicit TLS certificate %q: %w", mat.ServerCertPath, err)
+		}
+		logger.Warn("explicit TLS certificate unreadable, requesting replacement from Step CA",
+			"cert", mat.ServerCertPath,
+			"error", err,
+		)
+		if err := RenewServerCertMaterial(mat, serverSANs, logger, stepCA, 0); err != nil {
+			return fmt.Errorf("renew explicit TLS certificate %q: %w", mat.ServerCertPath, err)
+		}
+		return nil
+	}
+
+	lifetime := notAfter.Sub(notBefore)
+	remaining := time.Until(notAfter)
+	renewThreshold := lifetime / 3
+
+	if remaining > renewThreshold {
+		return nil
+	}
+
+	if stepCA == nil || stepCA.URL == "" {
+		if remaining <= 0 {
+			return fmt.Errorf("explicit TLS certificate %q expired at %s; configure step_ca.url and step_ca.provisioner_password_file or replace the certificate",
+				mat.ServerCertPath,
+				notAfter.Format(time.RFC3339),
+			)
+		}
+		logger.Warn("explicit TLS certificate is approaching expiry but no Step CA renewal config is available",
+			"cert", mat.ServerCertPath,
+			"expires", notAfter.Format(time.RFC3339),
+			"remaining", remaining.Round(time.Second),
+		)
+		return nil
+	}
+
+	if remaining <= 0 {
+		logger.Warn("explicit TLS certificate has expired, renewing before startup",
+			"cert", mat.ServerCertPath,
+			"expired", notAfter.Format(time.RFC3339),
+		)
+		if err := RenewServerCertMaterial(mat, serverSANs, logger, stepCA, 0); err != nil {
+			return fmt.Errorf("renew expired explicit TLS certificate %q: %w", mat.ServerCertPath, err)
+		}
+		return nil
+	}
+
+	logger.Info("explicit TLS certificate approaching expiry, renewing before startup",
+		"cert", mat.ServerCertPath,
+		"expires", notAfter.Format(time.RFC3339),
+		"remaining", remaining.Round(time.Second),
+	)
+	if err := RenewServerCertMaterial(mat, serverSANs, logger, stepCA, 0); err != nil {
+		logger.Warn("explicit TLS certificate renewal failed; continuing with current valid certificate",
+			"cert", mat.ServerCertPath,
+			"error", err,
+		)
+	}
+	return nil
+}
+
 // defaultCertRenewalCheckInterval is how often the renewal loop checks cert expiry.
 const defaultCertRenewalCheckInterval = 1 * time.Hour
 
@@ -1013,7 +1088,7 @@ func (s *Server) checkAndRenew() {
 		)
 	}
 
-	if err := RenewServerCert(s.stateDir, s.serverSANs, s.logger, s.stepCA, s.certValidity); err != nil {
+	if err := RenewServerCertMaterial(s.pkiMat, s.serverSANs, s.logger, s.stepCA, s.certValidity); err != nil {
 		s.logger.Error("cert renewal: failed to renew server certificate", "error", err)
 		return
 	}

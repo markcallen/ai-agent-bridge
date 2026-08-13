@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -164,6 +165,32 @@ func TestDefaultServerConfigPathFallsBackToXDGConfig(t *testing.T) {
 
 	if got := defaultServerConfigPath(stateDir); got != xdgConfig {
 		t.Fatalf("defaultServerConfigPath() = %q, want %q", got, xdgConfig)
+	}
+}
+
+func TestServerRenewCertRejectsPartialExplicitTLSConfig(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", stateDir)
+
+	configPath := filepath.Join(t.TempDir(), "bridge.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+tls:
+  cert: /tmp/server.crt
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newServerRenewCertCmd()
+	cmd.SetArgs([]string{"--config", configPath})
+	cmd.SetOut(nil)
+	cmd.SetErr(nil)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want partial TLS config error")
+	}
+	if !strings.Contains(err.Error(), "must set both tls.cert and tls.key or neither") {
+		t.Fatalf("Execute() error = %v", err)
 	}
 }
 

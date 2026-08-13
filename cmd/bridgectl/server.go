@@ -499,11 +499,19 @@ immediate renewal (e.g. when the cert has already expired).`,
 				}
 			}
 			var certValidity time.Duration
+			mat := localserver.LoadPKIMaterial(stateDir)
 			if configPath != "" {
 				fileCfg, err := config.Load(configPath)
 				if err != nil {
 					logger.Warn("could not load config file", "path", configPath, "error", err)
 				} else {
+					if (fileCfg.TLS.Cert == "") != (fileCfg.TLS.Key == "") {
+						return fmt.Errorf("config %q must set both tls.cert and tls.key or neither", configPath)
+					}
+					if fileCfg.TLS.Cert != "" {
+						mat.ServerCertPath = fileCfg.TLS.Cert
+						mat.ServerKeyPath = fileCfg.TLS.Key
+					}
 					if len(serverSANs) == 0 && len(fileCfg.Server.SANs) > 0 {
 						serverSANs = fileCfg.Server.SANs
 					}
@@ -534,7 +542,6 @@ immediate renewal (e.g. when the cert has already expired).`,
 			}
 
 			// Show current cert status.
-			mat := localserver.LoadPKIMaterial(stateDir)
 			_, notAfter, err := localserver.ServerCertExpiry(mat.ServerCertPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not read current cert: %v\n", err)
@@ -558,7 +565,7 @@ immediate renewal (e.g. when the cert has already expired).`,
 				}
 			}
 
-			if err := localserver.RenewServerCert(stateDir, serverSANs, logger, stepCA, certValidity); err != nil {
+			if err := localserver.RenewServerCertMaterial(mat, serverSANs, logger, stepCA, certValidity); err != nil {
 				return fmt.Errorf("renew cert: %w", err)
 			}
 

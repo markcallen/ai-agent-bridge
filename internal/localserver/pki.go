@@ -411,7 +411,13 @@ func acmeSANs(serverSANs []string) []string {
 // CertReloader picks it up on the next TLS handshake without a server restart.
 func RenewServerCert(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, certValidity time.Duration) error {
 	mat := LoadPKIMaterial(stateDir)
+	return RenewServerCertMaterial(mat, serverSANs, logger, stepCA, certValidity)
+}
 
+// RenewServerCertMaterial re-issues the certificate described by mat in-place.
+// It is used both for state-dir managed certificates and for explicit TLS
+// certificate paths loaded from config.
+func RenewServerCertMaterial(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, certValidity time.Duration) error {
 	if stepCA != nil && stepCA.URL != "" {
 		return renewServerCertStepCA(mat, serverSANs, logger, stepCA)
 	}
@@ -450,6 +456,9 @@ func renewServerCertStepCA(mat *PKIMaterial, serverSANs []string, logger *slog.L
 				return fmt.Errorf("renew server cert (ACME fallback after mTLS failure): %w", err)
 			}
 		default:
+			if stepCA.ProvisionerPasswordFile == "" {
+				return fmt.Errorf("renew server cert (JWK fallback after mTLS failure): step_ca.provisioner_password_file is required for non-interactive renewal")
+			}
 			if err := requestCertJWKFn(stepCA, serverSANs, mat.ServerCertPath, mat.ServerKeyPath, logger); err != nil {
 				return fmt.Errorf("renew server cert (JWK fallback after mTLS failure): %w", err)
 			}
