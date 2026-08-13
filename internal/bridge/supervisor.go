@@ -84,9 +84,10 @@ type Supervisor struct {
 	idleTimeout     time.Duration
 	cleanupInterval time.Duration
 
-	mu       sync.RWMutex
-	sessions map[string]*managedSession
-	done     chan struct{}
+	mu        sync.RWMutex
+	sessions  map[string]*managedSession
+	done      chan struct{}
+	closeOnce sync.Once
 
 	store     SessionStore
 	repoSetup RepoSetupRunner
@@ -568,12 +569,17 @@ func (s *Supervisor) readLoop(ms *managedSession) {
 			if errors.Is(err, io.EOF) {
 				slog.Info("session PTY closed", "session_id", ms.info.SessionID, "provider", ms.info.Provider)
 			} else {
-				slog.Warn("session PTY read error", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "error", err)
 				ms.mu.Lock()
-				if ms.info.Error == "" && !ms.info.ExitRecorded {
+				stopping := ms.info.State == SessionStateStopping
+				if ms.info.Error == "" && !ms.info.ExitRecorded && !stopping {
 					ms.info.Error = err.Error()
 				}
 				ms.mu.Unlock()
+				if stopping {
+					slog.Debug("session PTY closed during stop", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "error", err)
+					return
+				}
+				slog.Warn("session PTY read error", "session_id", ms.info.SessionID, "provider", ms.info.Provider, "error", err)
 				// Force-terminate the process so any pending WriteInput calls see
 				// SessionNotFound rather than writing to a dead PTY file descriptor.
 				sessionID := ms.info.SessionID
@@ -755,11 +761,12 @@ func (s *Supervisor) waitLoop(ms *managedSession) {
 	}
 
 	ms.mu.Lock()
+	stopping := ms.info.State == SessionStateStopping
 	ms.info.StoppedAt = nowUTC()
 	ms.info.ExitRecorded = true
 	ms.info.ExitCode = exitCode
 	ms.info.ProcessID = 0
-	if err != nil && !ms.forceStop {
+	if err != nil && !ms.forceStop && !stopping {
 		ms.info.State = SessionStateFailed
 		if ms.info.Error == "" {
 			ms.info.Error = err.Error()
@@ -1132,8 +1139,69 @@ func (s *Supervisor) List(projectID string) []SessionInfo {
 	return out
 }
 
+// Shutdown gracefully stops all active sessions and waits until they reach a
+// terminal state. If ctx expires, any remaining sessions are force-stopped and
+// ctx.Err() is returned.
+func (s *Supervisor) Shutdown(ctx context.Context) error {
+	s.closeOnce.Do(func() {
+		close(s.done)
+	})
+
+	s.mu.RLock()
+	ids := make([]string, 0, len(s.sessions))
+	for id := range s.sessions {
+		ids = append(ids, id)
+	}
+	s.mu.RUnlock()
+
+	for _, id := range ids {
+		if err := s.Stop(id, false); err != nil && !errors.Is(err, ErrSessionNotFound) {
+			slog.Warn("graceful session stop failed", "session_id", id, "error", err)
+		}
+	}
+
+	if err := s.waitForSessions(ctx, ids); err != nil {
+		for _, id := range ids {
+			_ = s.Stop(id, true)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Supervisor) waitForSessions(ctx context.Context, ids []string) error {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		allStopped := true
+		for _, id := range ids {
+			info, err := s.Get(id)
+			if errors.Is(err, ErrSessionNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if info.State != SessionStateStopped && info.State != SessionStateFailed {
+				allStopped = false
+				break
+			}
+		}
+		if allStopped {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 func (s *Supervisor) Close() {
-	close(s.done)
+	s.closeOnce.Do(func() {
+		close(s.done)
+	})
 	s.mu.RLock()
 	ids := make([]string, 0, len(s.sessions))
 	for id := range s.sessions {

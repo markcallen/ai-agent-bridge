@@ -146,6 +146,11 @@ Remote operator CLI acceptance criteria:
 
 **Session persistence**: with `--db-path`, the server writes session metadata and PTY output chunks to a BoltDB file. On restart, `LoadHistory()` rehydrates sessions so SDK clients can reconnect and replay events they missed.
 
+Session shutdown acceptance criteria:
+- When the user-session server receives process termination from its service manager, it stops accepting new work, gracefully terminates active provider sessions, and persists each session's terminal state before closing the session store.
+- Graceful server shutdown sends each active provider session its normal termination signal and waits up to the configured provider grace period inside a bounded server shutdown deadline before using forced termination as a fallback.
+- Sessions stopped during graceful server shutdown must reload after restart as terminal session history, not as daemon-orphaned failures, so clients can reconnect and replay persisted output/state.
+
 #### Human Interjection
 
 Human operators can observe and interact with any running session without stopping it. The session model distinguishes two roles:
