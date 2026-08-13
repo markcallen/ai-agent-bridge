@@ -441,6 +441,83 @@ func TestIsServerRunningSecureModeWithExplicitTLSCreatesLocalManagementPKI(t *te
 	assert.Equal(t, ModeSecure, mode)
 }
 
+func TestStartExplicitTLSWithStepCARenewsExpiredCert(t *testing.T) {
+	dir := t.TempDir()
+	tlsDir := filepath.Join(dir, "external-tls")
+	caCertPath, caKeyPath, err := pki.InitCA("external", tlsDir)
+	require.NoError(t, err)
+	caCert, caKey, err := pki.LoadCA(caCertPath, caKeyPath)
+	require.NoError(t, err)
+	serverCertPath, serverKeyPath, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "bridge-host", []string{"bridge-host", "127.0.0.1"}, tlsDir, time.Nanosecond)
+	require.NoError(t, err)
+	time.Sleep(10 * time.Millisecond)
+
+	oldMTLS := renewCertMTLSFn
+	renewCertMTLSFn = func(_ *StepCAConfig, _, _ string, _ *slog.Logger) error {
+		return assert.AnError
+	}
+	t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+	jwkCalled := false
+	oldJWK := requestCertJWKFn
+	requestCertJWKFn = func(_ *StepCAConfig, sans []string, certPath, keyPath string, _ *slog.Logger) error {
+		jwkCalled = true
+		issuedCertPath, issuedKeyPath, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "replacement", sans, t.TempDir(), 0)
+		require.NoError(t, err)
+		certData, err := os.ReadFile(issuedCertPath)
+		require.NoError(t, err)
+		keyData, err := os.ReadFile(issuedKeyPath)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(certPath, certData, 0o644))
+		require.NoError(t, os.WriteFile(keyPath, keyData, 0o600))
+		return nil
+	}
+	t.Cleanup(func() { requestCertJWKFn = oldJWK })
+
+	srv, err := Start(Config{
+		StateDir:                      dir,
+		ListenAddr:                    "127.0.0.1:0",
+		CABundlePath:                  caCertPath,
+		TLSCertPath:                   serverCertPath,
+		TLSKeyPath:                    serverKeyPath,
+		StepCAURL:                     "https://ca.example.internal",
+		StepCARootPath:                caCertPath,
+		StepCAProvisioner:             "admin",
+		StepCAProvisionerPasswordFile: filepath.Join(dir, "step-password"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { srv.Stop() })
+
+	assert.True(t, jwkCalled, "expired explicit cert should be reissued through Step CA fallback")
+	_, notAfter, err := ServerCertExpiry(serverCertPath)
+	require.NoError(t, err)
+	assert.True(t, time.Until(notAfter) > 24*time.Hour, "server should be using a fresh replacement cert")
+	assert.True(t, IsServerRunning(dir), "renewed explicit-TLS server should pass local health checks")
+}
+
+func TestStartExplicitTLSExpiredWithoutStepCAFails(t *testing.T) {
+	dir := t.TempDir()
+	tlsDir := filepath.Join(dir, "external-tls")
+	caCertPath, caKeyPath, err := pki.InitCA("external", tlsDir)
+	require.NoError(t, err)
+	caCert, caKey, err := pki.LoadCA(caCertPath, caKeyPath)
+	require.NoError(t, err)
+	serverCertPath, serverKeyPath, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "bridge-host", []string{"bridge-host", "127.0.0.1"}, tlsDir, time.Nanosecond)
+	require.NoError(t, err)
+	time.Sleep(10 * time.Millisecond)
+
+	_, err = Start(Config{
+		StateDir:     dir,
+		ListenAddr:   "127.0.0.1:0",
+		CABundlePath: caCertPath,
+		TLSCertPath:  serverCertPath,
+		TLSKeyPath:   serverKeyPath,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "explicit TLS certificate")
+	assert.Contains(t, err.Error(), "expired")
+}
+
 func TestDiscoverTargetSecureModeWithWildcardListen(t *testing.T) {
 	dir := t.TempDir()
 	srv, err := Start(Config{

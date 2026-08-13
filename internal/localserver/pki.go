@@ -411,7 +411,13 @@ func acmeSANs(serverSANs []string) []string {
 // CertReloader picks it up on the next TLS handshake without a server restart.
 func RenewServerCert(stateDir string, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, certValidity time.Duration) error {
 	mat := LoadPKIMaterial(stateDir)
+	return RenewServerCertMaterial(mat, serverSANs, logger, stepCA, certValidity)
+}
 
+// RenewServerCertMaterial re-issues the certificate described by mat in-place.
+// It is used both for state-dir managed certificates and for explicit TLS
+// certificate paths loaded from config.
+func RenewServerCertMaterial(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, certValidity time.Duration) error {
 	if stepCA != nil && stepCA.URL != "" {
 		return renewServerCertStepCA(mat, serverSANs, logger, stepCA)
 	}
