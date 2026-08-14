@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/x509"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -1691,15 +1692,28 @@ func TestStepCAIdempotency(t *testing.T) {
 	}
 
 	mockCertRequester(t)
+	// Stub mTLS so the renewal fallback path works when
+	// ensureStepCACertFresh encounters an unreadable fake cert.
+	restoreMTLS := localserver.SetCertRenewerFunc(
+		func(_ *localserver.StepCAConfig, _, _ string, _ *slog.Logger) error {
+			return fmt.Errorf("cert unreadable")
+		},
+	)
+	t.Cleanup(restoreMTLS)
+
 	stateDir := testStateDir(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
 	require.NoError(t, os.WriteFile(rootPEM, []byte("original-root"), 0o644))
 
+	pwFile := filepath.Join(t.TempDir(), "password")
+	require.NoError(t, os.WriteFile(pwFile, []byte("test"), 0o600))
+
 	stepCfg := &localserver.StepCAConfig{
-		URL:      "https://ca.example.internal:443",
-		RootPath: rootPEM,
+		URL:                     "https://ca.example.internal:443",
+		RootPath:                rootPEM,
+		ProvisionerPasswordFile: pwFile,
 	}
 
 	// First call — generates everything.
