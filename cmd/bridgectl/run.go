@@ -175,32 +175,26 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	}()
 
 	// Forward stdin → session, watching for detach key.
+	// Keystrokes are coalesced into batched WriteInput RPCs to avoid
+	// hitting per-session rate limits when typing quickly.
 	go func() {
-		buf := make([]byte, 1024)
-		for {
-			n, readErr := os.Stdin.Read(buf)
-			if n > 0 {
-				// Check for detach key (ctrl-]).
-				for i := 0; i < n; i++ {
-					if buf[i] == detachKey {
-						detached.Store(true)
-						cancel()
-						return
-					}
+		w := &inputWriter{cfg: inputWriterConfig{
+			Reader:    os.Stdin,
+			Client:    client,
+			SessionID: sessionID,
+			ClientID:  stream.ClientID(),
+			DetachKey: detachKey,
+			OnDetach: func() {
+				detached.Store(true)
+				cancel()
+			},
+			OnReadError: func(err error) {
+				if err != io.EOF {
+					fmt.Fprintf(os.Stderr, "\r\nstdin read failed: %v\r\n", err)
 				}
-				_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
-					SessionId: sessionID,
-					ClientId:  stream.ClientID(),
-					Data:      buf[:n],
-				})
-			}
-			if readErr != nil {
-				if readErr != io.EOF {
-					fmt.Fprintf(os.Stderr, "\r\nstdin read failed: %v\r\n", readErr)
-				}
-				return
-			}
-		}
+			},
+		}}
+		w.Run()
 	}()
 
 	// Receive session output → stdout.
@@ -323,17 +317,12 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 		case <-ctx.Done():
 			return
 		}
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := os.Stdin.Read(buf)
-			if n > 0 {
-				_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
-					SessionId: sessionID,
-					ClientId:  stream.ClientID(),
-					Data:      buf[:n],
-				})
-			}
-			if readErr != nil {
+		w := &inputWriter{cfg: inputWriterConfig{
+			Reader:    os.Stdin,
+			Client:    client,
+			SessionID: sessionID,
+			ClientID:  stream.ClientID(),
+			OnReadError: func(_ error) {
 				stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
 				_, _ = client.StopSession(stopCtx, &bridgev1.StopSessionRequest{
 					SessionId: sessionID,
@@ -341,9 +330,9 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 				})
 				stopCancel()
 				cancel()
-				return
-			}
-		}
+			},
+		}}
+		w.Run()
 	}()
 
 	err = stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {

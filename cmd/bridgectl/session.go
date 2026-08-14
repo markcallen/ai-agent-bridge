@@ -323,33 +323,24 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 
 	if isWriter {
 		go func() {
-			buf := make([]byte, 1024)
-			for {
-				n, readErr := os.Stdin.Read(buf)
-				if n > 0 {
-					for i := 0; i < n; i++ {
-						if buf[i] == detachKey {
-							// Release the writer slot before detaching so another
-							// observer can claim it.
-							_, _ = client.ReleaseWriter(context.Background(), &bridgev1.ReleaseWriterRequest{
-								SessionId: sessionID,
-								ClientId:  stream.ClientID(),
-							})
-							detached.Store(true)
-							cancel()
-							return
-						}
-					}
-					_, _ = client.WriteInput(context.Background(), &bridgev1.WriteInputRequest{
+			w := &inputWriter{cfg: inputWriterConfig{
+				Reader:    os.Stdin,
+				Client:    client,
+				SessionID: sessionID,
+				ClientID:  stream.ClientID(),
+				DetachKey: detachKey,
+				OnDetach: func() {
+					// Release the writer slot before detaching so another
+					// observer can claim it.
+					_, _ = client.ReleaseWriter(context.Background(), &bridgev1.ReleaseWriterRequest{
 						SessionId: sessionID,
 						ClientId:  stream.ClientID(),
-						Data:      buf[:n],
 					})
-				}
-				if readErr != nil {
-					return
-				}
-			}
+					detached.Store(true)
+					cancel()
+				},
+			}}
+			w.Run()
 		}()
 	} else if term.IsTerminal(fd) {
 		// In raw mode ISIG is disabled, so the terminal won't generate

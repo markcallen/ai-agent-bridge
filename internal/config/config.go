@@ -255,10 +255,10 @@ func applyDefaults(cfg *Config) {
 		cfg.RateLimits.StartSessionPerClientBurst = 3
 	}
 	if cfg.RateLimits.SendInputPerSessionRPS == 0 {
-		cfg.RateLimits.SendInputPerSessionRPS = 5
+		cfg.RateLimits.SendInputPerSessionRPS = 20
 	}
 	if cfg.RateLimits.SendInputPerSessionBurst == 0 {
-		cfg.RateLimits.SendInputPerSessionBurst = 20
+		cfg.RateLimits.SendInputPerSessionBurst = 50
 	}
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"
