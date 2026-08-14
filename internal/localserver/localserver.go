@@ -391,10 +391,10 @@ func Start(cfg Config) (*Server, error) {
 		cfg.RateLimits.StartSessionPerClientBurst = 10
 	}
 	if cfg.RateLimits.SendInputPerSessionRPS == 0 {
-		cfg.RateLimits.SendInputPerSessionRPS = 20
+		cfg.RateLimits.SendInputPerSessionRPS = 50
 	}
 	if cfg.RateLimits.SendInputPerSessionBurst == 0 {
-		cfg.RateLimits.SendInputPerSessionBurst = 50
+		cfg.RateLimits.SendInputPerSessionBurst = 100
 	}
 	if cfg.EventBufferSize <= 0 {
 		cfg.EventBufferSize = 8 << 20
