@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"strings"
 	"syscall"
@@ -32,6 +34,48 @@ func (p *testProvider) BuildCommand(ctx context.Context, cfg SessionConfig) (*ex
 	cmd := exec.CommandContext(ctx, "/bin/cat")
 	cmd.Dir = cfg.RepoPath
 	return cmd, nil
+}
+
+type termTrapProvider struct {
+	testProvider
+}
+
+func (p *termTrapProvider) StopGrace() time.Duration { return 500 * time.Millisecond }
+
+func (p *termTrapProvider) BuildCommand(ctx context.Context, cfg SessionConfig) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestGracefulShutdownHelperProcess")
+	cmd.Dir = cfg.RepoPath
+	cmd.Env = append(os.Environ(), "BRIDGE_GRACEFUL_HELPER=1")
+	return cmd, nil
+}
+
+type ignoreTermProvider struct {
+	testProvider
+}
+
+func (p *ignoreTermProvider) StopGrace() time.Duration { return 5 * time.Second }
+
+func (p *ignoreTermProvider) BuildCommand(ctx context.Context, cfg SessionConfig) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestGracefulShutdownHelperProcess")
+	cmd.Dir = cfg.RepoPath
+	cmd.Env = append(os.Environ(), "BRIDGE_IGNORE_TERM_HELPER=1")
+	return cmd, nil
+}
+
+func TestGracefulShutdownHelperProcess(t *testing.T) {
+	switch {
+	case os.Getenv("BRIDGE_GRACEFUL_HELPER") == "1":
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGTERM)
+		<-sigCh
+		_, _ = os.Stdout.WriteString("BRIDGE_TERM_OK\n")
+		os.Exit(0)
+	case os.Getenv("BRIDGE_IGNORE_TERM_HELPER") == "1":
+		signal.Ignore(syscall.SIGTERM)
+		select {}
+	default:
+		return
+	}
 }
 
 type setupRunnerFunc func(context.Context, string, []string) ([]string, error)
@@ -357,6 +401,144 @@ func TestSupervisorPersistenceAndHistory(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("persist-1 not found in List after restart")
+	}
+}
+
+func TestSupervisorShutdownGracefullyStopsAndPersistsRunningSession(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&termTrapProvider{testProvider: testProvider{id: "term-trap"}}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	dbPath := t.TempDir() + "/sessions.db"
+	store, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewBoltSessionStore: %v", err)
+	}
+
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store))
+	if _, err := sup.Start(context.Background(), SessionConfig{
+		ProjectID: "proj-shutdown",
+		SessionID: "shutdown-1",
+		RepoPath:  t.TempDir(),
+		Options:   map[string]string{"provider": "term-trap"},
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := sup.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	store2, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer func() { _ = store2.Close() }()
+	sup2 := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store2))
+	defer sup2.Close()
+	if err := sup2.LoadHistory(); err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+
+	info, err := sup2.Get("shutdown-1")
+	if err != nil {
+		t.Fatalf("Get after shutdown: %v", err)
+	}
+	if info.State != SessionStateStopped {
+		t.Fatalf("State=%v want Stopped", info.State)
+	}
+	if !info.ExitRecorded {
+		t.Fatal("ExitRecorded=false want true")
+	}
+	if strings.Contains(info.Error, "orphaned by daemon restart") {
+		t.Fatalf("Error=%q should not mark graceful shutdown as orphaned", info.Error)
+	}
+}
+
+func TestSupervisorShutdownRejectsNewSessions(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&testProvider{id: "fake"}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := sup.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	_, err := sup.Start(context.Background(), SessionConfig{
+		ProjectID: "proj-shutdown",
+		SessionID: "shutdown-reject",
+		RepoPath:  t.TempDir(),
+		Options:   map[string]string{"provider": "fake"},
+	})
+	if !errors.Is(err, ErrSupervisorShuttingDown) {
+		t.Fatalf("Start after shutdown error=%v want %v", err, ErrSupervisorShuttingDown)
+	}
+}
+
+func TestSupervisorShutdownForceStopWaitsForTerminalPersistence(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(&ignoreTermProvider{testProvider: testProvider{id: "ignore-term"}}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	dbPath := t.TempDir() + "/sessions.db"
+	store, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewBoltSessionStore: %v", err)
+	}
+
+	sup := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store))
+	if _, err := sup.Start(context.Background(), SessionConfig{
+		ProjectID: "proj-shutdown",
+		SessionID: "shutdown-force-1",
+		RepoPath:  t.TempDir(),
+		Options:   map[string]string{"provider": "ignore-term"},
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := sup.Shutdown(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Shutdown error=%v want %v", err, context.DeadlineExceeded)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("store.Close: %v", err)
+	}
+
+	store2, err := NewBoltSessionStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer func() { _ = store2.Close() }()
+	sup2 := NewSupervisor(registry, DefaultPolicy(), 1024, time.Minute, WithStore(store2))
+	defer sup2.Close()
+	if err := sup2.LoadHistory(); err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+
+	info, err := sup2.Get("shutdown-force-1")
+	if err != nil {
+		t.Fatalf("Get after shutdown: %v", err)
+	}
+	if info.State != SessionStateStopped {
+		t.Fatalf("State=%v want Stopped", info.State)
+	}
+	if !info.ExitRecorded {
+		t.Fatal("ExitRecorded=false want true")
+	}
+	if strings.Contains(info.Error, "orphaned by daemon restart") {
+		t.Fatalf("Error=%q should not mark forced shutdown as orphaned", info.Error)
 	}
 }
 
