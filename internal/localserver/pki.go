@@ -452,23 +452,29 @@ func renewServerCertAutoGen(mat *PKIMaterial, serverSANs []string, logger *slog.
 // ensureStepCACertFresh checks whether a Step CA-issued server certificate is
 // expired or approaching expiry (remaining < 1/3 of lifetime). When renewal is
 // needed it runs synchronously so the caller never proceeds with a stale cert.
-// If the certificate is unreadable (corrupt PEM, etc.) the check is skipped —
-// the server will fail on TLS handshake and the background renewal loop will
-// attempt recovery.
+// If the certificate is unreadable (corrupt PEM, etc.) it is treated as expired
+// and a replacement is requested from Step CA.
 func ensureStepCACertFresh(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, certValidity time.Duration) error {
 	notBefore, notAfter, err := ServerCertExpiry(mat.ServerCertPath)
 	if err != nil {
-		// Certificate is unreadable — skip the freshness check and let the
-		// background renewal loop handle recovery.
-		logger.Warn("Step CA server certificate unreadable, skipping freshness check",
+		logger.Warn("Step CA server certificate unreadable, requesting replacement",
 			"cert", mat.ServerCertPath, "error", err)
-		return nil
+		return RenewServerCertMaterial(mat, serverSANs, logger, stepCA, certValidity)
 	}
 
 	lifetime := notAfter.Sub(notBefore)
 	remaining := time.Until(notAfter)
-	renewThreshold := lifetime / 3
 
+	// Guard against certs with zero or inverted validity windows —
+	// treat them as expired so they are always renewed.
+	if lifetime <= 0 {
+		logger.Warn("Step CA server certificate has non-positive validity, renewing before startup",
+			"cert", mat.ServerCertPath, "notBefore", notBefore.Format(time.RFC3339),
+			"notAfter", notAfter.Format(time.RFC3339))
+		return RenewServerCertMaterial(mat, serverSANs, logger, stepCA, certValidity)
+	}
+
+	renewThreshold := lifetime / 3
 	if remaining > renewThreshold {
 		return nil // still fresh
 	}

@@ -333,6 +333,8 @@ func TestEnsurePKI_StepCAHappyPath(t *testing.T) {
 
 // TestEnsurePKI_StepCAIdempotent verifies that a second EnsurePKI call with
 // Step CA config is a no-op when ca-bundle.crt already exists.
+// The JWK stub writes fake (unparseable) certs, so ensureStepCACertFresh
+// treats them as unreadable and re-requests — the stub handles that idempotently.
 func TestEnsurePKI_StepCAIdempotent(t *testing.T) {
 	stateDir := t.TempDir()
 	rootPEM := filepath.Join(stateDir, "root.crt")
@@ -347,13 +349,29 @@ func TestEnsurePKI_StepCAIdempotent(t *testing.T) {
 	}
 	t.Cleanup(func() { requestCertJWKFn = oldJWK })
 
-	stepCfg := &StepCAConfig{URL: "https://ca.example.internal:443", RootPath: rootPEM}
+	// Stub mTLS so the fallback to JWK is exercised when the unreadable cert
+	// triggers a renewal attempt on the second EnsurePKI call.
+	oldMTLS := renewCertMTLSFn
+	renewCertMTLSFn = func(_ *StepCAConfig, _, _ string, _ *slog.Logger) error {
+		return fmt.Errorf("cert unreadable")
+	}
+	t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+	pwFile := filepath.Join(t.TempDir(), "password")
+	require.NoError(t, os.WriteFile(pwFile, []byte("test"), 0o600))
+
+	stepCfg := &StepCAConfig{
+		URL:                     "https://ca.example.internal:443",
+		RootPath:                rootPEM,
+		ProvisionerPasswordFile: pwFile,
+	}
 	_, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg, 0)
 	require.NoError(t, err)
 
 	// Overwrite root file with different content.
 	require.NoError(t, os.WriteFile(rootPEM, []byte("changed-root"), 0o644))
-	// Second call should be no-op: bundle should still have the original content.
+	// Second call: ensureStepCACertFresh triggers renewal (fake cert is unreadable),
+	// but the bundle should still have the original content from the first call.
 	mat2, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg, 0)
 	require.NoError(t, err)
 	bundle, _ := os.ReadFile(mat2.CABundlePath)
@@ -402,8 +420,14 @@ func TestEnsurePKI_StepCAExpiredCertRenewsAtStartup(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		certData, _ := os.ReadFile(freshCert)
-		keyData, _ := os.ReadFile(freshKey)
+		certData, err := os.ReadFile(freshCert)
+		if err != nil {
+			return fmt.Errorf("read fresh cert: %w", err)
+		}
+		keyData, err := os.ReadFile(freshKey)
+		if err != nil {
+			return fmt.Errorf("read fresh key: %w", err)
+		}
 		require.NoError(t, os.WriteFile(cp, certData, 0o644))
 		require.NoError(t, os.WriteFile(kp, keyData, 0o600))
 		return nil
