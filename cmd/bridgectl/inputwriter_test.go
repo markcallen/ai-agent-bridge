@@ -182,31 +182,52 @@ func TestInputWriterDetachKeyAtStart(t *testing.T) {
 
 func TestInputWriterFlushesOnMaxBatch(t *testing.T) {
 	mock := &mockWriteClient{}
-	// Create input larger than maxBatchSize (4096).
-	input := strings.Repeat("x", maxBatchSize+100)
-	reader := strings.NewReader(input)
+
+	// Use an io.Pipe so we control when data arrives and when EOF is sent.
+	// Write more than maxBatchSize, wait for the size-triggered flush, then
+	// write a second chunk and close.
+	pr, pw := io.Pipe()
 
 	done := make(chan struct{})
 	w := &inputWriter{cfg: inputWriterConfig{
-		Reader:        reader,
+		Reader:        pr,
 		Client:        mock,
 		SessionID:     "sess-1",
 		ClientID:      "client-1",
-		FlushInterval: time.Second, // long interval — flush should happen via size threshold
+		FlushInterval: time.Second, // long interval — flush should happen via size threshold only
 		OnReadError: func(_ error) {
 			close(done)
 		},
 	}}
 
-	w.Run()
-	<-done
+	go w.Run()
 
-	if got := string(mock.allData()); got != input {
-		t.Fatalf("data mismatch: got %d bytes, want %d", len(got), len(input))
+	// Write more than maxBatchSize in one go.
+	first := strings.Repeat("A", maxBatchSize+100)
+	_, _ = pw.Write([]byte(first))
+
+	// Wait for the size-triggered flush to happen.
+	deadline := time.After(2 * time.Second)
+	for len(mock.getCalls()) < 1 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for size-triggered flush")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 
-	// Should have flushed at least once before the final EOF flush due to
-	// exceeding maxBatchSize.
+	// Write a second chunk and close.
+	second := "tail"
+	_, _ = pw.Write([]byte(second))
+	_ = pw.Close()
+	<-done
+
+	want := first + second
+	if got := string(mock.allData()); got != want {
+		t.Fatalf("data mismatch: got %d bytes, want %d", len(got), len(want))
+	}
+
 	calls := mock.getCalls()
 	if len(calls) < 2 {
 		t.Errorf("expected at least 2 calls (size-triggered + final), got %d", len(calls))
