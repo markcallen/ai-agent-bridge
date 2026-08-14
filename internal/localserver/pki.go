@@ -128,6 +128,15 @@ func EnsurePKI(stateDir string, serverSANs []string, logger *slog.Logger, stepCA
 		if _, err := os.Stat(mat.ServerCertPath); err == nil {
 			if _, err := os.Stat(mat.ServerKeyPath); err == nil {
 				if readPKIMode(certsDir) == requestedMode {
+					// When Step CA is configured, check whether the existing
+					// server certificate is expired or approaching expiry.
+					// Renew synchronously before returning so the server
+					// never starts listening with a stale cert.
+					if stepCA != nil && stepCA.URL != "" {
+						if err := ensureStepCACertFresh(mat, serverSANs, logger, stepCA, certValidity); err != nil {
+							return nil, err
+						}
+					}
 					logger.Info("PKI material already exists", "dir", certsDir)
 					return mat, nil
 				}
@@ -438,6 +447,41 @@ func renewServerCertAutoGen(mat *PKIMaterial, serverSANs []string, logger *slog.
 
 	logger.Info("renewed server certificate (auto-PKI)", "cert", mat.ServerCertPath, "sans", serverSANs)
 	return nil
+}
+
+// ensureStepCACertFresh checks whether a Step CA-issued server certificate is
+// expired or approaching expiry (remaining < 1/3 of lifetime). When renewal is
+// needed it runs synchronously so the caller never proceeds with a stale cert.
+// If the certificate is unreadable (corrupt PEM, etc.) the check is skipped —
+// the server will fail on TLS handshake and the background renewal loop will
+// attempt recovery.
+func ensureStepCACertFresh(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig, certValidity time.Duration) error {
+	notBefore, notAfter, err := ServerCertExpiry(mat.ServerCertPath)
+	if err != nil {
+		// Certificate is unreadable — skip the freshness check and let the
+		// background renewal loop handle recovery.
+		logger.Warn("Step CA server certificate unreadable, skipping freshness check",
+			"cert", mat.ServerCertPath, "error", err)
+		return nil
+	}
+
+	lifetime := notAfter.Sub(notBefore)
+	remaining := time.Until(notAfter)
+	renewThreshold := lifetime / 3
+
+	if remaining > renewThreshold {
+		return nil // still fresh
+	}
+
+	if remaining <= 0 {
+		logger.Warn("Step CA server certificate has expired, renewing before startup",
+			"cert", mat.ServerCertPath, "expired", notAfter.Format(time.RFC3339))
+	} else {
+		logger.Info("Step CA server certificate approaching expiry, renewing before startup",
+			"cert", mat.ServerCertPath, "expires", notAfter.Format(time.RFC3339),
+			"remaining", remaining.Round(time.Second))
+	}
+	return RenewServerCertMaterial(mat, serverSANs, logger, stepCA, certValidity)
 }
 
 func renewServerCertStepCA(mat *PKIMaterial, serverSANs []string, logger *slog.Logger, stepCA *StepCAConfig) error {

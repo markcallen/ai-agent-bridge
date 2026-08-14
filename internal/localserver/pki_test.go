@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -358,6 +359,90 @@ func TestEnsurePKI_StepCAIdempotent(t *testing.T) {
 	bundle, _ := os.ReadFile(mat2.CABundlePath)
 	assert.True(t, strings.HasPrefix(string(bundle), "fake-root-cert"), "bundle should start with original Step CA root, not overwritten")
 	assert.NotContains(t, string(bundle), "changed-root", "bundle should not reflect the overwritten root file")
+}
+
+// TestEnsurePKI_StepCAExpiredCertRenewsAtStartup verifies that EnsurePKI renews
+// an expired Step CA certificate synchronously at startup instead of deferring
+// renewal to the background loop.
+func TestEnsurePKI_StepCAExpiredCertRenewsAtStartup(t *testing.T) {
+	stateDir := t.TempDir()
+	rootPEM := filepath.Join(stateDir, "root.crt")
+	require.NoError(t, os.WriteFile(rootPEM, []byte("fake-root-cert"), 0o644))
+
+	// Create a CA in a separate temp dir for issuing real certs.
+	caDir := filepath.Join(t.TempDir(), "ca")
+	caCertPath, caKeyPath, err := pki.InitCA("test-ca", caDir)
+	require.NoError(t, err)
+	caCert, caKey, err := pki.LoadCA(caCertPath, caKeyPath)
+	require.NoError(t, err)
+
+	// Issue an expired server cert in a scratch dir (not certsDir) so the
+	// first EnsurePKI call doesn't overwrite it with stub content.
+	scratchDir := filepath.Join(t.TempDir(), "scratch")
+	expiredCertPath, expiredKeyPath, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "server", []string{"10.0.0.1"}, scratchDir, time.Nanosecond)
+	require.NoError(t, err)
+	time.Sleep(10 * time.Millisecond) // let it expire
+	expiredCertData, err := os.ReadFile(expiredCertPath)
+	require.NoError(t, err)
+	expiredKeyData, err := os.ReadFile(expiredKeyPath)
+	require.NoError(t, err)
+
+	jwkCalled := 0
+	oldJWK := requestCertJWKFn
+	requestCertJWKFn = func(_ *StepCAConfig, sans []string, cp, kp string, _ *slog.Logger) error {
+		jwkCalled++
+		if jwkCalled == 1 {
+			// First call (initial setup): write stub content.
+			require.NoError(t, os.WriteFile(cp, []byte("STUB"), 0o644))
+			require.NoError(t, os.WriteFile(kp, []byte("STUB"), 0o600))
+			return nil
+		}
+		// Renewal call: issue a proper long-lived cert.
+		freshCert, freshKey, err := pki.IssueCert(caCert, caKey, pki.CertTypeServer, "server", sans, t.TempDir(), 24*time.Hour)
+		if err != nil {
+			return err
+		}
+		certData, _ := os.ReadFile(freshCert)
+		keyData, _ := os.ReadFile(freshKey)
+		require.NoError(t, os.WriteFile(cp, certData, 0o644))
+		require.NoError(t, os.WriteFile(kp, keyData, 0o600))
+		return nil
+	}
+	t.Cleanup(func() { requestCertJWKFn = oldJWK })
+
+	oldMTLS := renewCertMTLSFn
+	renewCertMTLSFn = func(_ *StepCAConfig, _, _ string, _ *slog.Logger) error {
+		return fmt.Errorf("cert expired")
+	}
+	t.Cleanup(func() { renewCertMTLSFn = oldMTLS })
+
+	stepCfg := &StepCAConfig{
+		URL:                     "https://ca.example.internal:443",
+		RootPath:                rootPEM,
+		ProvisionerPasswordFile: filepath.Join(t.TempDir(), "password"),
+	}
+	require.NoError(t, os.WriteFile(stepCfg.ProvisionerPasswordFile, []byte("test"), 0o600))
+
+	// First call: sets up all PKI files (ca-bundle, local-client, JWT, server cert stub).
+	_, err = EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg, 0)
+	require.NoError(t, err)
+
+	// Overwrite the server cert with the real expired cert so the second call
+	// can parse it and detect expiry.
+	certsDir := CertsDir(stateDir)
+	require.NoError(t, os.WriteFile(filepath.Join(certsDir, "server.crt"), expiredCertData, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(certsDir, "server.key"), expiredKeyData, 0o600))
+
+	// Second call: should detect the expired cert and renew at startup.
+	mat2, err := EnsurePKI(stateDir, []string{"10.0.0.1"}, testLogger(), stepCfg, 0)
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, jwkCalled, "JWK provisioner should have been called twice: initial setup + renewal")
+
+	// Verify the cert was renewed (should now be valid for >23 hours).
+	_, notAfter, err := ServerCertExpiry(mat2.ServerCertPath)
+	require.NoError(t, err)
+	assert.True(t, time.Until(notAfter) > 23*time.Hour, "cert should have been renewed at startup, got remaining=%v", time.Until(notAfter))
 }
 
 // TestIssueClientCertViaOIDC_HappyPath exercises the full OIDC enrollment path
