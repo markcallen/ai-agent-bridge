@@ -109,3 +109,55 @@ Evidence:
 
 Note:
 - `scripts/test-go-coverage.sh` initially failed under sandboxed `/tmp` caches due blocked module downloads, then failed under elevated network because the filesystem was full. The maintained coverage gate passed after pruning Docker build cache and using existing home Go caches.
+
+---
+
+# User-Owned Provider Runtime
+
+Mode: Approval-Required, approved by user request on 2026-08-14.
+
+Governing PRD section: `7.6 Debian/Ubuntu Distribution`.
+
+Scope:
+- Make the packaged provider runtime installer default to a user-owned runtime directory for self-updating provider CLIs.
+- Preserve `/opt/ai-agent-bridge` as an explicit root-controlled runtime path for pinned provider installs.
+- Update package docs and examples so native provider updaters do not target root-owned `/opt` by default.
+- Add unit coverage for config expansion/validation and Linux e2e coverage for the packaged installer path.
+
+Constraints:
+- The bridge package must still boot without provider CLIs or API keys.
+- Do not install third-party provider CLIs during `apt install`.
+- Keep existing `runtime.provider_root` semantics for absolute paths and relative provider binary/arg resolution.
+- Do not require root for user-owned provider runtime installs.
+
+Tradeoffs:
+- User-owned runtime directories fit fast-moving native provider updaters but reduce package-level version pinning.
+- Root-owned `/opt/ai-agent-bridge` remains useful for reproducible deployments that accept privileged updates.
+
+Risks:
+- Provider runtime installs rely on Node.js being present for unprivileged runs; root-only Node bootstrap must not obscure that requirement.
+- `$HOME` and `XDG_DATA_HOME` expansion must be deterministic and fail clearly when it cannot produce an absolute path.
+
+Test Strategy:
+- Add config unit tests proving `runtime.provider_root` expands `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, and rejects unresolved or relative values.
+- Add installer e2e coverage in an Ubuntu container proving a non-root user can install the provider runtime into a user-owned directory and verify stubbed provider CLIs.
+- Run focused Go tests plus the new Linux e2e script.
+
+Rollback:
+- Set `INSTALL_DIR=/opt/ai-agent-bridge` when running `/usr/lib/ai-agent-bridge/install-provider-runtime`.
+- Revert the installer default and docs if user-owned provider self-updates are no longer supported.
+
+Execution Checklist:
+- [x] Update `PRD.md` with user-owned provider runtime acceptance criteria.
+- [x] Add failing config unit tests for runtime root expansion.
+- [x] Add Linux e2e coverage for non-root provider runtime installation.
+- [x] Implement installer default path and root/user behavior.
+- [x] Update Ubuntu install docs and packaged example config.
+- [x] Run formatting, unit tests, and Linux e2e verification.
+- [x] Record evidence and any lessons.
+
+Evidence:
+- `go test ./internal/config -run TestLoadRuntimeProviderRoot -count=1` failed before implementation because `${HOME}` and `$XDG_DATA_HOME` were not expanded.
+- `go test ./internal/config -count=1` -> passed.
+- `go test ./...` -> passed.
+- `SUITE=noble scripts/smoke-provider-runtime-user.sh` -> passed with Docker escalation; verified non-root install to `/home/ubuntu/.local/share/ai-agent-bridge/providers` and no `/opt/ai-agent-bridge` directory.

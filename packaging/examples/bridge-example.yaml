@@ -7,7 +7,7 @@
 # This profile:
 #   - binds to 127.0.0.1:9445 in SECURE mode (mTLS + JWT via auto-generated PKI)
 #   - persistence is disabled by default; uncomment db_path to enable it
-#   - resolves provider CLIs from /opt/ai-agent-bridge (the provider runtime root)
+#   - resolves provider CLIs from the user-owned provider runtime root
 #
 # SECURITY MODES:
 #   - No server.listen (unix socket): local-only, no authentication required.
@@ -63,7 +63,7 @@ persistence:
   # Use an absolute path; ~ is not expanded. Omit to disable persistence.
 
 runtime:
-  provider_root: "/opt/ai-agent-bridge"
+  provider_root: "$HOME/.local/share/ai-agent-bridge/providers"
 
 repo_setup:
   enabled: true
@@ -74,8 +74,8 @@ repo_setup:
 # Enable one or more providers below. Credentials are read from the environment
 # (injected via /etc/ai-agent-bridge/agents.env at service startup).
 #
-# Run /usr/lib/ai-agent-bridge/install-provider-runtime to install the CLIs
-# before enabling any provider here.
+# Run /usr/lib/ai-agent-bridge/install-provider-runtime as the bridge login user
+# to install the CLIs before enabling any provider here.
 
 providers:
 
@@ -83,7 +83,7 @@ providers:
 #
 #   codex:
 #     binary: "/usr/bin/node"
-#     args: ["/opt/ai-agent-bridge/node_modules/@openai/codex/bin/codex.js"]
+#     args: ["./node_modules/@openai/codex/bin/codex.js"]
 #     startup_timeout: "60s"
 #     startup_probe: "output"
 #     required_env: ["OPENAI_API_KEY"]
@@ -92,7 +92,7 @@ providers:
 # Uncomment to enable Claude Code (requires CLAUDE_CODE_OAUTH_TOKEN in agents.env):
 #
 #   claude:
-#     binary: "/opt/ai-agent-bridge/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+#     binary: "./node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 #     args: []
 #     startup_timeout: "60s"
 #     startup_probe: "output"
@@ -103,7 +103,7 @@ providers:
 # OpenCode ships as a native binary installed via npm — no Node.js invocation needed.
 #
 #   opencode:
-#     binary: "/opt/ai-agent-bridge/node_modules/.bin/opencode"
+#     binary: "./node_modules/.bin/opencode"
 #     args: []
 #     startup_timeout: "45s"
 #     startup_probe: "output"
@@ -112,7 +112,7 @@ providers:
 #
 #   gemini:
 #     binary: "/usr/bin/node"
-#     args: ["/opt/ai-agent-bridge/node_modules/@google/gemini-cli/dist/index.js"]
+#     args: ["./node_modules/@google/gemini-cli/dist/index.js"]
 #     startup_timeout: "60s"
 #     startup_probe: "output"
 #     required_env: ["GOOGLE_API_KEY"]

@@ -484,6 +484,11 @@ sessions:
 }
 
 func TestLoadRuntimeProviderRoot(t *testing.T) {
+	homeDir := t.TempDir()
+	xdgDir := filepath.Join(t.TempDir(), "xdg-data")
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XDG_DATA_HOME", xdgDir)
+
 	tests := []struct {
 		name     string
 		content  string
@@ -505,6 +510,70 @@ sessions:
   subscriber_ttl: "30m"
 `,
 			wantRoot: "/opt/ai-agent-bridge",
+		},
+		{
+			name: "provider_root expands braced home variable",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+runtime:
+  provider_root: "${HOME}/.local/share/ai-agent-bridge/providers"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantRoot: filepath.Join(homeDir, ".local/share/ai-agent-bridge/providers"),
+		},
+		{
+			name: "provider_root expands home variable",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+runtime:
+  provider_root: "$HOME/.local/share/ai-agent-bridge/providers"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantRoot: filepath.Join(homeDir, ".local/share/ai-agent-bridge/providers"),
+		},
+		{
+			name: "provider_root expands xdg data variable",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+runtime:
+  provider_root: "$XDG_DATA_HOME/ai-agent-bridge/providers"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantRoot: filepath.Join(xdgDir, "ai-agent-bridge/providers"),
+		},
+		{
+			name: "provider_root expands braced xdg data variable",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+runtime:
+  provider_root: "${XDG_DATA_HOME}/ai-agent-bridge/providers"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantRoot: filepath.Join(xdgDir, "ai-agent-bridge/providers"),
 		},
 		{
 			name: "provider_root absent",
@@ -529,6 +598,22 @@ auth:
   jwt_max_ttl: "5m"
 runtime:
   provider_root: "relative/path"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantErr: true,
+		},
+		{
+			name: "provider_root unresolved variable rejected",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+runtime:
+  provider_root: "$BRIDGE_PROVIDER_ROOT/providers"
 sessions:
   idle_timeout: "30m"
   stop_grace_period: "10s"

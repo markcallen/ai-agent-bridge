@@ -228,13 +228,13 @@ Controls how the bridge locates provider CLIs and the Node.js runtime. These set
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `provider_root` | `""` (daemon CWD) | Absolute path to the directory that contains `.nvmrc` and provider `node_modules`. When set: (1) Node.js version validation reads `{provider_root}/.nvmrc` instead of the daemon working directory; (2) a relative `binary` path (one that contains a `/`) resolves against `provider_root`; (3) bare standalone relative path arguments (e.g. `./node_modules/foo/bin/cli.js`) resolve against `provider_root`. Plain command names looked up via `PATH` (e.g. `node`) and embedded flag values (e.g. `--config=./foo`) are not affected. Use this when the daemon runs as a systemd service with a different `WorkingDirectory` than where provider CLIs are installed. |
+| `provider_root` | `""` (daemon CWD) | Absolute path to the directory that contains `.nvmrc` and provider `node_modules`. `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, and `${XDG_DATA_HOME}` are expanded before validation. When set: (1) Node.js version validation reads `{provider_root}/.nvmrc` instead of the daemon working directory; (2) a relative `binary` path (one that contains a `/`) resolves against `provider_root`; (3) bare standalone relative path arguments (e.g. `./node_modules/foo/bin/cli.js`) resolve against `provider_root`. Plain command names looked up via `PATH` (e.g. `node`) and embedded flag values (e.g. `--config=./foo`) are not affected. Use this when the daemon runs as a systemd service with a different `WorkingDirectory` than where provider CLIs are installed. |
 
 Example:
 
 ```yaml
 runtime:
-  provider_root: "/opt/ai-agent-bridge"
+  provider_root: "$HOME/.local/share/ai-agent-bridge/providers"
 
 providers:
   codex:
@@ -247,8 +247,9 @@ providers:
 ```
 
 In this example, `./node_modules/@openai/codex/bin/codex.js` resolves to
-`/opt/ai-agent-bridge/node_modules/@openai/codex/bin/codex.js` regardless of
-where the daemon process is launched from.
+`$HOME/.local/share/ai-agent-bridge/providers/node_modules/@openai/codex/bin/codex.js`
+after environment expansion, regardless of where the daemon process is launched
+from.
 
 #### `repo_setup`
 
