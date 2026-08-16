@@ -41,9 +41,14 @@ Read and follow these rule files in `.codex/rules/` when they apply:
 - `.codex/rules/common/docs.md` — Rules for common/docs
 - `.codex/rules/common/cicd.md` — Rules for common/cicd
 - `.codex/rules/common/observability.md` — Rules for common/observability
+- `.codex/rules/common/publishing-api.md` — Rules for common/publishing-api
+- `.codex/rules/common/publishing-apps.md` — Rules for common/publishing-apps
+- `.codex/rules/common/publishing-apt.md` — Rules for common/publishing-apt
+- `.codex/rules/common/publishing-brew.md` — Rules for common/publishing-brew
+- `.codex/rules/common/publishing-cli.md` — Rules for common/publishing-cli
 - `.codex/rules/common/publishing-libraries.md` — Rules for common/publishing-libraries
 - `.codex/rules/common/publishing-sdks.md` — Rules for common/publishing-sdks
-- `.codex/rules/common/publishing-apps.md` — Rules for common/publishing-apps
+- `.codex/rules/common/publishing-web.md` — Rules for common/publishing-web
 - `.codex/rules/common/git-hooks.md` — Rules for common/git-hooks
 - `.codex/rules/typescript/typescript-linting.md` — Rules for typescript/linting
 - `.codex/rules/typescript/typescript-logging.md` — Rules for typescript/logging
@@ -56,6 +61,7 @@ Read and follow these rule files in `.codex/rules/` when they apply:
 
 Created by Ballast. Do not edit this section.
 
-Read and use these skill files in `.codex/rules/` when they are relevant:
+Read and use these skill files in `.codex/skills/` when they are relevant:
 
-- `.codex/rules/github-health-check.md` — run a comprehensive GitHub repository health check covering CI status, branch hygiene, and repo configuration
+- `.codex/skills/github-health-check/SKILL.md` — run a comprehensive GitHub repository health check covering CI status, code quality, branch hygiene, and repo configuration
+- `.codex/skills/github-pr-copilot-cycle/SKILL.md` — create or update a GitHub PR, request Copilot review, triage and fix Copilot comments, push fixes, check CI, and repeat up to three cycles
