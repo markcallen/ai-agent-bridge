@@ -70,7 +70,7 @@ func TestCodexValidateStartup_CodexAuth(t *testing.T) {
 	}
 }
 
-func TestCodexValidateStartup_CodeXHomeAuthFile(t *testing.T) {
+func TestCodexValidateStartup_CodexHomeAuthFile(t *testing.T) {
 	clearCodexEnv(t)
 	codexHome := t.TempDir()
 	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"auth_mode":"chatgpt"}`), 0o600); err != nil {

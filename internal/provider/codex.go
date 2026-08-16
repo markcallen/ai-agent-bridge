@@ -37,7 +37,7 @@ func NewCodexProvider(cfg StdioConfig) *CodexProvider {
 	}
 }
 
-// codexHasAuth returns true if any supported Codex auth env var is set.
+// codexHasAuth returns true if any supported Codex auth source is available.
 func codexHasAuth() bool {
 	for _, key := range []string{"OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_AUTH"} {
 		if strings.TrimSpace(os.Getenv(key)) != "" {
@@ -66,14 +66,14 @@ func codexAuthFilePath() string {
 
 func (p *CodexProvider) ValidateStartup(ctx context.Context) error {
 	if !codexHasAuth() {
-		return fmt.Errorf("provider %q requires OPENAI_API_KEY, CODEX_API_KEY, CODEX_AUTH, or CODEX_HOME auth.json", p.cfg.ProviderID)
+		return fmt.Errorf("provider %q requires OPENAI_API_KEY, CODEX_API_KEY, CODEX_AUTH, CODEX_HOME/auth.json, or ~/.codex/auth.json", p.cfg.ProviderID)
 	}
 	return p.StdioProvider.ValidateStartup(ctx)
 }
 
 func (p *CodexProvider) Health(ctx context.Context) error {
 	if !codexHasAuth() {
-		return fmt.Errorf("provider %q requires OPENAI_API_KEY, CODEX_API_KEY, CODEX_AUTH, or CODEX_HOME auth.json", p.cfg.ProviderID)
+		return fmt.Errorf("provider %q requires OPENAI_API_KEY, CODEX_API_KEY, CODEX_AUTH, CODEX_HOME/auth.json, or ~/.codex/auth.json", p.cfg.ProviderID)
 	}
 	return p.StdioProvider.Health(ctx)
 }

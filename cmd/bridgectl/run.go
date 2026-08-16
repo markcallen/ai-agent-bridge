@@ -204,8 +204,7 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	err = stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {
 		switch ev.Type {
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
-			appendProviderOutputTail(&outputTail, ev.Payload)
-			if err := codexAuthExpiredError(providerName, outputTail.String()); err != nil {
+			if err := codexOutputAuthExpiredError(providerName, &outputTail, ev.Payload); err != nil {
 				return err
 			}
 			_, writeErr := os.Stdout.Write(ev.Payload)
@@ -372,8 +371,7 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 		}
 		switch ev.Type {
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
-			appendProviderOutputTail(&outputTail, ev.Payload)
-			if err := codexAuthExpiredError(providerName, outputTail.String()); err != nil {
+			if err := codexOutputAuthExpiredError(providerName, &outputTail, ev.Payload); err != nil {
 				return err
 			}
 			_, writeErr := os.Stdout.Write(ev.Payload)
@@ -407,6 +405,14 @@ func appendProviderOutputTail(tail *strings.Builder, payload []byte) {
 	}
 	tail.Reset()
 	tail.WriteString(text[len(text)-maxProviderErrorTail:])
+}
+
+func codexOutputAuthExpiredError(providerName string, tail *strings.Builder, payload []byte) error {
+	if providerName != "codex" {
+		return nil
+	}
+	appendProviderOutputTail(tail, payload)
+	return codexAuthExpiredError(providerName, tail.String())
 }
 
 func codexAuthExpiredError(providerName, text string) error {

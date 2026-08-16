@@ -44,7 +44,7 @@ func connectClient(stateDir string, timeout time.Duration) (*bridgeclient.Client
 // precedence over auto-discovery.
 //
 // Discovery rules:
-//   - CA bundle: step-ca-root.crt in certsDir
+//   - CA bundle: step-ca-root.crt in certsDir, then ca-bundle.crt
 //   - Client cert: <local-hostname>.crt or <short-hostname>.crt, then the first non-CA *.crt in certsDir (override with --cert)
 //   - JWT key: jwt-signing.key in certsDir, then stateDir (override with --jwt-key)
 //   - Issuer: CN extracted from the client cert

@@ -77,6 +77,16 @@ while [ "$#" -gt 0 ]; do
 done
 
 auth_file="$codex_home/auth.json"
+if [ "$update_agents_env" -eq 1 ] && [[ "$codex_home" =~ [[:space:]] ]]; then
+  cat >&2 <<EOF
+mint-desktop-codex-auth: CODEX_HOME contains whitespace and cannot be written
+as an unquoted agents.env entry: $codex_home
+
+Use a path without whitespace, or pass --no-agents-env and manage CODEX_HOME
+quoting in your service environment.
+EOF
+  exit 1
+fi
 mkdir -p "$codex_home"
 chmod 700 "$codex_home"
 
