@@ -1,0 +1,5 @@
+services:
+  bridge:
+    environment:
+      BRIDGE_CODEX_UNPROTECTED: "true"
+      BRIDGE_CLAUDE_UNPROTECTED: "true"

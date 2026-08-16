@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -91,7 +92,7 @@ func (p *StdioProvider) BuildCommand(ctx context.Context, cfg bridge.SessionConf
 	if err != nil {
 		return nil, fmt.Errorf("%w: resolve binary %q: %v", bridge.ErrProviderUnavailable, p.cfg.Binary, err)
 	}
-	args, err := resolveCommandArgs(p.cfg.DefaultArgs, p.cfg.ProviderRoot)
+	args, err := commandArgsForProvider(p.cfg.ProviderID, p.cfg.DefaultArgs, p.cfg.ProviderRoot)
 	if err != nil {
 		return nil, fmt.Errorf("%w: resolve args for %q: %v", bridge.ErrProviderUnavailable, p.cfg.ProviderID, err)
 	}
@@ -144,7 +145,7 @@ func (p *StdioProvider) validateStartupPrompt(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	args, err := resolveCommandArgs(p.cfg.DefaultArgs, p.cfg.ProviderRoot)
+	args, err := commandArgsForProvider(p.cfg.ProviderID, p.cfg.DefaultArgs, p.cfg.ProviderRoot)
 	if err != nil {
 		return err
 	}
@@ -195,7 +196,7 @@ func (p *StdioProvider) validateStartupOutput(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	args, err := resolveCommandArgs(p.cfg.DefaultArgs, p.cfg.ProviderRoot)
+	args, err := commandArgsForProvider(p.cfg.ProviderID, p.cfg.DefaultArgs, p.cfg.ProviderRoot)
 	if err != nil {
 		return err
 	}
@@ -266,6 +267,9 @@ func (p *StdioProvider) HealthWithEnv(ctx context.Context, env []string) error {
 	p.mu.RUnlock()
 	if unavailErr != nil {
 		return unavailErr
+	}
+	if err := validateProviderUnprotectedEnv(p.cfg.ProviderID, env); err != nil {
+		return err
 	}
 	path, err := resolveBinaryPath(p.cfg.Binary, p.cfg.ProviderRoot)
 	if err != nil {
@@ -359,6 +363,75 @@ func isStandaloneRelativePathArg(arg string) bool {
 	return strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../")
 }
 
+type unprotectedModeConfig struct {
+	envVar string
+	args   []string
+}
+
+var providerUnprotectedModes = map[string]unprotectedModeConfig{
+	"codex": {
+		envVar: "BRIDGE_CODEX_UNPROTECTED",
+		args:   []string{"--dangerously-bypass-approvals-and-sandbox"},
+	},
+	"claude": {
+		envVar: "BRIDGE_CLAUDE_UNPROTECTED",
+		args:   []string{"--dangerously-skip-permissions"},
+	},
+	"opencode": {
+		envVar: "BRIDGE_OPENCODE_UNPROTECTED",
+		args:   []string{"--auto"},
+	},
+	"gemini": {
+		envVar: "BRIDGE_GEMINI_UNPROTECTED",
+		args:   []string{"--yolo"},
+	},
+}
+
+func commandArgsForProvider(providerID string, args []string, root string) ([]string, error) {
+	resolved, err := resolveCommandArgs(args, root)
+	if err != nil {
+		return nil, err
+	}
+
+	mode, ok := providerUnprotectedModes[providerID]
+	if !ok {
+		return resolved, nil
+	}
+
+	enabled, err := parseProviderUnprotectedMode(providerID, os.LookupEnv)
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return resolved, nil
+	}
+	return append(resolved, mode.args...), nil
+}
+
+func validateProviderUnprotectedEnv(providerID string, env []string) error {
+	_, err := parseProviderUnprotectedMode(providerID, func(key string) (string, bool) {
+		value := envValue(env, key)
+		return value, strings.TrimSpace(value) != ""
+	})
+	return err
+}
+
+func parseProviderUnprotectedMode(providerID string, lookup func(string) (string, bool)) (bool, error) {
+	mode, ok := providerUnprotectedModes[providerID]
+	if !ok {
+		return false, nil
+	}
+	raw, ok := lookup(mode.envVar)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return false, nil
+	}
+	enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean: %w", mode.envVar, err)
+	}
+	return enabled, nil
+}
+
 // versionProbeEnv returns a minimal environment for --version checks.
 // It deliberately excludes auth tokens and API keys so that provider binaries
 // that make network calls when credentials are present (e.g. token validation)
@@ -426,12 +499,13 @@ func filterEnv(env []string) []string {
 
 func envValue(env []string, key string) string {
 	prefix := key + "="
+	value := ""
 	for _, item := range env {
 		if strings.HasPrefix(item, prefix) {
-			return strings.TrimPrefix(item, prefix)
+			value = strings.TrimPrefix(item, prefix)
 		}
 	}
-	return ""
+	return value
 }
 
 func hasEnvKey(env []string, key string) bool {

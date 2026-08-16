@@ -3,14 +3,20 @@ set -euo pipefail
 
 CERT_DIR="${CERT_DIR:-/app/certs}"
 RUNTIME_CERT_DIR="${RUNTIME_CERT_DIR:-/run/bridge-certs}"
-BRIDGE_CONFIG="${BRIDGE_CONFIG:-/app/config/bridge.yaml}"
-BRIDGE_CN="${BRIDGE_CN:-bridge}"
-BRIDGE_SANS="${BRIDGE_SANS:-bridge,localhost,127.0.0.1}"
-BRIDGE_CLIENT_CN="${BRIDGE_CLIENT_CN:-client}"
+BRIDGE_CONFIG="${BRIDGE_CONFIG:-/app/config/bridge-docker.yaml}"
+BRIDGE_CN="${BRIDGE_CN:-bridge.local}"
+BRIDGE_SANS="${BRIDGE_SANS:-bridge.local,bridge,localhost,127.0.0.1}"
+BRIDGE_CLIENT_CN="${BRIDGE_CLIENT_CN:-dev-client}"
 STEP_CA_URL="${STEP_CA_URL:-}"
 STEP_CA_ROOT="${STEP_CA_ROOT:-}"
 STEP_CA_PROVISIONER="${STEP_CA_PROVISIONER:-}"
 STEP_CA_PROVISIONER_PASSWORD="${STEP_CA_PROVISIONER_PASSWORD:-}"
+
+exec_as_bridge() {
+  local quoted=""
+  printf -v quoted '%q ' "$@"
+  exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec ${quoted}"
+}
 
 # Running as root — prepare directories the bridge user needs.
 mkdir -p "$CERT_DIR" "$RUNTIME_CERT_DIR"
@@ -120,7 +126,7 @@ find "$RUNTIME_CERT_DIR" -name '*.key' -exec chmod 600 {} + 2>/dev/null || true
 if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   echo "==> Verifying Claude API-key auth..."
   CLAUDE_AUTH_STATUS="$(su -m -s /bin/bash bridge -c 'cd /app && export HOME=/home/bridge && ./node_modules/.bin/claude auth status' || true)"
-  if [[ "$CLAUDE_AUTH_STATUS" != *'"loggedIn": true'* ]] || [[ "$CLAUDE_AUTH_STATUS" != *'"apiKeySource": "CLAUDE_CODE_OAUTH_TOKEN"'* ]]; then
+  if [[ "$CLAUDE_AUTH_STATUS" != *'"loggedIn": true'* ]]; then
     echo "Claude auth verification failed"
     echo "$CLAUDE_AUTH_STATUS"
     exit 1
@@ -133,6 +139,8 @@ const fs = require("fs");
 const path = require("path");
 
 const statePath = path.join(process.env.HOME, ".claude.json");
+const settingsDir = path.join(process.env.HOME, ".claude");
+const settingsPath = path.join(settingsDir, "settings.json");
 const pkg = require("./node_modules/@anthropic-ai/claude-code/package.json");
 
 let state = {};
@@ -168,6 +176,16 @@ if (apiKey) {
 }
 
 fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n");
+
+fs.mkdirSync(settingsDir, { recursive: true });
+let settings = {};
+try {
+  settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+} catch (_) {
+settings = {};
+}
+settings.skipDangerousModePermissionPrompt = true;
+fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 EOF'
 
 echo "==> Seeding Gemini onboarding state..."
@@ -271,6 +289,9 @@ const configToml = [
   "[projects.\"/repos/penduin\"]",
   "trust_level = \"trusted\"",
   "",
+  "[projects.\"/tmp/ai-agent-bridge\"]",
+  "trust_level = \"trusted\"",
+  "",
   "[notice.model_migrations]",
   "\"gpt-5.3-codex\" = \"gpt-5.4\"",
   "",
@@ -280,17 +301,21 @@ fs.writeFileSync(configPath, configToml);
 EOF'
 
 echo "==> Starting bridge as non-root user..."
-BRIDGE_CMD="bridgectl server start --config $BRIDGE_CONFIG"
+if [ "$#" -gt 0 ]; then
+  exec_as_bridge "$@"
+fi
+
+BRIDGE_CMD=(bridgectl server start --config "$BRIDGE_CONFIG")
 if [ -n "$STEP_CA_URL" ] && [ -n "$STEP_CA_ROOT" ]; then
-  BRIDGE_CMD="$BRIDGE_CMD --step-ca-url $STEP_CA_URL --step-ca-root $STEP_CA_ROOT"
+  BRIDGE_CMD+=(--step-ca-url "$STEP_CA_URL" --step-ca-root "$STEP_CA_ROOT")
   if [ -n "$STEP_CA_PROVISIONER" ]; then
-    BRIDGE_CMD="$BRIDGE_CMD --step-ca-provisioner $STEP_CA_PROVISIONER"
+    BRIDGE_CMD+=(--step-ca-provisioner "$STEP_CA_PROVISIONER")
   fi
   # Pass the provisioner password file for non-interactive JWK cert requests
   # (Docker containers have no TTY for interactive password prompts).
   STEP_PASS_FILE="/run/bridge-certs/step-provisioner-password"
   if [ -f "$STEP_PASS_FILE" ]; then
-    BRIDGE_CMD="$BRIDGE_CMD --step-ca-provisioner-password-file $STEP_PASS_FILE"
+    BRIDGE_CMD+=(--step-ca-provisioner-password-file "$STEP_PASS_FILE")
   fi
 fi
-exec su -m -s /bin/bash bridge -c "cd /app && export HOME=/home/bridge && exec $BRIDGE_CMD"
+exec_as_bridge "${BRIDGE_CMD[@]}"

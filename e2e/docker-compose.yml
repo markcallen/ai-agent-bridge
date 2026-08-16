@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     environment:
       BRIDGE_CONFIG: /app/config/bridge-e2e.yaml
+      BRIDGE_CN: bridge
       BRIDGE_CLIENT_CN: e2e-client
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -26,6 +27,8 @@ services:
       dockerfile: e2e/Dockerfile.client
     environment:
       E2E_ONLY: ${E2E_ONLY:-}
+      E2E_TEST_TIMEOUT: ${E2E_TEST_TIMEOUT:-}
+      E2E_UNPROTECTED_EXPECT: ${E2E_UNPROTECTED_EXPECT:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

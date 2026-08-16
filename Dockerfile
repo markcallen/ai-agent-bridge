@@ -49,6 +49,10 @@ COPY --from=build /out/ai-agent-bridge-ca /usr/local/bin/ai-agent-bridge-ca
 COPY .nvmrc /app/.nvmrc
 COPY package.json package-lock.json /app/
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force && \
+    ln -sf /app/node_modules/.bin/codex /usr/local/bin/codex && \
+    ln -sf /app/node_modules/.bin/claude /usr/local/bin/claude && \
+    ln -sf /app/node_modules/.bin/opencode /usr/local/bin/opencode && \
+    ln -sf /app/node_modules/.bin/gemini /usr/local/bin/gemini && \
     (sed -i "s|'  Type your message or @path/to/file'|' '|g" \
         /app/node_modules/@google/gemini-cli/dist/src/ui/components/Composer.js \
         /app/node_modules/@google/gemini-cli/dist/src/ui/components/InputPrompt.js \

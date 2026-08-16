@@ -20,3 +20,17 @@
 - Early signal missed: The first harness assumed a missing packaged file meant package contents were wrong, but the generated `.deb` contained the file.
 - Preventative rule: Detached container smoke tests must create and wait on an explicit readiness marker before running assertions or follow-up exec commands.
 - Validation added (test/check/alert): `scripts/smoke-provider-runtime-user.sh` waits for `/tmp/provider-runtime-smoke-ready` before running the non-root provider runtime installer.
+
+## 2026-08-16 Docker Config Certificate Name Alignment
+- Incident/bug: Changing the container default config to `bridge-docker.yaml` initially made default image startup fail because the entrypoint generated `bridge.crt` while the Docker config expected `bridge.local.crt`.
+- Root cause pattern: Docker entrypoint-generated filenames are part of the config contract; changing the default config without checking generated certificate names creates a startup-only failure.
+- Early signal missed: Compose overrides had been setting `BRIDGE_CN=bridge.local`, masking the mismatch in normal compose-based development.
+- Preventative rule: When changing default container config or certificate CN defaults, run a no-args detached image startup smoke and verify the container stays running.
+- Validation added (test/check/alert): `docker run -d --name issue180-default ai-agent-bridge:issue-180` stayed running after aligning `BRIDGE_CN`, `BRIDGE_CLIENT_CN`, and SAN defaults with `bridge-docker.yaml`.
+
+## 2026-08-16 Live Provider TUI E2E Input
+- Incident/bug: The first unprotected-mode e2e harness treated echoed prompt text as completion and sent Claude's prompt plus Enter in one PTY write, leaving Claude's TUI composer unsubmitted.
+- Root cause pattern: Interactive provider CLIs echo prompts and can treat pasted text differently from a separate submit key, so transcript literals alone are not a reliable proof of action.
+- Early signal missed: Codex and Claude transcripts showed the prompt in the composer with zero tokens, but the test advanced because the completion marker was present in the echoed prompt.
+- Preventative rule: For live provider e2e tests, prove behavior through external state first, then use transcript markers only as secondary evidence; send provider-specific submit keys as separate PTY writes when needed.
+- Validation added (test/check/alert): `env-secrets aws -s /ai-agent-bridge/e2e -- make test-e2e-unprotected` passed with protected and unprotected Codex/Claude `.git` marker checks.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/markcallen/ai-agent-bridge/internal/bridge"
@@ -203,4 +204,222 @@ func TestBuildCommandResolvesArgsFromProviderRoot(t *testing.T) {
 	if len(cmd.Args) < 2 || cmd.Args[1] != want {
 		t.Fatalf("cmd.Args=%v want second arg %q", cmd.Args, want)
 	}
+}
+
+func TestBuildCommandAppendsProviderScopedUnprotectedArgs(t *testing.T) {
+	tests := []struct {
+		provider string
+		envVar   string
+		wantArgs []string
+	}{
+		{
+			provider: "codex",
+			envVar:   "BRIDGE_CODEX_UNPROTECTED",
+			wantArgs: []string{"--dangerously-bypass-approvals-and-sandbox"},
+		},
+		{
+			provider: "claude",
+			envVar:   "BRIDGE_CLAUDE_UNPROTECTED",
+			wantArgs: []string{"--dangerously-skip-permissions"},
+		},
+		{
+			provider: "opencode",
+			envVar:   "BRIDGE_OPENCODE_UNPROTECTED",
+			wantArgs: []string{"--auto"},
+		},
+		{
+			provider: "gemini",
+			envVar:   "BRIDGE_GEMINI_UNPROTECTED",
+			wantArgs: []string{"--yolo"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.provider, func(t *testing.T) {
+			clearUnprotectedEnv(t)
+			t.Setenv(tc.envVar, "true")
+
+			p := NewStdioProvider(StdioConfig{
+				ProviderID:  tc.provider,
+				Binary:      "/bin/echo",
+				DefaultArgs: []string{"base"},
+			})
+
+			cmd, err := p.BuildCommand(context.Background(), bridge.SessionConfig{
+				ProjectID: "test",
+				SessionID: "session",
+				RepoPath:  ".",
+			})
+			if err != nil {
+				t.Fatalf("BuildCommand: %v", err)
+			}
+			for _, wantArg := range tc.wantArgs {
+				if !containsString(cmd.Args, wantArg) {
+					t.Fatalf("cmd.Args=%v missing %q", cmd.Args, wantArg)
+				}
+				if got := countString(cmd.Args, wantArg); got != 1 {
+					t.Fatalf("%q count=%d want 1 in %v", wantArg, got, cmd.Args)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildCommandUnprotectedEnvIsProviderScoped(t *testing.T) {
+	clearUnprotectedEnv(t)
+	t.Setenv("BRIDGE_CODEX_UNPROTECTED", "true")
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID:  "claude",
+		Binary:      "/bin/echo",
+		DefaultArgs: []string{"base"},
+	})
+
+	cmd, err := p.BuildCommand(context.Background(), bridge.SessionConfig{
+		ProjectID: "test",
+		SessionID: "session",
+		RepoPath:  ".",
+	})
+	if err != nil {
+		t.Fatalf("BuildCommand: %v", err)
+	}
+	if containsString(cmd.Args, "--dangerously-skip-permissions") {
+		t.Fatalf("claude args unexpectedly enabled by codex env: %v", cmd.Args)
+	}
+}
+
+func TestBuildCommandUnprotectedFalseDoesNotAppendArgs(t *testing.T) {
+	clearUnprotectedEnv(t)
+	t.Setenv("BRIDGE_CODEX_UNPROTECTED", "false")
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID:  "codex",
+		Binary:      "/bin/echo",
+		DefaultArgs: []string{"base"},
+	})
+
+	cmd, err := p.BuildCommand(context.Background(), bridge.SessionConfig{
+		ProjectID: "test",
+		SessionID: "session",
+		RepoPath:  ".",
+	})
+	if err != nil {
+		t.Fatalf("BuildCommand: %v", err)
+	}
+	if containsString(cmd.Args, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("unprotected args appended with false env: %v", cmd.Args)
+	}
+}
+
+func TestBuildCommandInvalidUnprotectedEnvFailsClosed(t *testing.T) {
+	clearUnprotectedEnv(t)
+	t.Setenv("BRIDGE_CODEX_UNPROTECTED", "maybe")
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID:  "codex",
+		Binary:      "/bin/echo",
+		DefaultArgs: []string{"base"},
+	})
+
+	_, err := p.BuildCommand(context.Background(), bridge.SessionConfig{
+		ProjectID: "test",
+		SessionID: "session",
+		RepoPath:  ".",
+	})
+	if err == nil {
+		t.Fatal("expected invalid unprotected env error")
+	}
+	if !strings.Contains(err.Error(), "BRIDGE_CODEX_UNPROTECTED") {
+		t.Fatalf("error %q should mention env var", err)
+	}
+}
+
+func TestHealthWithEnvInvalidUnprotectedEnvFailsClosed(t *testing.T) {
+	clearUnprotectedEnv(t)
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID: "codex",
+		Binary:     "/bin/echo",
+	})
+
+	err := p.HealthWithEnv(context.Background(), []string{"BRIDGE_CODEX_UNPROTECTED=maybe"})
+	if err == nil {
+		t.Fatal("expected invalid unprotected env error")
+	}
+	if !strings.Contains(err.Error(), "BRIDGE_CODEX_UNPROTECTED") {
+		t.Fatalf("error %q should mention env var", err)
+	}
+}
+
+func TestHealthWithEnvDuplicateUnprotectedEnvUsesLastValue(t *testing.T) {
+	clearUnprotectedEnv(t)
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID: "codex",
+		Binary:     "/bin/echo",
+	})
+
+	err := p.HealthWithEnv(context.Background(), []string{
+		"BRIDGE_CODEX_UNPROTECTED=",
+		"BRIDGE_CODEX_UNPROTECTED=maybe",
+	})
+	if err == nil {
+		t.Fatal("expected invalid last unprotected env value to fail closed")
+	}
+	if !strings.Contains(err.Error(), "BRIDGE_CODEX_UNPROTECTED") {
+		t.Fatalf("error %q should mention env var", err)
+	}
+
+	err = p.HealthWithEnv(context.Background(), []string{
+		"BRIDGE_CODEX_UNPROTECTED=maybe",
+		"BRIDGE_CODEX_UNPROTECTED=false",
+	})
+	if err != nil {
+		t.Fatalf("expected valid last unprotected env value to win, got %v", err)
+	}
+}
+
+func TestProbeArgsUseProviderScopedUnprotectedMode(t *testing.T) {
+	clearUnprotectedEnv(t)
+	t.Setenv("BRIDGE_CLAUDE_UNPROTECTED", "1")
+
+	got, err := commandArgsForProvider("claude", []string{"--verbose"}, "")
+	if err != nil {
+		t.Fatalf("commandArgsForProvider: %v", err)
+	}
+	if !containsString(got, "--dangerously-skip-permissions") {
+		t.Fatalf("probe args missing claude unprotected flag: %v", got)
+	}
+}
+
+func clearUnprotectedEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"BRIDGE_CODEX_UNPROTECTED",
+		"BRIDGE_CLAUDE_UNPROTECTED",
+		"BRIDGE_OPENCODE_UNPROTECTED",
+		"BRIDGE_GEMINI_UNPROTECTED",
+	} {
+		t.Setenv(key, "")
+		_ = os.Unsetenv(key)
+	}
+}
+
+func countString(values []string, target string) int {
+	count := 0
+	for _, value := range values {
+		if value == target {
+			count++
+		}
+	}
+	return count
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

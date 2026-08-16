@@ -306,6 +306,7 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs
 | `make build` | Build `bin/ai-agent-bridge` and `bin/ai-agent-bridge-ca` |
 | `make test` | Run unit tests with race detection |
 | `make test-e2e` | Run the Dockerized end-to-end test suite |
+| `make test-e2e-unprotected` | Manually run live Docker SDK e2e tests for Codex/Claude protected and unprotected modes |
 | `make test-cover` | Run tests with coverage report |
 | `make smoke` | Run Docker-based smoke validation |
 | `make smoke-apt-local` | Build a `.deb`, create a local apt repo, and verify install in Ubuntu containers |

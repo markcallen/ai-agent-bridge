@@ -1,4 +1,4 @@
-.PHONY: build proto tools test test-e2e test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-provider-runtime-user smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini sessions-list sessions-watch sessions-attach orchestrator-claude orchestrator-opencode web-install web-dev web-build web-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
+.PHONY: build proto tools test test-e2e test-e2e-unprotected test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-provider-runtime-user smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini sessions-list sessions-watch sessions-attach orchestrator-claude orchestrator-opencode web-install web-dev web-build web-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
 BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
@@ -44,6 +44,17 @@ test-e2e:
 	E2E_ONLY=$(E2E_ONLY) ./scripts/with_env_secrets.sh docker compose -f e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-client; \
 	rc=$$?; \
 	docker compose -f e2e/docker-compose.yml down -v; \
+	exit $$rc
+
+test-e2e-unprotected:
+	@set +e; \
+	E2E_ONLY=unprotected E2E_TEST_TIMEOUT=900s E2E_UNPROTECTED_EXPECT=protected ./scripts/with_env_secrets.sh docker compose -f e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from test-client; \
+	rc=$$?; \
+	docker compose -f e2e/docker-compose.yml down -v; \
+	if [ $$rc -ne 0 ]; then exit $$rc; fi; \
+	E2E_ONLY=unprotected E2E_TEST_TIMEOUT=900s E2E_UNPROTECTED_EXPECT=enabled ./scripts/with_env_secrets.sh docker compose -f e2e/docker-compose.yml -f e2e/docker-compose.unprotected.yml up --build --abort-on-container-exit --exit-code-from test-client; \
+	rc=$$?; \
+	docker compose -f e2e/docker-compose.yml -f e2e/docker-compose.unprotected.yml down -v; \
 	exit $$rc
 
 test-step-ca-e2e:

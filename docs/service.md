@@ -85,11 +85,45 @@ The prebuilt image is available at `ghcr.io/markcallen/ai-agent-bridge`.
 ```bash
 docker run \
   -p 9445:9445 \
-  -v ./certs:/app/certs:ro \
   -v ~/repos:/repos \
-  -e CLAUDE_CODE_OAUTH_TOKEN=sk-ant-... \
+  -e OPENAI_API_KEY=sk-... \
   ghcr.io/markcallen/ai-agent-bridge
 ```
+
+With no command arguments, the image initializes runtime state and starts
+`bridgectl server start` with `/app/config/bridge-docker.yaml`. Set
+`BRIDGE_CONFIG` to use a mounted config file instead. If command arguments are
+supplied, the entrypoint performs the same initialization and then runs the
+supplied command as the non-root `bridge` user:
+
+```bash
+docker run --rm ghcr.io/markcallen/ai-agent-bridge bridgectl server status
+```
+
+The image exposes its bundled `codex`, `claude`, `opencode`, and `gemini` CLIs
+on `PATH`.
+
+### Container Provider Auth and Unprotected Mode
+
+Codex in the published container accepts any of `OPENAI_API_KEY`,
+`CODEX_API_KEY`, or `CODEX_AUTH`. The other bundled providers use their native
+credential environment variables, such as `CLAUDE_CODE_OAUTH_TOKEN` for Claude
+and `GEMINI_API_KEY` for Gemini.
+
+Provider sessions are protected by default. In container or VM deployments that
+provide their own isolation boundary, a provider can be opted into its native
+permissive mode with a provider-specific boolean environment variable:
+
+| Provider | Environment variable | Native argument added |
+|---|---|---|
+| `codex` | `BRIDGE_CODEX_UNPROTECTED=true` | `--dangerously-bypass-approvals-and-sandbox` |
+| `claude` | `BRIDGE_CLAUDE_UNPROTECTED=true` | `--dangerously-skip-permissions` |
+| `opencode` | `BRIDGE_OPENCODE_UNPROTECTED=true` | `--auto` |
+| `gemini` | `BRIDGE_GEMINI_UNPROTECTED=true` | `--yolo` |
+
+Invalid boolean values fail closed. These settings apply to startup probes and
+sessions, so provider health reflects the same mode that sessions will use.
+Only enable them inside an isolation boundary you trust.
 
 ---
 
@@ -312,6 +346,10 @@ If setup exits non-zero, exceeds its effective timeout, or has an invalid config
 | `required_env` | Environment variables that must be set; daemon refuses to start the provider otherwise |
 | `fallbacks` | Ordered list of up to 2 provider IDs to try if the requested provider is unavailable at session start. Fallback selection happens only before the session starts; the daemon does not migrate a running session. |
 | `prompt_pattern` | Regex that matches the agent's interactive prompt (used for ready detection) |
+
+Provider-scoped unprotected environment variables are intentionally separate
+from YAML config so deployments can opt into permissive provider behavior at
+runtime without generating a config file.
 
 ---
 
