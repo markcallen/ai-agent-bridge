@@ -29,6 +29,8 @@ import (
 // detachKey is ctrl-] (0x1d), used to detach from a session without stopping it.
 const detachKey = 0x1d
 
+const maxProviderErrorTail = 16 * 1024
+
 func newRunCmd() *cobra.Command {
 	var (
 		providerName string
@@ -141,6 +143,7 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	}
 
 	var detached atomic.Bool
+	var outputTail strings.Builder
 
 	// Handle signals.
 	sigCh := make(chan os.Signal, 2)
@@ -201,12 +204,19 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 	err = stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {
 		switch ev.Type {
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
+			appendProviderOutputTail(&outputTail, ev.Payload)
+			if err := codexAuthExpiredError(providerName, outputTail.String()); err != nil {
+				return err
+			}
 			_, writeErr := os.Stdout.Write(ev.Payload)
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_REPLAY_GAP:
 			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[ai-agent-bridge] replay gap: oldest=%d last=%d\r\n", ev.OldestSeq, ev.LastSeq)
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
+			if err := codexAuthExpiredError(providerName, ev.Error); err != nil {
+				return err
+			}
 			return errors.New(ev.Error)
 		default:
 			return nil
@@ -232,6 +242,9 @@ func ensureServer() error {
 	target, _ := localserver.DiscoverTarget("")
 	if target != "" {
 		return nil
+	}
+	if err := secureServerDiscoveryError(); err != nil {
+		return err
 	}
 
 	// Find our own binary to spawn the server (local mode only).
@@ -260,6 +273,22 @@ func ensureServer() error {
 		}
 	}
 	return fmt.Errorf("server did not start within 5s")
+}
+
+func secureServerDiscoveryError() error {
+	stateDir := localserver.StateDir()
+	if localserver.DiscoverMode(stateDir) != localserver.ModeSecure {
+		return nil
+	}
+	addrData, err := os.ReadFile(filepath.Join(stateDir, "server.addr"))
+	if err != nil {
+		return nil
+	}
+	addr := strings.TrimSpace(string(addrData))
+	if addr == "" {
+		return nil
+	}
+	return fmt.Errorf("secure ai-agent-bridge server is recorded at %s, but the health probe failed; check the user service and credentials under %s/certs", addr, stateDir)
 }
 
 // runSessionNoTTY runs a session without a terminal, forwarding raw stdin to
@@ -309,6 +338,7 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 	// before the ATTACHED event is sent).
 	attached := make(chan struct{})
 	var attachOnce sync.Once
+	var outputTail strings.Builder
 
 	// Forward stdin to session once attached; stop session on EOF.
 	go func() {
@@ -342,9 +372,16 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 		}
 		switch ev.Type {
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT:
+			appendProviderOutputTail(&outputTail, ev.Payload)
+			if err := codexAuthExpiredError(providerName, outputTail.String()); err != nil {
+				return err
+			}
 			_, writeErr := os.Stdout.Write(ev.Payload)
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
+			if err := codexAuthExpiredError(providerName, ev.Error); err != nil {
+				return err
+			}
 			return errors.New(ev.Error)
 		default:
 			return nil
@@ -354,6 +391,35 @@ func runSessionNoTTY(dir, providerName, project string, timeout time.Duration) e
 		return fmt.Errorf("session ended: %w", err)
 	}
 	return nil
+}
+
+func appendProviderOutputTail(tail *strings.Builder, payload []byte) {
+	if len(payload) == 0 {
+		return
+	}
+	tail.Write(payload)
+	if tail.Len() <= maxProviderErrorTail {
+		return
+	}
+	text := tail.String()
+	if len(text) <= maxProviderErrorTail {
+		return
+	}
+	tail.Reset()
+	tail.WriteString(text[len(text)-maxProviderErrorTail:])
+}
+
+func codexAuthExpiredError(providerName, text string) error {
+	if providerName != "codex" || !looksLikeCodexAuthExpired(text) {
+		return nil
+	}
+	return errors.New("codex account auth is expired; refresh the Codex auth.json for this desktop, or remove CODEX_AUTH if you intend to use API-key auth")
+}
+
+func looksLikeCodexAuthExpired(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "token_expired") ||
+		strings.Contains(lower, "provided authentication token is expired")
 }
 
 // formatStartSessionError reformats gRPC errors from StartSession into

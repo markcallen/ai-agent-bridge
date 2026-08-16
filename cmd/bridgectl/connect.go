@@ -54,8 +54,7 @@ func resolveRemoteCredentials(certOverride, keyOverride, jwtKeyOverride string) 
 
 	creds := &remoteCredentials{}
 
-	// CA bundle — always step-ca-root.crt for remote (Step CA) setups.
-	creds.caBundle = filepath.Join(certsDir, "step-ca-root.crt")
+	creds.caBundle = discoverCABundle(certsDir)
 
 	// Client cert: explicit override or auto-discover.
 	if certOverride != "" {
@@ -96,6 +95,16 @@ func resolveRemoteCredentials(certOverride, keyOverride, jwtKeyOverride string) 
 	creds.issuer = issuer
 
 	return creds, nil
+}
+
+func discoverCABundle(certsDir string) string {
+	for _, name := range []string{"step-ca-root.crt", "ca-bundle.crt"} {
+		path := filepath.Join(certsDir, name)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return filepath.Join(certsDir, "step-ca-root.crt")
 }
 
 // discoverClientCert prefers a certificate/key pair named after the local

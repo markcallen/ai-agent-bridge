@@ -2,9 +2,12 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/markcallen/ai-agent-bridge/internal/localserver"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -65,5 +68,48 @@ func TestFormatStartSessionError_NonGRPC(t *testing.T) {
 
 	if !strings.HasPrefix(msg, "start session:") {
 		t.Fatalf("non-gRPC errors should keep prefix, got: %s", msg)
+	}
+}
+
+func TestCodexAuthExpiredError(t *testing.T) {
+	err := codexAuthExpiredError("codex", `{"code":"token_expired","message":"Provided authentication token is expired."}`)
+	if err == nil {
+		t.Fatal("expected expired auth error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "account auth is expired") {
+		t.Fatalf("message should mention account auth expiry, got: %s", msg)
+	}
+	if !strings.Contains(msg, "auth.json") {
+		t.Fatalf("message should mention auth.json refresh, got: %s", msg)
+	}
+}
+
+func TestCodexAuthExpiredErrorNonCodex(t *testing.T) {
+	if err := codexAuthExpiredError("claude", "token_expired"); err != nil {
+		t.Fatalf("non-codex provider should not get codex auth error: %v", err)
+	}
+}
+
+func TestSecureServerDiscoveryError(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", stateDir)
+	if err := os.WriteFile(filepath.Join(stateDir, "server.mode"), []byte(string(localserver.ModeSecure)+"\n"), 0o644); err != nil {
+		t.Fatalf("write server.mode: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "server.addr"), []byte("100.64.0.1:9445\n"), 0o644); err != nil {
+		t.Fatalf("write server.addr: %v", err)
+	}
+
+	err := secureServerDiscoveryError()
+	if err == nil {
+		t.Fatal("expected secure discovery error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "100.64.0.1:9445") {
+		t.Fatalf("message should include recorded addr, got: %s", msg)
+	}
+	if strings.Contains(msg, "5s") {
+		t.Fatalf("message should not be generic 5s timeout, got: %s", msg)
 	}
 }

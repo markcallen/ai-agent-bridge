@@ -82,6 +82,27 @@ func TestDiscoverClientCertForHostnameFallsBackToSingleCandidate(t *testing.T) {
 	}
 }
 
+func TestDiscoverCABundleFallsBackToStateBundle(t *testing.T) {
+	certsDir := t.TempDir()
+	bundle := filepath.Join(certsDir, "ca-bundle.crt")
+	touchFile(t, bundle)
+
+	if got := discoverCABundle(certsDir); got != bundle {
+		t.Fatalf("discoverCABundle() = %q, want %q", got, bundle)
+	}
+}
+
+func TestDiscoverCABundlePrefersStepCARoot(t *testing.T) {
+	certsDir := t.TempDir()
+	stepRoot := filepath.Join(certsDir, "step-ca-root.crt")
+	touchFile(t, stepRoot)
+	touchFile(t, filepath.Join(certsDir, "ca-bundle.crt"))
+
+	if got := discoverCABundle(certsDir); got != stepRoot {
+		t.Fatalf("discoverCABundle() = %q, want %q", got, stepRoot)
+	}
+}
+
 func TestRemoteAuthHintSuggestsLocalJWTKey(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

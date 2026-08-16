@@ -20,10 +20,11 @@ func newTestCodexProvider() *CodexProvider {
 
 func clearCodexEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_AUTH"} {
+	for _, key := range []string{"OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_AUTH", "CODEX_HOME"} {
 		t.Setenv(key, "")
 		_ = os.Unsetenv(key)
 	}
+	t.Setenv("HOME", t.TempDir())
 }
 
 func TestCodexValidateStartup_NoAuth(t *testing.T) {
@@ -66,6 +67,36 @@ func TestCodexValidateStartup_CodexAuth(t *testing.T) {
 
 	if err := p.ValidateStartup(context.Background()); err != nil {
 		t.Fatalf("unexpected error with CODEX_AUTH: %v", err)
+	}
+}
+
+func TestCodexValidateStartup_CodeXHomeAuthFile(t *testing.T) {
+	clearCodexEnv(t)
+	codexHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"auth_mode":"chatgpt"}`), 0o600); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
+	p := newTestCodexProvider()
+
+	if err := p.ValidateStartup(context.Background()); err != nil {
+		t.Fatalf("unexpected error with CODEX_HOME auth.json: %v", err)
+	}
+}
+
+func TestCodexValidateStartup_DefaultHomeAuthFile(t *testing.T) {
+	clearCodexEnv(t)
+	codexHome := filepath.Join(os.Getenv("HOME"), ".codex")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatalf("mkdir .codex: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(`{"auth_mode":"chatgpt"}`), 0o600); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+	p := newTestCodexProvider()
+
+	if err := p.ValidateStartup(context.Background()); err != nil {
+		t.Fatalf("unexpected error with default auth.json: %v", err)
 	}
 }
 

@@ -340,8 +340,13 @@ no command-line arguments are supplied.
   `bridge` user.
 - The bundled `codex`, `claude`, `opencode`, and `gemini` CLIs are exposed on
   `PATH` inside the image.
-- Provider authentication may be supplied through environment variables. Codex
-  accepts `OPENAI_API_KEY`, `CODEX_API_KEY`, or `CODEX_AUTH`.
+- Provider authentication may be supplied through environment variables or
+  provider-native credential files. Codex accepts `OPENAI_API_KEY`,
+  `CODEX_API_KEY`, `CODEX_AUTH`, `CODEX_HOME/auth.json`, or the default
+  `~/.codex/auth.json`.
+- Codex account-token expiry should surface as an actionable operator error
+  that points to refreshing the desktop's `auth.json` instead of exposing only
+  the provider's raw token expiry payload.
 
 ### Provider-Scoped Unprotected Mode
 
