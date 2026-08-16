@@ -92,6 +92,15 @@ if ! docker exec "$CONTAINER" test -f /tmp/provider-runtime-smoke-ready >/dev/nu
 fi
 
 docker exec "$CONTAINER" su - ubuntu -c \
+  'if PATH=/tmp/fakebin:$PATH INSTALL_DIR=relative/providers /usr/lib/ai-agent-bridge/install-provider-runtime >/tmp/relative-install-dir.out 2>&1; then cat /tmp/relative-install-dir.out >&2; exit 1; fi'
+docker exec "$CONTAINER" su - ubuntu -c \
+  'grep -q "INSTALL_DIR must be an absolute path" /tmp/relative-install-dir.out'
+docker exec "$CONTAINER" su - ubuntu -c \
+  'if PATH=/tmp/fakebin:$PATH XDG_DATA_HOME=relative-data /usr/lib/ai-agent-bridge/install-provider-runtime >/tmp/relative-xdg-data-home.out 2>&1; then cat /tmp/relative-xdg-data-home.out >&2; exit 1; fi'
+docker exec "$CONTAINER" su - ubuntu -c \
+  'grep -q "INSTALL_DIR must be an absolute path" /tmp/relative-xdg-data-home.out'
+
+docker exec "$CONTAINER" su - ubuntu -c \
   'PATH=/tmp/fakebin:$PATH /usr/lib/ai-agent-bridge/install-provider-runtime'
 
 docker exec "$CONTAINER" su - ubuntu -c \

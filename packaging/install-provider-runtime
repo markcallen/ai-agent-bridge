@@ -53,6 +53,11 @@ for arg in "$@"; do
   esac
 done
 
+case "$INSTALL_DIR" in
+  /*) ;;
+  *) die "INSTALL_DIR must be an absolute path, got ${INSTALL_DIR}" ;;
+esac
+
 # ── Node.js version check ──────────────────────────────────────────────────
 
 node_major() {
