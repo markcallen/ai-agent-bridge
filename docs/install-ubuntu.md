@@ -71,6 +71,29 @@ systemctl --user start bridge
 
 This split is intentional: the apt package ships the bridge server, not third-party provider binaries or API credentials.
 
+## Provider Runtime
+
+Provider CLIs that self-update should be installed as the same login user that runs the bridge service:
+
+```bash
+/usr/lib/ai-agent-bridge/install-provider-runtime
+```
+
+By default this installs providers into `$XDG_DATA_HOME/ai-agent-bridge/providers`, or `~/.local/share/ai-agent-bridge/providers` when `XDG_DATA_HOME` is unset. Configure the bridge with the same root:
+
+```yaml
+runtime:
+  provider_root: "$HOME/.local/share/ai-agent-bridge/providers"
+```
+
+Use `/opt/ai-agent-bridge` only for an explicitly root-controlled, pinned provider runtime:
+
+```bash
+sudo INSTALL_DIR=/opt/ai-agent-bridge /usr/lib/ai-agent-bridge/install-provider-runtime
+```
+
+Native provider updaters should not target `/opt/ai-agent-bridge` unless they run through a controlled privileged updater.
+
 ## Verifying The Service
 
 ```bash

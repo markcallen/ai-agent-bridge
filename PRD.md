@@ -288,6 +288,9 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
 - No system user or group is created; the bridge runs as the login user.
 - Provide a default packaged config that allows the server to start on a fresh host without bundled provider CLIs or API keys.
 - Provider CLIs and their API credentials remain operator-managed prerequisites and must be documented separately from the package install flow.
+- Provider CLIs that are expected to use native self-updaters must be installed into a user-owned runtime directory. The packaged helper defaults to `$XDG_DATA_HOME/ai-agent-bridge/providers`, or `$HOME/.local/share/ai-agent-bridge/providers` when `XDG_DATA_HOME` is unset.
+- `/opt/ai-agent-bridge` is reserved for explicit root-controlled provider runtimes. Native provider self-updaters must not target this directory unless they run through a controlled privileged updater.
+- `runtime.provider_root` accepts absolute paths after environment expansion for `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, and `${XDG_DATA_HOME}` so per-user provider roots can be documented without hard-coding a login name.
 
 ### Publishing and Hosting
 
@@ -310,6 +313,7 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
 - A release tag builds a signed `.deb` for each supported Ubuntu target.
 - The published apt repository is consumable with standard `apt` commands on supported Ubuntu releases.
 - A clean Ubuntu host can install `ai-agent-bridge`, start the systemd service, and pass a basic daemon health check.
+- A clean Ubuntu container can run the packaged provider runtime installer as a non-root login user and install provider CLIs into the user-owned runtime directory without mutating `/opt/ai-agent-bridge`.
 - The release workflow includes smoke coverage that validates apt installation in containers and on an EC2 host.
 - `README.md` and `docs/` describe package installation, runtime prerequisites, and service behavior accurately.
 

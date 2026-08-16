@@ -172,6 +172,9 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyDefaults(cfg)
+	if err := expandRuntimeConfig(cfg); err != nil {
+		return nil, err
+	}
 	if err := validate(cfg); err != nil {
 		return nil, err
 	}
@@ -275,6 +278,39 @@ func applyDefaults(cfg *Config) {
 	if cfg.RepoSetup.MaxTimeout == "" {
 		cfg.RepoSetup.MaxTimeout = "15m"
 	}
+}
+
+func expandRuntimeConfig(cfg *Config) error {
+	if cfg.Runtime.ProviderRoot == "" {
+		return nil
+	}
+	expanded, err := expandProviderRoot(cfg.Runtime.ProviderRoot)
+	if err != nil {
+		return err
+	}
+	cfg.Runtime.ProviderRoot = expanded
+	return nil
+}
+
+func expandProviderRoot(root string) (string, error) {
+	var missing []string
+	expanded := os.Expand(root, func(name string) string {
+		switch name {
+		case "HOME", "XDG_DATA_HOME":
+			value := os.Getenv(name)
+			if value == "" {
+				missing = append(missing, name)
+			}
+			return value
+		default:
+			missing = append(missing, name)
+			return ""
+		}
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("config: runtime.provider_root references unset or unsupported environment variable %q", missing[0])
+	}
+	return expanded, nil
 }
 
 func validate(cfg *Config) error {

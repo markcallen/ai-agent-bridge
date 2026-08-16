@@ -13,3 +13,10 @@
 - Early signal missed: The packaged default config is localhost-only by design, but the first smoke harness assumed host-to-container access over a published port.
 - Preventative rule: When a packaged service defaults to loopback-only binding, run health verification inside the target environment or through an explicit tunnel instead of relying on Docker port publishing.
 - Validation added (test/check/alert): Updated `scripts/smoke-apt-local.sh` to execute the gRPC healthcheck inside each Ubuntu container, matching packaged service behavior.
+
+## 2026-08-14 Detached Docker Smoke Setup
+- Incident/bug: The provider runtime smoke test tried to exec into a detached Ubuntu container before package/user setup had completed.
+- Root cause pattern: `docker run -d` returns after the container starts, not after an inline bootstrap script reaches its steady state.
+- Early signal missed: The first harness assumed a missing packaged file meant package contents were wrong, but the generated `.deb` contained the file.
+- Preventative rule: Detached container smoke tests must create and wait on an explicit readiness marker before running assertions or follow-up exec commands.
+- Validation added (test/check/alert): `scripts/smoke-provider-runtime-user.sh` waits for `/tmp/provider-runtime-smoke-ready` before running the non-root provider runtime installer.

@@ -6,22 +6,42 @@
 #   install-provider-runtime --verify     Check installed versions; no changes.
 #
 # This script:
-#   1. Verifies (or installs) Node.js REQUIRED_NODE_MAJOR on the system PATH.
+#   1. Verifies Node.js REQUIRED_NODE_MAJOR on the system PATH.
 #   2. Copies the packaged runtime manifest from MANIFEST_DIR to INSTALL_DIR.
 #   3. Runs npm ci --omit=dev --no-audit --no-fund to install pinned provider CLIs.
 #   4. Verifies each installed CLI binary is present and reports its version.
-#   5. Ensures INSTALL_DIR is owned root:root and not writable by group/other.
+#   5. Ensures INSTALL_DIR is not writable by group/other.
 #
 # The script is safe to re-run; a failed install does not remove a previously
 # working runtime at INSTALL_DIR.
+#
+# By default, INSTALL_DIR is user-owned:
+#   $XDG_DATA_HOME/ai-agent-bridge/providers
+#   or $HOME/.local/share/ai-agent-bridge/providers when XDG_DATA_HOME is unset.
+#
+# Set INSTALL_DIR=/opt/ai-agent-bridge explicitly for a root-controlled runtime.
 #
 # MANIFEST_DIR and INSTALL_DIR may be overridden for testing:
 #   MANIFEST_DIR=/custom/src INSTALL_DIR=/custom/dst install-provider-runtime
 
 set -eu
 
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+say() { printf '==> %s\n' "$*"; }
+
+default_install_dir() {
+  if [ -n "${XDG_DATA_HOME:-}" ]; then
+    printf '%s\n' "${XDG_DATA_HOME}/ai-agent-bridge/providers"
+    return
+  fi
+  if [ -z "${HOME:-}" ]; then
+    die "HOME is required when INSTALL_DIR is not set"
+  fi
+  printf '%s\n' "${HOME}/.local/share/ai-agent-bridge/providers"
+}
+
 MANIFEST_DIR="${MANIFEST_DIR:-/usr/share/ai-agent-bridge/provider-runtime}"
-INSTALL_DIR="${INSTALL_DIR:-/opt/ai-agent-bridge}"
+INSTALL_DIR="${INSTALL_DIR:-$(default_install_dir)}"
 REQUIRED_NODE_MAJOR=24
 export DEBIAN_FRONTEND=noninteractive
 
@@ -33,14 +53,10 @@ for arg in "$@"; do
   esac
 done
 
-die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-say() { printf '==> %s\n' "$*"; }
-
-# ── Root check ────────────────────────────────────────────────────────────────
-
-if [ "$(id -u)" -ne 0 ]; then
-  die "install-provider-runtime must be run as root (use sudo)"
-fi
+case "$INSTALL_DIR" in
+  /*) ;;
+  *) die "INSTALL_DIR must be an absolute path, got ${INSTALL_DIR}" ;;
+esac
 
 # ── Node.js version check ──────────────────────────────────────────────────
 
@@ -49,6 +65,9 @@ node_major() {
 }
 
 if ! command -v node >/dev/null 2>&1; then
+  if [ "$(id -u)" -ne 0 ]; then
+    die "node not found on PATH; install Node.js ${REQUIRED_NODE_MAJOR} before running install-provider-runtime as this user"
+  fi
   if [ "$VERIFY_ONLY" -eq 1 ]; then
     die "node not found on PATH; install Node.js ${REQUIRED_NODE_MAJOR} first"
   fi
@@ -109,8 +128,10 @@ if [ "$VERIFY_ONLY" -eq 0 ]; then
   mv "$STAGE_DIR/node_modules" "$INSTALL_DIR/node_modules"
   rm -rf "$OLD_DIR" "$STAGE_DIR"
 
-  say "Fixing ownership of ${INSTALL_DIR}..."
-  chown -R root:root "$INSTALL_DIR"
+  if [ "$(id -u)" -eq 0 ]; then
+    say "Fixing ownership of ${INSTALL_DIR}..."
+    chown -R root:root "$INSTALL_DIR"
+  fi
   chmod -R go-w "$INSTALL_DIR"
 fi
 
