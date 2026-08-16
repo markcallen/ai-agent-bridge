@@ -351,6 +351,34 @@ func TestHealthWithEnvInvalidUnprotectedEnvFailsClosed(t *testing.T) {
 	}
 }
 
+func TestHealthWithEnvDuplicateUnprotectedEnvUsesLastValue(t *testing.T) {
+	clearUnprotectedEnv(t)
+
+	p := NewStdioProvider(StdioConfig{
+		ProviderID: "codex",
+		Binary:     "/bin/echo",
+	})
+
+	err := p.HealthWithEnv(context.Background(), []string{
+		"BRIDGE_CODEX_UNPROTECTED=",
+		"BRIDGE_CODEX_UNPROTECTED=maybe",
+	})
+	if err == nil {
+		t.Fatal("expected invalid last unprotected env value to fail closed")
+	}
+	if !strings.Contains(err.Error(), "BRIDGE_CODEX_UNPROTECTED") {
+		t.Fatalf("error %q should mention env var", err)
+	}
+
+	err = p.HealthWithEnv(context.Background(), []string{
+		"BRIDGE_CODEX_UNPROTECTED=maybe",
+		"BRIDGE_CODEX_UNPROTECTED=false",
+	})
+	if err != nil {
+		t.Fatalf("expected valid last unprotected env value to win, got %v", err)
+	}
+}
+
 func TestProbeArgsUseProviderScopedUnprotectedMode(t *testing.T) {
 	clearUnprotectedEnv(t)
 	t.Setenv("BRIDGE_CLAUDE_UNPROTECTED", "1")

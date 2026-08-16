@@ -499,12 +499,13 @@ func filterEnv(env []string) []string {
 
 func envValue(env []string, key string) string {
 	prefix := key + "="
+	value := ""
 	for _, item := range env {
 		if strings.HasPrefix(item, prefix) {
-			return strings.TrimPrefix(item, prefix)
+			value = strings.TrimPrefix(item, prefix)
 		}
 	}
-	return ""
+	return value
 }
 
 func hasEnvKey(env []string, key string) bool {

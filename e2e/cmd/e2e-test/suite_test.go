@@ -73,15 +73,15 @@ func (s *BridgeSuite) TearDownSuite() {
 }
 
 func (s *BridgeSuite) TestClaude() {
-	s.runProviderScenario(scenarios[0])
+	s.runProviderScenario(s.providerScenario("claude"))
 }
 
 func (s *BridgeSuite) TestOpencode() {
-	s.runProviderScenario(scenarios[1])
+	s.runProviderScenario(s.providerScenario("opencode"))
 }
 
 func (s *BridgeSuite) TestGemini() {
-	s.runProviderScenario(scenarios[2])
+	s.runProviderScenario(s.providerScenario("codex"))
 }
 
 // TestEcho validates bridge session lifecycle using the no-auth echo provider (cat).
@@ -144,11 +144,21 @@ func (s *BridgeSuite) TestEcho() {
 }
 
 func (s *BridgeSuite) TestUnprotectedCodexFilesystemBehavior() {
-	s.runUnprotectedFilesystemScenario(scenarios[2])
+	s.runUnprotectedFilesystemScenario(s.providerScenario("codex"))
 }
 
 func (s *BridgeSuite) TestUnprotectedClaudeFilesystemBehavior() {
-	s.runUnprotectedFilesystemScenario(scenarios[0])
+	s.runUnprotectedFilesystemScenario(s.providerScenario("claude"))
+}
+
+func (s *BridgeSuite) providerScenario(name string) providerScenario {
+	for _, scenario := range scenarios {
+		if scenario.name == name {
+			return scenario
+		}
+	}
+	s.T().Fatalf("provider scenario %q not found", name)
+	return providerScenario{}
 }
 
 func (s *BridgeSuite) runProviderScenario(scenario providerScenario) {
@@ -279,6 +289,15 @@ func (s *BridgeSuite) executeUnprotectedFilesystemScenario(scenario providerScen
 
 	if err := waitForFileContent(markerAbsPath, markerContent, 90*time.Second); err == nil {
 		return fmt.Errorf("protected mode wrote marker file %q", markerAbsPath)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("stream ended before protected-mode assertion completed: %w\ntranscript:\n%s", err, log.snapshot())
+		}
+		return fmt.Errorf("stream ended before protected-mode assertion completed\ntranscript:\n%s", log.snapshot())
+	default:
 	}
 
 	cancel()
