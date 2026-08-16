@@ -8,6 +8,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,12 +143,150 @@ func (s *BridgeSuite) TestEcho() {
 	}
 }
 
+func (s *BridgeSuite) TestUnprotectedCodexFilesystemBehavior() {
+	s.runUnprotectedFilesystemScenario(scenarios[2])
+}
+
+func (s *BridgeSuite) TestUnprotectedClaudeFilesystemBehavior() {
+	s.runUnprotectedFilesystemScenario(scenarios[0])
+}
+
 func (s *BridgeSuite) runProviderScenario(scenario providerScenario) {
 	if os.Getenv(scenario.requiredEnv) == "" {
 		s.T().Skipf("skipping %s: %s not set", scenario.name, scenario.requiredEnv)
 	}
 	err := s.executeScenario(scenario)
 	s.Require().NoError(err, "provider scenario %s", scenario.name)
+}
+
+func (s *BridgeSuite) runUnprotectedFilesystemScenario(scenario providerScenario) {
+	expectation := strings.TrimSpace(os.Getenv("E2E_UNPROTECTED_EXPECT"))
+	if expectation == "" {
+		s.T().Skip("skipping manual unprotected-mode e2e: E2E_UNPROTECTED_EXPECT not set")
+	}
+	if expectation != "protected" && expectation != "enabled" {
+		s.T().Fatalf("E2E_UNPROTECTED_EXPECT=%q, want protected or enabled", expectation)
+	}
+	if os.Getenv(scenario.requiredEnv) == "" {
+		s.T().Skipf("skipping %s: %s not set", scenario.name, scenario.requiredEnv)
+	}
+
+	err := s.executeUnprotectedFilesystemScenario(scenario, expectation)
+	s.Require().NoError(err, "%s unprotected filesystem scenario", scenario.name)
+}
+
+func (s *BridgeSuite) executeUnprotectedFilesystemScenario(scenario providerScenario, expectation string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), *suiteTimeout)
+	defer cancel()
+
+	id := uuid.NewString()
+	markerName := fmt.Sprintf("bridge-unprotected-%s-%s.txt", scenario.name, id)
+	markerRelPath := filepath.Join(".git", markerName)
+	markerAbsPath := filepath.Join(*suiteRepo, markerRelPath)
+	markerContent := fmt.Sprintf("BRIDGE_UNPROTECTED_%s_OK_%s", strings.ToUpper(scenario.name), id)
+	doneMarker := fmt.Sprintf("BRIDGE_DONE_%s", id)
+	_ = os.Remove(markerAbsPath)
+	defer func() { _ = os.Remove(markerAbsPath) }()
+
+	sessionID := uuid.NewString()
+	_, err := s.client.StartSession(ctx, &bridgev1.StartSessionRequest{
+		ProjectId:   "e2e",
+		SessionId:   sessionID,
+		RepoPath:    *suiteRepo,
+		Provider:    scenario.name,
+		InitialCols: 120,
+		InitialRows: 40,
+	})
+	if err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+	defer func() {
+		_, _ = s.client.StopSession(context.Background(), &bridgev1.StopSessionRequest{
+			SessionId: sessionID,
+			Force:     true,
+		})
+	}()
+
+	stream, err := s.client.AttachSession(ctx, &bridgev1.AttachSessionRequest{
+		SessionId: sessionID,
+		ClientId:  uuid.NewString(),
+	})
+	if err != nil {
+		return fmt.Errorf("attach: %w", err)
+	}
+
+	var log transcript
+	done := make(chan error, 1)
+	go func() {
+		done <- stream.RecvAll(ctx, func(ev *bridgev1.AttachSessionEvent) error {
+			if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT {
+				log.append(ev.Payload)
+			}
+			if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR {
+				return errors.New(ev.Error)
+			}
+			return nil
+		})
+	}()
+
+	if err := waitForMatch(&log, scenario.promptRe, scenario.startTimeout); err != nil {
+		return fmt.Errorf("initial prompt: %w\ntranscript:\n%s", err, log.snapshot())
+	}
+	if expectation == "enabled" && scenario.name == "claude" && strings.Contains(log.snapshot(), "Bypass Permissions mode") {
+		if _, err := s.client.WriteInput(ctx, &bridgev1.WriteInputRequest{
+			SessionId: sessionID,
+			ClientId:  stream.ClientID(),
+			Data:      []byte("\x1bOB\r"),
+		}); err != nil {
+			return fmt.Errorf("accept claude bypass prompt: %w", err)
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	prompt := fmt.Sprintf("This is an automated bridge e2e test. Use your file editing or shell tool to create the file %s with exactly this content: %s. Do not create any other files. Do not ask for confirmation. After the file has been written, reply with exactly %s and nothing else.", markerRelPath, markerContent, doneMarker)
+
+	input := []byte(prompt + "\r")
+	if expectation == "enabled" && scenario.name == "claude" {
+		input = []byte(prompt)
+	}
+	if _, err := s.client.WriteInput(ctx, &bridgev1.WriteInputRequest{
+		SessionId: sessionID,
+		ClientId:  stream.ClientID(),
+		Data:      input,
+	}); err != nil {
+		return fmt.Errorf("write prompt: %w", err)
+	}
+	if expectation == "enabled" && scenario.name == "claude" {
+		time.Sleep(2 * time.Second)
+		if _, err := s.client.WriteInput(ctx, &bridgev1.WriteInputRequest{
+			SessionId: sessionID,
+			ClientId:  stream.ClientID(),
+			Data:      []byte("\r"),
+		}); err != nil {
+			return fmt.Errorf("submit claude prompt: %w", err)
+		}
+	}
+
+	if expectation == "enabled" {
+		if err := waitForFileContent(markerAbsPath, markerContent, 5*time.Minute); err != nil {
+			return fmt.Errorf("unprotected marker file: %w\ntranscript:\n%s", err, log.snapshot())
+		}
+		if err := waitForLiteral(&log, doneMarker, 30*time.Second); err != nil {
+			return fmt.Errorf("completion marker: %w\ntranscript:\n%s", err, log.snapshot())
+		}
+		return nil
+	}
+
+	if err := waitForFileContent(markerAbsPath, markerContent, 90*time.Second); err == nil {
+		return fmt.Errorf("protected mode wrote marker file %q", markerAbsPath)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+	}
+	return nil
 }
 
 // executeScenario runs a multi-turn provider conversation and asserts correctness.
@@ -247,6 +387,18 @@ func (s *BridgeSuite) executeScenario(scenario providerScenario) error {
 	case <-time.After(5 * time.Second):
 	}
 	return nil
+}
+
+func waitForFileContent(path, want string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil && string(data) == want {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for %q to contain %q", path, want)
 }
 
 // TestBridgeSuite is the entry point that runs all provider tests.

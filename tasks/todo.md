@@ -161,3 +161,70 @@ Evidence:
 - `go test ./internal/config -count=1` -> passed.
 - `go test ./...` -> passed.
 - `SUITE=noble scripts/smoke-provider-runtime-user.sh` -> passed with Docker escalation; verified non-root install to `/home/ubuntu/.local/share/ai-agent-bridge/providers` and no `/opt/ai-agent-bridge` directory.
+
+---
+
+# Issue 180 Environment-Only Container Startup
+
+Mode: Approval-Required, approved by user request on 2026-08-16.
+
+Governing PRD section: `7.8 Published Container Runtime`.
+
+Scope:
+- Make the published-style Docker image usable from environment variables without mounted provider YAML.
+- Expose all bundled provider CLIs on `PATH`.
+- Add provider-scoped unprotected mode for Codex, Claude, OpenCode, and Gemini with protected behavior as the default.
+- Make the Docker entrypoint honor supplied command arguments after initialization.
+- Add manual Docker SDK e2e coverage proving Codex and Claude protected/unprotected behavior against a disposable repo `.git` path.
+
+Constraints:
+- Do not enable unprotected mode globally or by default.
+- Invalid unprotected env values must fail closed.
+- Live unprotected provider e2e tests are manual only because they use credentials and permissive agent modes.
+- The e2e repo is disposable and must not mount the host checkout as the provider workspace.
+
+Tradeoffs:
+- Provider-specific env vars keep the public API explicit and avoid inventing a broad provider override language.
+- Applying unprotected args to startup probes makes health reflect session behavior, at the cost of surfacing invalid env values earlier.
+- `.git` marker writes give a concrete protected-path signal, but the live tests remain slower and credential-dependent.
+
+Risks:
+- Provider CLIs may change permissive-mode flags; docs and e2e coverage need to catch drift.
+- Claude bypass mode has root/sandbox constraints, so the container must keep running providers as the non-root `bridge` user.
+- Manual e2e runs spend live provider credits and can be flaky if provider services are degraded.
+
+Test Strategy:
+- Add unit tests for provider-scoped unprotected argument parsing and failure paths.
+- Add Docker entrypoint behavior coverage where practical.
+- Add manual Docker Compose e2e coverage that starts the bridge image and uses the Go SDK to verify Codex and Claude protected/unprotected `.git` marker behavior.
+- Run focused Go tests, formatting, and non-live test suites locally; document any skipped live e2e evidence.
+
+Rollback:
+- Unset all `BRIDGE_<PROVIDER>_UNPROTECTED` env vars to restore protected behavior.
+- Override `BRIDGE_CONFIG` to a mounted custom config if the bundled Docker config is not desired.
+- Revert the Docker symlinks and entrypoint arg dispatch if command override behavior causes operational issues.
+
+Execution Checklist:
+- [x] Update `PRD.md` with published container runtime requirements and acceptance criteria.
+- [x] Add failing unit tests for provider-scoped unprotected mode.
+- [x] Implement provider-scoped unprotected mode for sessions and startup probes.
+- [x] Expose bundled CLIs on `PATH` in the Docker image.
+- [x] Default the entrypoint to the Docker config and honor supplied Docker args.
+- [x] Add manual Docker SDK e2e coverage for Codex/Claude protected and unprotected modes.
+- [x] Update docs for environment-only container startup and provider-scoped unprotected env vars.
+- [x] Run targeted verification and capture evidence.
+- [x] Record lessons from implementation or verification gaps.
+
+Evidence:
+- `go test ./internal/provider -run 'TestBuildCommand.*Unprotected|TestProbeArgsUseProviderScopedUnprotectedMode' -count=1` failed before implementation because `commandArgsForProvider` did not exist.
+- `go test ./internal/provider -count=1` -> passed.
+- `go test -c -tags e2e -o /tmp/e2e-suite-check ./e2e/cmd/e2e-test` -> passed.
+- `go test ./...` -> passed.
+- `bash -n docker-entrypoint.sh e2e/scripts/test-entrypoint.sh` -> passed.
+- `docker compose -f e2e/docker-compose.yml config` -> passed.
+- `docker compose -f e2e/docker-compose.yml -f e2e/docker-compose.unprotected.yml config` -> passed.
+- `docker build -t ai-agent-bridge:issue-180 .` -> passed.
+- `docker run --rm --entrypoint sh ai-agent-bridge:issue-180 -lc 'command -v codex && command -v claude && command -v opencode && command -v gemini'` -> passed.
+- `docker run --rm ai-agent-bridge:issue-180 id -un` -> passed; command args executed as `bridge` after initialization.
+- Detached default-start smoke with `docker run -d --name issue180-default ai-agent-bridge:issue-180` stayed running and logged `secure (mTLS+JWT on [::]:9445)`.
+- `env-secrets aws -s /ai-agent-bridge/e2e -- make test-e2e-unprotected` -> passed. Protected pass verified Claude and Codex did not write `.git` markers; unprotected pass verified Claude and Codex wrote provider-specific `.git` markers through SDK-started sessions.

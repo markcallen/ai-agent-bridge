@@ -321,6 +321,63 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
 
 The bridge package is deployment-neutral. Consumer platforms are responsible for authoring their own systemd drop-ins, credential injection, provisioning guides, and readiness checks. The package ships `bridge-example.yaml` as a reference config; all deployment-specific orchestration lives outside this repository.
 
+## 7.8 Published Container Runtime
+
+The published container image must support an environment-only startup path for
+operators that already provide an external container or VM isolation boundary.
+The image is responsible for making its bundled provider CLIs discoverable and
+for starting the bridge with a container-appropriate default configuration when
+no command-line arguments are supplied.
+
+### Container Startup Contract
+
+- Running the image with no command arguments starts `bridgectl server start`
+  using the bundled Docker configuration.
+- `BRIDGE_CONFIG` remains the override for operators that want to mount or
+  generate a custom bridge configuration.
+- When Docker command arguments are supplied, the entrypoint performs normal
+  runtime initialization and then executes those arguments as the non-root
+  `bridge` user.
+- The bundled `codex`, `claude`, `opencode`, and `gemini` CLIs are exposed on
+  `PATH` inside the image.
+- Provider authentication may be supplied through environment variables. Codex
+  accepts `OPENAI_API_KEY`, `CODEX_API_KEY`, or `CODEX_AUTH`.
+
+### Provider-Scoped Unprotected Mode
+
+Provider sessions remain protected by default. Operators may opt a provider into
+its native permissive mode by setting the provider-specific bridge environment
+variable to a boolean true value:
+
+| Provider | Environment variable | Provider behavior |
+|---|---|---|
+| `codex` | `BRIDGE_CODEX_UNPROTECTED` | Adds `--dangerously-bypass-approvals-and-sandbox`. |
+| `claude` | `BRIDGE_CLAUDE_UNPROTECTED` | Adds `--dangerously-skip-permissions`. |
+| `opencode` | `BRIDGE_OPENCODE_UNPROTECTED` | Adds `--auto`. |
+| `gemini` | `BRIDGE_GEMINI_UNPROTECTED` | Adds `--yolo`. |
+
+Boolean parsing follows Go boolean syntax. Invalid values fail closed with a
+clear provider startup error. The provider-specific setting applies to both
+startup probes and launched sessions so health checks reflect the runtime mode
+that user sessions will use.
+
+### Acceptance Criteria
+
+- A container can start the bridge with only runtime environment variables and
+  no mounted provider YAML.
+- `codex`, `claude`, `opencode`, and `gemini` are available on `PATH` in the
+  published-style image.
+- Docker command arguments are honored after entrypoint initialization.
+- Provider unprotected mode is opt-in, provider-scoped, defaults to protected
+  behavior, and fails closed on invalid boolean values.
+- Manual Docker e2e coverage starts a published-style bridge container and uses
+  the Go SDK from a separate test-client container to verify:
+  - Codex protected mode does not write a marker under a disposable repo's
+    `.git` directory.
+  - Codex unprotected mode writes the marker under `.git`.
+  - Claude protected mode does not write a marker under `.git`.
+  - Claude unprotected mode writes the marker under `.git`.
+
 ---
 
 ## 8. gRPC API Contract (v1)

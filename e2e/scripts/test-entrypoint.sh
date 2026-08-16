@@ -25,8 +25,10 @@ else
   cp -a /tmp/ai-agent-bridge-src/. /tmp/ai-agent-bridge/
   rm -rf /tmp/ai-agent-bridge-src
 fi
+chmod -R a+rwX /tmp/ai-agent-bridge
 
 echo "==> Running e2e test suite..."
+E2E_TEST_TIMEOUT="${E2E_TEST_TIMEOUT:-300s}"
 
 # Map the optional E2E_ONLY env var to a -test.run filter.
 # E2E_ONLY=claude  → -test.run TestBridgeSuite/TestClaude
@@ -40,7 +42,7 @@ fi
 
 e2e-suite \
   -test.v \
-  -test.timeout 300s \
+  -test.timeout "$E2E_TEST_TIMEOUT" \
   ${run_filter} \
   -bridge.target bridge:9445 \
   -bridge.cacert "$CERT_DIR/ca-bundle.crt" \
@@ -49,7 +51,7 @@ e2e-suite \
   -bridge.jwt-key "$CERT_DIR/jwt-signing.key" \
   -bridge.jwt-issuer e2e \
   -bridge.repo /tmp/ai-agent-bridge \
-  -bridge.timeout 300s
+  -bridge.timeout "$E2E_TEST_TIMEOUT"
 
 exit_code=$?
 
