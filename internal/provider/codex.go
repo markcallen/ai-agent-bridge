@@ -14,7 +14,8 @@ import (
 
 // CodexProvider wraps StdioProvider with Codex-specific auth handling.
 // It accepts either OPENAI_API_KEY / CODEX_API_KEY (API-key auth) or
-// CODEX_AUTH (device-code auth contents) as valid authentication.
+// CODEX_AUTH / CODEX_HOME auth.json (ChatGPT account auth) as valid
+// authentication.
 //
 // When CODEX_AUTH is set, its value is written to a temporary directory
 // as auth.json and the subprocess receives CODEX_HOME pointing there so
@@ -36,26 +37,43 @@ func NewCodexProvider(cfg StdioConfig) *CodexProvider {
 	}
 }
 
-// codexHasAuth returns true if any supported Codex auth env var is set.
+// codexHasAuth returns true if any supported Codex auth source is available.
 func codexHasAuth() bool {
 	for _, key := range []string{"OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_AUTH"} {
 		if strings.TrimSpace(os.Getenv(key)) != "" {
 			return true
 		}
 	}
-	return false
+	return codexAuthFilePath() != ""
+}
+
+func codexAuthFilePath() string {
+	candidates := []string{}
+	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
+		candidates = append(candidates, filepath.Join(codexHome, "auth.json"))
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		candidates = append(candidates, filepath.Join(home, ".codex", "auth.json"))
+	}
+	for _, path := range candidates {
+		info, err := os.Stat(path)
+		if err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
 }
 
 func (p *CodexProvider) ValidateStartup(ctx context.Context) error {
 	if !codexHasAuth() {
-		return fmt.Errorf("provider %q requires OPENAI_API_KEY, CODEX_API_KEY, or CODEX_AUTH", p.cfg.ProviderID)
+		return fmt.Errorf("provider %q requires OPENAI_API_KEY, CODEX_API_KEY, CODEX_AUTH, CODEX_HOME/auth.json, or ~/.codex/auth.json", p.cfg.ProviderID)
 	}
 	return p.StdioProvider.ValidateStartup(ctx)
 }
 
 func (p *CodexProvider) Health(ctx context.Context) error {
 	if !codexHasAuth() {
-		return fmt.Errorf("provider %q requires OPENAI_API_KEY, CODEX_API_KEY, or CODEX_AUTH", p.cfg.ProviderID)
+		return fmt.Errorf("provider %q requires OPENAI_API_KEY, CODEX_API_KEY, CODEX_AUTH, CODEX_HOME/auth.json, or ~/.codex/auth.json", p.cfg.ProviderID)
 	}
 	return p.StdioProvider.Health(ctx)
 }
