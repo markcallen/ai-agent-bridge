@@ -15,9 +15,10 @@
     "git-hooks"
   ],
   "skills": [
-    "github-health-check"
+    "github-health-check",
+    "github-pr-copilot-cycle"
   ],
-  "ballastVersion": "5.7.3",
+  "ballastVersion": "5.16.5",
   "languages": [
     "typescript",
     "go"
@@ -27,9 +28,19 @@
       "."
     ],
     "typescript": [
-      "examples/chat-ts",
-      "examples/chat-web",
-      "packages/bridge-client-node"
+      "examples/web/ui"
     ]
-  }
+  },
+  "tools": {
+    "go": [
+      "go",
+      "gofumpt",
+      "golangci-lint"
+    ],
+    "typescript": [
+      "pnpm",
+      "corepack"
+    ]
+  },
+  "deploymentModel": "none"
 }

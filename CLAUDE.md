@@ -24,9 +24,14 @@ Read and follow these rule files in `.claude/rules/` when they apply:
 - `.claude/rules/common/docs.md` — Rules for common/docs
 - `.claude/rules/common/cicd.md` — Rules for common/cicd
 - `.claude/rules/common/observability.md` — Rules for common/observability
+- `.claude/rules/common/publishing-api.md` — Rules for common/publishing-api
+- `.claude/rules/common/publishing-apps.md` — Rules for common/publishing-apps
+- `.claude/rules/common/publishing-apt.md` — Rules for common/publishing-apt
+- `.claude/rules/common/publishing-brew.md` — Rules for common/publishing-brew
+- `.claude/rules/common/publishing-cli.md` — Rules for common/publishing-cli
 - `.claude/rules/common/publishing-libraries.md` — Rules for common/publishing-libraries
 - `.claude/rules/common/publishing-sdks.md` — Rules for common/publishing-sdks
-- `.claude/rules/common/publishing-apps.md` — Rules for common/publishing-apps
+- `.claude/rules/common/publishing-web.md` — Rules for common/publishing-web
 - `.claude/rules/common/git-hooks.md` — Rules for common/git-hooks
 - `.claude/rules/typescript/typescript-linting.md` — Rules for typescript/linting
 - `.claude/rules/typescript/typescript-logging.md` — Rules for typescript/logging
@@ -41,4 +46,5 @@ Created by Ballast. Do not edit this section.
 
 Read and use these skill files in `.claude/skills/` when they are relevant:
 
-- `.claude/skills/github-health-check.skill` — run a comprehensive GitHub repository health check covering CI status, branch hygiene, and repo configuration
+- `.claude/skills/github-health-check.skill` — run a comprehensive GitHub repository health check covering CI status, code quality, branch hygiene, and repo configuration
+- `.claude/skills/github-pr-copilot-cycle.skill` — create or update a GitHub PR, request Copilot review, triage and fix Copilot comments, push fixes, check CI, and repeat up to three cycles
