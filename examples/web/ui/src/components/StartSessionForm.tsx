@@ -112,9 +112,9 @@ export default function StartSessionForm({ remote, onStarted, onCancel }: Props)
   }
 
   return (
-    <div style={styles.overlay}>
+    <div style={styles.overlay} role="dialog" aria-modal="true" aria-labelledby="new-session-title">
       <form style={styles.form} onSubmit={handleSubmit}>
-        <div style={styles.title}>Start New Session</div>
+        <div id="new-session-title" style={styles.title}>Start New Session</div>
 
         <div style={styles.field}>
           <label style={styles.fieldLabel}>Repo Path</label>
