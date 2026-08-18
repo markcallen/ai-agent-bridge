@@ -18,7 +18,7 @@
     "github-health-check",
     "github-pr-copilot-cycle"
   ],
-  "ballastVersion": "5.16.5",
+  "ballastVersion": "5.17.0",
   "languages": [
     "typescript",
     "go"
