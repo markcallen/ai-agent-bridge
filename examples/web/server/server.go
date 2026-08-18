@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 )
 
@@ -145,11 +146,16 @@ func (s *server) startSession(w http.ResponseWriter, r *http.Request) {
 		project = "local"
 	}
 
+	sessionID := body.SessionID
+	if sessionID == "" {
+		sessionID = uuid.NewString()
+	}
+
 	req := &bridgev1.StartSessionRequest{
 		ProjectId: project,
 		Provider:  body.Provider,
 		RepoPath:  body.RepoPath,
-		SessionId: body.SessionID,
+		SessionId: sessionID,
 	}
 
 	resp, err := client.StartSession(r.Context(), req)

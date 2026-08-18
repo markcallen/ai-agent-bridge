@@ -248,14 +248,15 @@ web-install:
 	cd examples/web/ui && pnpm install
 
 web-dev: web-install
-	cd examples/web && go run . --port $(WEB_PORT) --vite-port $(WEB_VITE_PORT) &\
+	cd examples/web && air -- --port $(WEB_PORT) --vite-port $(WEB_VITE_PORT) &\
 	cd examples/web/ui && pnpm dev
 
 web-build: web-install
 	cd examples/web/ui && pnpm build
+	cd examples/web/server && go build -o ../web .
 
 web-start: web-build
-	cd examples/web && go run . --port $(WEB_PORT) --vite-port 0
+	cd examples/web && ./web --port $(WEB_PORT) --vite-port 0
 
 test-cli-e2e:
 	go test -v -count=1 -race -timeout 120s ./e2e/bridgectl/

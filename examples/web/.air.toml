@@ -1,0 +1,9 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "cd server && go build -o ../tmp/web ."
+  bin = "./tmp/web"
+  include_ext = ["go"]
+  include_dir = ["server"]
+  exclude_dir = ["tmp", "ui"]

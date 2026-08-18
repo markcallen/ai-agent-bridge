@@ -55,6 +55,9 @@ e2e/.env
 /dist/
 /.tmp/
 
+# Air (Go live reload)
+examples/web/tmp/
+
 # Local JS dependencies
 /node_modules/
 .ballast/

@@ -15,7 +15,8 @@ const styles: Record<string, React.CSSProperties> = {
   wrapper: {
     display: 'flex',
     flexDirection: 'column' as const,
-    height: '600px',
+    flex: 1,
+    minHeight: 0,
     background: '#000',
   },
   toolbar: {

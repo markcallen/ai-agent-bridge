@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { listSessions, stopSession, type Session } from '../api'
-import StartSessionForm from './StartSessionForm'
 
 interface Props {
   remote: string | undefined
   onAttach: (id: string) => void
   onWatch: (id: string) => void
+  onNewSession: () => void
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -14,6 +14,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #0f3460',
     borderRadius: '8px',
     padding: '20px',
+    flexShrink: 0,
   },
   header: {
     display: 'flex',
@@ -71,6 +72,10 @@ const styles: Record<string, React.CSSProperties> = {
     borderCollapse: 'collapse' as const,
     fontSize: '14px',
   },
+  tableWrapper: {
+    maxHeight: '115px',
+    overflowY: 'auto' as const,
+  },
   th: {
     textAlign: 'left' as const,
     padding: '8px 12px',
@@ -78,6 +83,10 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#a0a0b0',
     fontWeight: 500,
     fontSize: '13px',
+    position: 'sticky' as const,
+    top: 0,
+    background: '#16213e',
+    zIndex: 1,
   },
   td: {
     padding: '8px 12px',
@@ -134,11 +143,10 @@ function formatDate(iso: string): string {
   }
 }
 
-export default function SessionList({ remote, onAttach, onWatch }: Props) {
+export default function SessionList({ remote, onAttach, onWatch, onNewSession }: Props) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [showForm, setShowForm] = useState(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -166,12 +174,6 @@ export default function SessionList({ remote, onAttach, onWatch }: Props) {
     }
   }
 
-  function handleStarted(sessionId: string) {
-    setShowForm(false)
-    void refresh()
-    onAttach(sessionId)
-  }
-
   return (
     <div style={styles.container}>
       <div style={styles.header}>
@@ -180,65 +182,59 @@ export default function SessionList({ remote, onAttach, onWatch }: Props) {
           <button style={styles.btn} onClick={() => void refresh()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
-          <button style={styles.btnPrimary} onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Cancel' : '+ New Session'}
+          <button style={styles.btnPrimary} onClick={onNewSession}>
+            + New Session
           </button>
         </div>
       </div>
 
       {error && <div style={styles.error}>{error}</div>}
 
-      {showForm && (
-        <StartSessionForm
-          remote={remote}
-          onStarted={handleStarted}
-          onCancel={() => setShowForm(false)}
-        />
-      )}
-
       {sessions.length === 0 && !loading ? (
         <div style={styles.empty}>No sessions found. Start a new one above.</div>
       ) : (
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Session ID</th>
-              <th style={styles.th}>Project</th>
-              <th style={styles.th}>Provider</th>
-              <th style={styles.th}>Status</th>
-              <th style={styles.th}>Created</th>
-              <th style={styles.th}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sessions.map((s) => (
-              <tr key={s.sessionId}>
-                <td style={styles.td}>
-                  <span style={styles.mono} title={s.sessionId}>
-                    {shortID(s.sessionId)}
-                  </span>
-                </td>
-                <td style={styles.td}>{s.projectId}</td>
-                <td style={styles.td}>{s.provider}</td>
-                <td style={styles.td}>
-                  <span style={statusStyle(s.status)}>{s.status}</span>
-                </td>
-                <td style={styles.td}>{formatDate(s.createdAt)}</td>
-                <td style={styles.td}>
-                  <button style={styles.btnSmall} onClick={() => onAttach(s.sessionId)}>
-                    Attach
-                  </button>
-                  <button style={styles.btnSmall} onClick={() => onWatch(s.sessionId)}>
-                    Watch
-                  </button>
-                  <button style={styles.btnDanger} onClick={() => void handleStop(s.sessionId)}>
-                    Stop
-                  </button>
-                </td>
+        <div style={styles.tableWrapper}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Session ID</th>
+                <th style={styles.th}>Project</th>
+                <th style={styles.th}>Provider</th>
+                <th style={styles.th}>Status</th>
+                <th style={styles.th}>Created</th>
+                <th style={styles.th}>Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sessions.map((s) => (
+                <tr key={s.sessionId}>
+                  <td style={styles.td}>
+                    <span style={styles.mono} title={s.sessionId}>
+                      {shortID(s.sessionId)}
+                    </span>
+                  </td>
+                  <td style={styles.td}>{s.projectId}</td>
+                  <td style={styles.td}>{s.provider}</td>
+                  <td style={styles.td}>
+                    <span style={statusStyle(s.status)}>{s.status}</span>
+                  </td>
+                  <td style={styles.td}>{formatDate(s.createdAt)}</td>
+                  <td style={styles.td}>
+                    <button style={styles.btnSmall} onClick={() => onAttach(s.sessionId)}>
+                      Attach
+                    </button>
+                    <button style={styles.btnSmall} onClick={() => onWatch(s.sessionId)}>
+                      Watch
+                    </button>
+                    <button style={styles.btnDanger} onClick={() => void handleStop(s.sessionId)}>
+                      Stop
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )

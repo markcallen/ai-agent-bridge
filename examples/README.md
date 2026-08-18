@@ -160,9 +160,11 @@ A browser-based interface for listing, starting, watching, and interacting with 
 
 ### Development mode (hot reload)
 
+Run two terminals — `air` watches Go files and restarts the server on changes, while Vite handles frontend hot reload:
+
 ```bash
-# Terminal 1 — Go API server
-cd examples/web && go run . --port 8080
+# Terminal 1 — Go API server (auto-reloads on Go file changes)
+cd examples/web && air -- --port 8080
 
 # Terminal 2 — Vite dev server (proxies /api → :8080)
 cd examples/web/ui && pnpm install && pnpm dev
@@ -170,11 +172,17 @@ cd examples/web/ui && pnpm install && pnpm dev
 
 Then open `http://localhost:5173`.
 
+> **Note:** [air](https://github.com/air-verse/air) is required for dev mode (`go install github.com/air-verse/air@latest`). If you prefer not to install it, use `cd examples/web/server && go run . --port 8080` instead — you'll just need to restart manually after Go changes.
+
 ### Production mode
 
 ```bash
-make web-build        # builds the Vite app into examples/web/ui/dist/
-make web-start        # serves the built UI + API from :8080
+# Build the Vite app and Go server
+cd examples/web/ui && pnpm install && pnpm build
+cd examples/web/server && go build -o ../web .
+
+# Serve the built UI + API from :8080
+cd examples/web && ./web --port 8080 --vite-port 0
 ```
 
 Then open `http://localhost:8080`.
