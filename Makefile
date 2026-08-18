@@ -248,7 +248,7 @@ web-install:
 	cd examples/web/ui && pnpm install
 
 web-dev: web-install
-	cd examples/web && go run . --port $(WEB_PORT) --vite-port $(WEB_VITE_PORT) &\
+	cd examples/web && air -- --port $(WEB_PORT) --vite-port $(WEB_VITE_PORT) &\
 	cd examples/web/ui && pnpm dev
 
 web-build: web-install
