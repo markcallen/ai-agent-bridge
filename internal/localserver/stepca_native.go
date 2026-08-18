@@ -286,11 +286,21 @@ func renewCertMTLS(stepCA *StepCAConfig, certPath, keyPath string, logger *slog.
 	pool.AppendCertsFromPEM(rootPEM)
 
 	// Create an mTLS transport that presents our existing cert.
+	// Use GetClientCertificate instead of Certificates so the cert is
+	// always sent regardless of the server's acceptable-CA list. When
+	// the cert PEM on disk contains only the leaf (no intermediate),
+	// Go's default matching logic finds no issuer match against the
+	// root-only acceptable-CA list and silently sends an empty
+	// certificate — causing Step CA to return "missing client
+	// certificate". GetClientCertificate bypasses that matching and
+	// lets Step CA decide whether to accept the cert.
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			RootCAs:      pool,
-			MinVersion:   tls.VersionTLS12,
+			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				return &cert, nil
+			},
+			RootCAs:    pool,
+			MinVersion: tls.VersionTLS12,
 		},
 	}
 
