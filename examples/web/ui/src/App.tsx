@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import SessionList from './components/SessionList'
+import StartSessionForm from './components/StartSessionForm'
 import Terminal from './components/Terminal'
 
 type ConnectionMode = 'local' | 'remote'
@@ -11,7 +12,10 @@ interface ActiveSession {
 
 const styles: Record<string, React.CSSProperties> = {
   app: {
-    minHeight: '100vh',
+    height: '100vh',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    overflow: 'hidden',
     background: '#1a1a2e',
     color: '#e0e0e0',
     fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -63,9 +67,18 @@ const styles: Record<string, React.CSSProperties> = {
     width: '220px',
   },
   main: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column' as const,
     padding: '24px',
+    overflow: 'hidden',
+    minHeight: 0,
   },
   terminalPanel: {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column' as const,
     marginTop: '24px',
     border: '1px solid #0f3460',
     borderRadius: '8px',
@@ -77,6 +90,8 @@ export default function App() {
   const [mode, setMode] = useState<ConnectionMode>('local')
   const [remoteHost, setRemoteHost] = useState('')
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
+  const [showNewSession, setShowNewSession] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const remote = mode === 'remote' && remoteHost ? remoteHost : undefined
 
@@ -91,6 +106,12 @@ export default function App() {
   function handleCloseTerminal() {
     setActiveSession(null)
   }
+
+  const handleSessionStarted = useCallback((sessionId: string) => {
+    setShowNewSession(false)
+    setRefreshKey((k) => k + 1)
+    setActiveSession({ id: sessionId, role: 'writer' })
+  }, [])
 
   return (
     <div style={styles.app}>
@@ -134,9 +155,11 @@ export default function App() {
 
       <main style={styles.main}>
         <SessionList
+          key={refreshKey}
           remote={remote}
           onAttach={handleAttach}
           onWatch={handleWatch}
+          onNewSession={() => setShowNewSession(true)}
         />
 
         {activeSession && (
@@ -150,6 +173,14 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {showNewSession && (
+        <StartSessionForm
+          remote={remote}
+          onStarted={handleSessionStarted}
+          onCancel={() => setShowNewSession(false)}
+        />
+      )}
     </div>
   )
 }

@@ -8,13 +8,22 @@ interface Props {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  overlay: {
+    position: 'fixed' as const,
+    inset: 0,
+    background: 'rgba(0, 0, 0, 0.6)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 100,
+  },
   form: {
     background: '#16213e',
     border: '1px solid #0f3460',
     borderRadius: '8px',
-    padding: '20px',
-    marginTop: '16px',
-    maxWidth: '480px',
+    padding: '24px',
+    width: '420px',
+    maxWidth: '90vw',
   },
   title: {
     fontSize: '16px',
@@ -103,57 +112,59 @@ export default function StartSessionForm({ remote, onStarted, onCancel }: Props)
   }
 
   return (
-    <form style={styles.form} onSubmit={handleSubmit}>
-      <div style={styles.title}>Start New Session</div>
+    <div style={styles.overlay}>
+      <form style={styles.form} onSubmit={handleSubmit}>
+        <div style={styles.title}>Start New Session</div>
 
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>Repo Path</label>
-        <input
-          style={styles.input}
-          type="text"
-          placeholder="/path/to/project"
-          value={repoPath}
-          onChange={(e) => setRepoPath(e.target.value)}
-          required
-        />
-      </div>
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Repo Path</label>
+          <input
+            style={styles.input}
+            type="text"
+            placeholder="/path/to/project"
+            value={repoPath}
+            onChange={(e) => setRepoPath(e.target.value)}
+            autoFocus
+            required
+          />
+        </div>
 
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>Provider</label>
-        <select
-          style={styles.select}
-          value={provider}
-          onChange={(e) => setProvider(e.target.value)}
-        >
-          <option value="claude">claude</option>
-          <option value="codex">codex</option>
-          <option value="gemini">gemini</option>
-          <option value="opencode">opencode</option>
-          <option value="echo">echo (test)</option>
-        </select>
-      </div>
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Provider</label>
+          <select
+            style={styles.select}
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+          >
+            <option value="claude">claude</option>
+            <option value="codex">codex</option>
+            <option value="opencode">opencode</option>
+            <option value="echo">echo (test)</option>
+          </select>
+        </div>
 
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>Project</label>
-        <input
-          style={styles.input}
-          type="text"
-          placeholder="local"
-          value={project}
-          onChange={(e) => setProject(e.target.value)}
-        />
-      </div>
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Project</label>
+          <input
+            style={styles.input}
+            type="text"
+            placeholder="local"
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+          />
+        </div>
 
-      {error && <div style={styles.error}>{error}</div>}
+        {error && <div style={styles.error}>{error}</div>}
 
-      <div style={styles.actions}>
-        <button style={styles.btnPrimary} type="submit" disabled={loading}>
-          {loading ? 'Starting…' : 'Start Session'}
-        </button>
-        <button style={styles.btnSecondary} type="button" onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </form>
+        <div style={styles.actions}>
+          <button style={styles.btnPrimary} type="submit" disabled={loading}>
+            {loading ? 'Starting…' : 'Start Session'}
+          </button>
+          <button style={styles.btnSecondary} type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
   )
 }

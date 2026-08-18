@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
 )
 
@@ -47,11 +48,11 @@ func (s *server) routes() {
 			proxy.ServeHTTP(w, r)
 		})
 	} else {
-		fs := http.FileServer(http.Dir("ui/dist"))
+		fs := http.FileServer(http.Dir("../ui/dist"))
 		s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			// For SPA routing: serve index.html for non-file paths
 			if !strings.Contains(r.URL.Path, ".") {
-				http.ServeFile(w, r, "ui/dist/index.html")
+				http.ServeFile(w, r, "../ui/dist/index.html")
 				return
 			}
 			fs.ServeHTTP(w, r)
@@ -145,11 +146,16 @@ func (s *server) startSession(w http.ResponseWriter, r *http.Request) {
 		project = "local"
 	}
 
+	sessionID := body.SessionID
+	if sessionID == "" {
+		sessionID = uuid.NewString()
+	}
+
 	req := &bridgev1.StartSessionRequest{
 		ProjectId: project,
 		Provider:  body.Provider,
 		RepoPath:  body.RepoPath,
-		SessionId: body.SessionID,
+		SessionId: sessionID,
 	}
 
 	resp, err := client.StartSession(r.Context(), req)
