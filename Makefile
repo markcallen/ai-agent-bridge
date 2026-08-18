@@ -256,7 +256,7 @@ web-build: web-install
 	cd examples/web/server && go build -o ../web .
 
 web-start: web-build
-	cd examples/web/server && ../web --port $(WEB_PORT) --vite-port 0
+	cd examples/web && ./web --port $(WEB_PORT) --vite-port 0
 
 test-cli-e2e:
 	go test -v -count=1 -race -timeout 120s ./e2e/bridgectl/

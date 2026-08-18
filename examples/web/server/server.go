@@ -48,11 +48,11 @@ func (s *server) routes() {
 			proxy.ServeHTTP(w, r)
 		})
 	} else {
-		fs := http.FileServer(http.Dir("../ui/dist"))
+		fs := http.FileServer(http.Dir("ui/dist"))
 		s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			// For SPA routing: serve index.html for non-file paths
 			if !strings.Contains(r.URL.Path, ".") {
-				http.ServeFile(w, r, "../ui/dist/index.html")
+				http.ServeFile(w, r, "ui/dist/index.html")
 				return
 			}
 			fs.ServeHTTP(w, r)

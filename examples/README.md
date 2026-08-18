@@ -182,7 +182,7 @@ cd examples/web/ui && pnpm install && pnpm build
 cd examples/web/server && go build -o ../web .
 
 # Serve the built UI + API from :8080
-cd examples/web/server && ../web --port 8080 --vite-port 0
+cd examples/web && ./web --port 8080 --vite-port 0
 ```
 
 Then open `http://localhost:8080`.
