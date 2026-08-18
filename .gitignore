@@ -57,6 +57,9 @@ e2e/.env
 
 # Air (Go live reload)
 examples/web/tmp/
+examples/web/server/tmp/
+
+examples/web/web
 
 # Local JS dependencies
 /node_modules/
