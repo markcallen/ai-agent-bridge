@@ -177,12 +177,13 @@ Then open `http://localhost:5173`.
 ### Production mode
 
 ```bash
+cd examples
 # Build the Vite app and Go server
-cd examples/web/ui && pnpm install && pnpm build
-cd examples/web/server && go build -o ../web .
+cd web/ui && pnpm install && pnpm build
+cd web/server && go build -o ../web .
 
 # Serve the built UI + API from :8080
-cd examples/web && ./web --port 8080 --vite-port 0
+cd web && ./web --port 8080 --vite-port 0
 ```
 
 Then open `http://localhost:8080`.
