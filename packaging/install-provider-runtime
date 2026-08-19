@@ -8,7 +8,7 @@
 # This script:
 #   1. Verifies Node.js REQUIRED_NODE_MAJOR on the system PATH.
 #   2. Copies the packaged runtime manifest from MANIFEST_DIR to INSTALL_DIR.
-#   3. Runs npm ci --omit=dev --no-audit --no-fund to install pinned provider CLIs.
+#   3. Runs pnpm install --frozen-lockfile --prod to install pinned provider CLIs.
 #   4. Verifies each installed CLI binary is present and reports its version.
 #   5. Ensures INSTALL_DIR is not writable by group/other.
 #
@@ -100,23 +100,25 @@ if [ "$VERIFY_ONLY" -eq 0 ]; then
 
   say "Copying runtime manifest to ${INSTALL_DIR}..."
   mkdir -p "$INSTALL_DIR"
-  cp -- "$MANIFEST_DIR/.nvmrc"           "$INSTALL_DIR/.nvmrc"
-  cp -- "$MANIFEST_DIR/package.json"     "$INSTALL_DIR/package.json"
-  cp -- "$MANIFEST_DIR/package-lock.json" "$INSTALL_DIR/package-lock.json"
+  cp -- "$MANIFEST_DIR/.nvmrc"              "$INSTALL_DIR/.nvmrc"
+  cp -- "$MANIFEST_DIR/package.json"        "$INSTALL_DIR/package.json"
+  cp -- "$MANIFEST_DIR/pnpm-lock.yaml"      "$INSTALL_DIR/pnpm-lock.yaml"
+  cp -- "$MANIFEST_DIR/pnpm-workspace.yaml" "$INSTALL_DIR/pnpm-workspace.yaml"
 
   say "Installing provider CLIs (this may take several minutes)..."
   # Stage inside INSTALL_DIR's parent so that mv is always on the same
   # filesystem (avoids cross-device link errors and data loss when /tmp is
-  # on a different mount from /opt).  If npm ci fails, the existing
+  # on a different mount from /opt).  If pnpm install fails, the existing
   # node_modules is preserved via a rename-to-backup / rename-on-success
   # pattern so the host is never left without working provider CLIs.
   STAGE_DIR=$(mktemp -d -p "$INSTALL_DIR/..")
-  cp -- "$MANIFEST_DIR/.nvmrc"            "$STAGE_DIR/.nvmrc"
-  cp -- "$MANIFEST_DIR/package.json"      "$STAGE_DIR/package.json"
-  cp -- "$MANIFEST_DIR/package-lock.json" "$STAGE_DIR/package-lock.json"
+  cp -- "$MANIFEST_DIR/.nvmrc"              "$STAGE_DIR/.nvmrc"
+  cp -- "$MANIFEST_DIR/package.json"        "$STAGE_DIR/package.json"
+  cp -- "$MANIFEST_DIR/pnpm-lock.yaml"      "$STAGE_DIR/pnpm-lock.yaml"
+  cp -- "$MANIFEST_DIR/pnpm-workspace.yaml" "$STAGE_DIR/pnpm-workspace.yaml"
   (
     cd "$STAGE_DIR"
-    npm ci --omit=dev --no-audit --no-fund
+    corepack pnpm install --frozen-lockfile --prod
   )
   # Atomically swap node_modules using rename.  Keep the old modules as a
   # backup directory; remove it only after the new one is in place so that
@@ -152,7 +154,7 @@ for cli in claude codex opencode gemini; do
 done
 
 if [ "$fail" -eq 1 ]; then
-  die "one or more provider CLIs failed verification; check that npm ci completed successfully"
+  die "one or more provider CLIs failed verification; check that pnpm install completed successfully"
 fi
 
 say "Provider runtime ready at ${INSTALL_DIR}"

@@ -47,8 +47,9 @@ RUN useradd -m -s /bin/bash bridge && \
 COPY --from=build /out/bridgectl /usr/local/bin/bridgectl
 COPY --from=build /out/ai-agent-bridge-ca /usr/local/bin/ai-agent-bridge-ca
 COPY .nvmrc /app/.nvmrc
-COPY package.json package-lock.json /app/
-RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force && \
+RUN corepack enable && corepack prepare pnpm@11.22.0 --activate
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml /app/
+RUN pnpm install --frozen-lockfile --prod && pnpm store prune && \
     ln -sf /app/node_modules/.bin/codex /usr/local/bin/codex && \
     ln -sf /app/node_modules/.bin/claude /usr/local/bin/claude && \
     ln -sf /app/node_modules/.bin/opencode /usr/local/bin/opencode && \
