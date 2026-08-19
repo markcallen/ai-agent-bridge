@@ -12,7 +12,7 @@
     "lint:ts": "eslint \"examples/web/ui/src/**/*.{ts,tsx}\"",
     "test:ts": "echo 'no ts tests'",
     "test:ts:coverage": "echo 'no ts tests'",
-    "verify:ts": "pnpm run build:ts"
+    "verify:ts": "corepack pnpm run build:ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
