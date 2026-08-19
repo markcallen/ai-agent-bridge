@@ -507,6 +507,16 @@ func TestSupervisorShutdownForceStopWaitsForTerminalPersistence(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
+	// Wait for the session process to be running before attempting shutdown,
+	// otherwise the process may exit before the deadline fires.
+	for range 50 {
+		info, _ := sup.Get("shutdown-force-1")
+		if info.State == SessionStateRunning {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	if err := sup.Shutdown(ctx); !errors.Is(err, context.DeadlineExceeded) {
