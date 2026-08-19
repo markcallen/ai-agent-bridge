@@ -1,0 +1,10 @@
+allowBuilds:
+  '@anthropic-ai/claude-code': true
+  '@github/keytar': true
+  node-pty: true
+  opencode-ai: true
+onlyBuiltDependencies:
+  - node-pty
+  - '@anthropic-ai/claude-code'
+  - '@github/keytar'
+  - opencode-ai

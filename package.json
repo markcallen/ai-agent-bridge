@@ -1,6 +1,7 @@
 {
   "name": "ai-agent-bridge",
   "private": true,
+  "packageManager": "pnpm@11.22.0",
   "description": "Pinned local AI agent CLIs for ai-agent-bridge",
   "engines": {
     "node": ">=24"
@@ -11,7 +12,7 @@
     "lint:ts": "eslint \"examples/web/ui/src/**/*.{ts,tsx}\"",
     "test:ts": "echo 'no ts tests'",
     "test:ts:coverage": "echo 'no ts tests'",
-    "verify:ts": "npm run build:ts"
+    "verify:ts": "pnpm run build:ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
