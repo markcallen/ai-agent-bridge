@@ -1,6 +1,7 @@
 {
   "name": "ai-agent-bridge",
   "private": true,
+  "packageManager": "pnpm@11.22.0",
   "description": "Pinned local AI agent CLIs for ai-agent-bridge",
   "engines": {
     "node": ">=24"
@@ -11,13 +12,13 @@
     "lint:ts": "eslint \"examples/web/ui/src/**/*.{ts,tsx}\"",
     "test:ts": "echo 'no ts tests'",
     "test:ts:coverage": "echo 'no ts tests'",
-    "verify:ts": "npm run build:ts"
+    "verify:ts": "corepack pnpm run build:ts"
   },
   "devDependencies": {
-    "@eslint/js": "^9.24.0",
-    "eslint": "^9.24.0",
-    "globals": "^16.0.0",
-    "typescript-eslint": "^8.62.0"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "typescript-eslint": "^8.67.0"
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "2.1.220",

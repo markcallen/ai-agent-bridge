@@ -109,7 +109,7 @@ if [ "$actual_node_major" != "$required_node_major" ]; then
 fi
 
 echo "==> Installing pinned AI agent CLIs into $PROJECT_DIR/node_modules"
-npm install
+corepack pnpm install --frozen-lockfile
 
 echo "==> Verifying installed CLI versions"
 ./node_modules/.bin/claude --version

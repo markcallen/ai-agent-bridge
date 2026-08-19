@@ -60,9 +60,10 @@ install -m 0755 "$ROOT_DIR/packaging/install-provider-runtime" \
   "$PKG_ROOT/usr/lib/ai-agent-bridge/install-provider-runtime"
 
 # Provider runtime manifest (used by install-provider-runtime)
-install -m 0644 "$ROOT_DIR/.nvmrc"            "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/.nvmrc"
-install -m 0644 "$ROOT_DIR/package.json"      "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/package.json"
-install -m 0644 "$ROOT_DIR/package-lock.json" "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/package-lock.json"
+install -m 0644 "$ROOT_DIR/.nvmrc"              "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/.nvmrc"
+install -m 0644 "$ROOT_DIR/package.json"        "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/package.json"
+install -m 0644 "$ROOT_DIR/pnpm-lock.yaml"      "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/pnpm-lock.yaml"
+install -m 0644 "$ROOT_DIR/pnpm-workspace.yaml" "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/pnpm-workspace.yaml"
 
 # Example configs
 install -m 0644 "$ROOT_DIR/packaging/examples/bridge-example.yaml" \

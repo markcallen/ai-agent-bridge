@@ -42,9 +42,9 @@ else
   printf "  %-20s SKIPPED — brew not found\n" "proto includes"
 fi
 
-# Node / npm (for AI agent CLIs and TypeScript linting)
+# Node / pnpm (for AI agent CLIs and TypeScript linting)
 check "node" "node"
-check "npm" "npm"
+check "pnpm" "pnpm"
 
 # Git hooks
 check "pre-commit" "pre-commit"
@@ -69,12 +69,12 @@ if command -v go >/dev/null 2>&1 && command -v golangci-lint >/dev/null 2>&1; th
   fi
 fi
 
-# Verify eslint is available (npm install must have been run).
-if command -v npm >/dev/null 2>&1; then
-  if npm run lint:ts -- --help >/dev/null 2>&1; then
-    echo "eslint: available via npm"
+# Verify eslint is available (pnpm install must have been run).
+if command -v pnpm >/dev/null 2>&1; then
+  if pnpm run lint:ts -- --help >/dev/null 2>&1; then
+    echo "eslint: available via pnpm"
   else
-    echo "WARNING: eslint not available — run 'npm install' at project root"
+    echo "WARNING: eslint not available — run 'pnpm install' at project root"
     ERRORS=$((ERRORS + 1))
   fi
 fi

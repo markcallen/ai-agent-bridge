@@ -63,6 +63,7 @@ examples/web/web
 
 # Local JS dependencies
 /node_modules/
+/package-lock.json
 .ballast/
 
 # Claude
