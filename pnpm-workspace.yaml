@@ -3,6 +3,8 @@ allowBuilds:
   '@github/keytar': true
   node-pty: true
   opencode-ai: true
+minimumReleaseAgeExclude:
+  - '@openai/codex@0.148.0-darwin-x64'
 onlyBuiltDependencies:
   - node-pty
   - '@anthropic-ai/claude-code'
