@@ -21,6 +21,21 @@ export interface StartParams {
   repoPath: string
 }
 
+export interface RemoteEntry {
+  name: string
+  host: string
+}
+
+export async function listRemotes(): Promise<RemoteEntry[]> {
+  const res = await fetch('/api/remotes')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error ?? `HTTP ${res.status}`)
+  }
+  const data = await res.json()
+  return data.remotes ?? []
+}
+
 function remoteQuery(remote: string | undefined): string {
   return remote ? `?remote=${encodeURIComponent(remote)}` : ''
 }

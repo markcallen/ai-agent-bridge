@@ -363,7 +363,7 @@ func Start(cfg Config) (*Server, error) {
 				cfg.CertRenewalCheckInterval = config.ParseDuration(fileCfg.Server.CertRenewalCheckInterval, 0)
 			}
 			if cfg.StepCAURL == "" && fileCfg.StepCA.URL != "" {
-				cfg.StepCAURL = fileCfg.StepCA.URL
+				cfg.StepCAURL = strings.TrimRight(fileCfg.StepCA.URL, "/")
 			}
 			if cfg.StepCARootPath == "" && fileCfg.StepCA.Root != "" {
 				cfg.StepCARootPath = fileCfg.StepCA.Root

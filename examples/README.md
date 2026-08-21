@@ -13,11 +13,35 @@ bridgectl server start
 # Or with Step CA for remote access — see docs/step-ca.md
 ```
 
-For **remote** examples (`chat-ca`, `sessions --remote`, `web --remote`), you need a client certificate enrolled with the remote server:
+For **remote** examples (`chat-ca`, `sessions --remote`, `web --remote`), you need a client certificate enrolled with the remote server.
+
+### Obtaining a client certificate
+
+If you have a Step CA instance running (e.g. started by `bridgectl server start --step-ca-url`), you can obtain a client certificate directly:
 
 ```bash
-bridgectl client init --step-ca-url https://your-ca.example.com
-# Follow the prompts; credentials are saved to ~/.ai-agent-bridge/certs/
+bridgectl client init --step-ca-url https://your-step-ca:443
+```
+
+The command will:
+1. Fetch the CA root certificate (saved to `~/.ai-agent-bridge/certs/step-ca-root.crt`).
+2. Discover available provisioners and let you choose one.
+3. Issue a client certificate and key (saved to `~/.ai-agent-bridge/certs/<name>.crt` and `<name>.key`).
+
+After the certificate is issued, enroll it with the remote bridge server:
+
+```bash
+bridgectl client enroll \
+  --target <host>:9445 \
+  --ca ~/.ai-agent-bridge/certs/step-ca-root.crt \
+  --cert ~/.ai-agent-bridge/certs/<name>.crt \
+  --key ~/.ai-agent-bridge/certs/<name>.key
+```
+
+Or combine both steps by passing `--target` to `client init`:
+
+```bash
+bridgectl client init --step-ca-url https://your-step-ca:443 --target <host>:9445
 ```
 
 ---
@@ -164,10 +188,10 @@ Run two terminals — `air` watches Go files and restarts the server on changes,
 
 ```bash
 # Terminal 1 — Go API server (auto-reloads on Go file changes)
-cd examples/web && air -- --port 8080
+cd web && air -- --port 8080
 
 # Terminal 2 — Vite dev server (proxies /api → :8080)
-cd examples/web/ui && pnpm install && pnpm dev
+cd web/ui && pnpm install && pnpm dev
 ```
 
 Then open `http://localhost:5173`.

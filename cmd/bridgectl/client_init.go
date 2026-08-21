@@ -88,6 +88,8 @@ func discoverProvisioners(caURL string) ([]caProvisioner, error) {
 }
 
 func runClientInit(stepCAURL, rootPath, provisioner, name, target string) error {
+	stepCAURL = strings.TrimRight(stepCAURL, "/")
+
 	stateDir := localserver.StateDir()
 	certsDir := filepath.Join(stateDir, "certs")
 
@@ -99,7 +101,7 @@ func runClientInit(stepCAURL, rootPath, provisioner, name, target string) error 
 
 	// Step CA URL.
 	if stepCAURL == "" {
-		stepCAURL = prompt(reader, "Step CA URL", "")
+		stepCAURL = strings.TrimRight(prompt(reader, "Step CA URL", ""), "/")
 		if stepCAURL == "" {
 			return fmt.Errorf("--step-ca-url is required")
 		}

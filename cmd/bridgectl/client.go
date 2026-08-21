@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+	"github.com/markcallen/ai-agent-bridge/internal/localserver"
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
@@ -53,6 +55,10 @@ with a cert signed by the server's trusted CA can enroll.`,
 			if target == "" {
 				return fmt.Errorf("--target is required")
 			}
+			// Default to port 9445 if not specified.
+			if !strings.Contains(target, ":") {
+				target = target + ":9445"
+			}
 			if caBundle == "" {
 				return fmt.Errorf("--ca is required")
 			}
@@ -79,14 +85,22 @@ with a cert signed by the server's trusted CA can enroll.`,
 				serverName = defaultServerNameFromTarget(target)
 			}
 
-			// Generate JWT keypair locally.
-			pubPath, privPath, err := pki.GenerateJWTKeypair(outDir, "jwt-signing")
-			if err != nil {
-				return fmt.Errorf("generate JWT keypair: %w", err)
+			// Reuse existing JWT keypair if present; generate only if missing.
+			pubPath := filepath.Join(outDir, "jwt-signing.pub")
+			privPath := filepath.Join(outDir, "jwt-signing.key")
+			if _, err := os.Stat(privPath); os.IsNotExist(err) {
+				pubPath, privPath, err = pki.GenerateJWTKeypair(outDir, "jwt-signing")
+				if err != nil {
+					return fmt.Errorf("generate JWT keypair: %w", err)
+				}
+				fmt.Printf("Generated JWT keypair:\n")
+				fmt.Printf("  Private key: %s\n", privPath)
+				fmt.Printf("  Public key:  %s\n", pubPath)
+			} else {
+				fmt.Printf("Using existing JWT keypair:\n")
+				fmt.Printf("  Private key: %s\n", privPath)
+				fmt.Printf("  Public key:  %s\n", pubPath)
 			}
-			fmt.Printf("Generated JWT keypair:\n")
-			fmt.Printf("  Private key: %s\n", privPath)
-			fmt.Printf("  Public key:  %s\n", pubPath)
 
 			// Load the public key for the RPC.
 			pubKey, err := pki.LoadEd25519PublicKey(pubPath)
@@ -125,6 +139,17 @@ with a cert signed by the server's trusted CA can enroll.`,
 			}
 
 			fmt.Printf("Enrolled: %s\n", resp.Message)
+
+			// Record this remote in the local remotes registry.
+			// Use the hostname from the target as the display name.
+			remoteName := target
+			if h, _, err := net.SplitHostPort(target); err == nil {
+				remoteName = h
+			}
+			if err := localserver.AddRemote(localserver.StateDir(), remoteName, target); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not save remote to registry: %v\n", err)
+			}
+
 			fmt.Println()
 			fmt.Println("To connect with the Go SDK:")
 			fmt.Println()

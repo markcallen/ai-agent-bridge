@@ -145,7 +145,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 				ConfigPath:                    configPath,
 				DBPath:                        dbPath,
 				Logger:                        logger,
-				StepCAURL:                     stepCAURL,
+				StepCAURL:                     strings.TrimRight(stepCAURL, "/"),
 				StepCARootPath:                stepCARootPath,
 				StepCAProvisioner:             stepCAProvisioner,
 				StepCAProvisionerPasswordFile: stepCAProvisionerPasswordFile,
@@ -379,7 +379,7 @@ for interactive authentication. The 'step' CLI must be on PATH.`,
 			if oidcProvider != "" {
 				// Tier 2: obtain cert from Step CA via OIDC.
 				stepCfg := &localserver.StepCAConfig{
-					URL:             stepCAURL,
+					URL:             strings.TrimRight(stepCAURL, "/"),
 					RootPath:        stepCARootPath,
 					OIDCProviderURL: oidcProvider,
 				}
@@ -558,7 +558,7 @@ immediate renewal (e.g. when the cert has already expired).`,
 			var stepCA *localserver.StepCAConfig
 			if stepCAURL != "" {
 				stepCA = &localserver.StepCAConfig{
-					URL:                     stepCAURL,
+					URL:                     strings.TrimRight(stepCAURL, "/"),
 					RootPath:                stepCARootPath,
 					Provisioner:             stepCAProvisioner,
 					ProvisionerPasswordFile: stepCAProvisionerPasswordFile,
