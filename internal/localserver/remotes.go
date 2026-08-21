@@ -60,5 +60,20 @@ func AddRemote(stateDir, name, host string) error {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(RemotesPath(stateDir), data, 0o644)
+	// Write atomically via temp file + rename so readers never see a partial file.
+	tmp, err := os.CreateTemp(stateDir, "remotes-*.yaml")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, RemotesPath(stateDir))
 }
