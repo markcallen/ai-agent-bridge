@@ -56,8 +56,8 @@ with a cert signed by the server's trusted CA can enroll.`,
 				return fmt.Errorf("--target is required")
 			}
 			// Default to port 9445 if not specified.
-			if !strings.Contains(target, ":") {
-				target = target + ":9445"
+			if _, _, err := net.SplitHostPort(target); err != nil {
+				target = net.JoinHostPort(target, "9445")
 			}
 			if caBundle == "" {
 				return fmt.Errorf("--ca is required")
@@ -85,10 +85,13 @@ with a cert signed by the server's trusted CA can enroll.`,
 				serverName = defaultServerNameFromTarget(target)
 			}
 
-			// Reuse existing JWT keypair if present; generate only if missing.
+			// Reuse existing JWT keypair if present; generate only if either file is missing.
 			pubPath := filepath.Join(outDir, "jwt-signing.pub")
 			privPath := filepath.Join(outDir, "jwt-signing.key")
-			if _, err := os.Stat(privPath); os.IsNotExist(err) {
+			_, pubErr := os.Stat(pubPath)
+			_, privErr := os.Stat(privPath)
+			if os.IsNotExist(pubErr) || os.IsNotExist(privErr) {
+				var err error
 				pubPath, privPath, err = pki.GenerateJWTKeypair(outDir, "jwt-signing")
 				if err != nil {
 					return fmt.Errorf("generate JWT keypair: %w", err)
@@ -96,6 +99,10 @@ with a cert signed by the server's trusted CA can enroll.`,
 				fmt.Printf("Generated JWT keypair:\n")
 				fmt.Printf("  Private key: %s\n", privPath)
 				fmt.Printf("  Public key:  %s\n", pubPath)
+			} else if pubErr != nil {
+				return fmt.Errorf("check JWT public key: %w", pubErr)
+			} else if privErr != nil {
+				return fmt.Errorf("check JWT private key: %w", privErr)
 			} else {
 				fmt.Printf("Using existing JWT keypair:\n")
 				fmt.Printf("  Private key: %s\n", privPath)

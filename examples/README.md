@@ -188,10 +188,10 @@ Run two terminals — `air` watches Go files and restarts the server on changes,
 
 ```bash
 # Terminal 1 — Go API server (auto-reloads on Go file changes)
-cd web && air -- --port 8080
+cd examples/web && air -- --port 8080
 
 # Terminal 2 — Vite dev server (proxies /api → :8080)
-cd web/ui && pnpm install && pnpm dev
+cd examples/web/ui && pnpm install && pnpm dev
 ```
 
 Then open `http://localhost:5173`.

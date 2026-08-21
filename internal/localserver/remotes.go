@@ -28,7 +28,7 @@ func LoadRemotes(stateDir string) ([]Remote, error) {
 	data, err := os.ReadFile(RemotesPath(stateDir))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return []Remote{}, nil
 		}
 		return nil, err
 	}
