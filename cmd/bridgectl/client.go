@@ -75,6 +75,7 @@ with a cert signed by the server's trusted CA can enroll.`,
 			if outDir == "" {
 				outDir = "."
 			}
+			target = normalizeRemoteTarget(target)
 			if serverName == "" {
 				serverName = defaultServerNameFromTarget(target)
 			}
@@ -147,7 +148,7 @@ with a cert signed by the server's trusted CA can enroll.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&target, "target", "", "bridge server address (e.g. macbook.ts.net:9445)")
+	cmd.Flags().StringVar(&target, "target", "", "bridge server address (e.g. macbook.ts.net or macbook.ts.net:9445; default port 9445)")
 	_ = cmd.MarkFlagRequired("target")
 	cmd.Flags().StringVar(&caBundle, "ca", "", "path to CA bundle for server verification")
 	_ = cmd.MarkFlagRequired("ca")
@@ -174,6 +175,19 @@ func defaultServerNameFromTarget(target string) string {
 		return "server"
 	}
 	return target
+}
+
+func normalizeRemoteTarget(target string) string {
+	if strings.HasPrefix(target, "unix://") {
+		return target
+	}
+	if _, _, err := net.SplitHostPort(target); err == nil {
+		return target
+	}
+	if strings.Contains(target, ":") && !strings.Contains(target, "://") {
+		return target
+	}
+	return target + ":" + defaultRemotePort
 }
 
 // extractCN reads a PEM certificate file and returns its Common Name.
