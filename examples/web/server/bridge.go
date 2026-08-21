@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -86,6 +87,13 @@ func remoteClient(host string, timeout time.Duration) (*bridgeclient.Client, err
 		return nil, fmt.Errorf("read client cert CN: %w", err)
 	}
 
+	// Use the hostname (without port) as the TLS server name so it matches
+	// the remote server's certificate SANs.
+	serverName := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		serverName = h
+	}
+
 	return bridgeclient.New(
 		bridgeclient.WithTarget(host),
 		bridgeclient.WithTimeout(timeout),
@@ -93,7 +101,7 @@ func remoteClient(host string, timeout time.Duration) (*bridgeclient.Client, err
 			CABundlePath: caBundle,
 			CertPath:     clientCert,
 			KeyPath:      clientKey,
-			ServerName:   "server",
+			ServerName:   serverName,
 		}),
 		bridgeclient.WithJWT(bridgeclient.JWTConfig{
 			PrivateKeyPath: jwtKey,
