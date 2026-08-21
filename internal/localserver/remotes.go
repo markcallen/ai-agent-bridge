@@ -75,5 +75,9 @@ func AddRemote(stateDir, name, host string) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	return os.Rename(tmpName, RemotesPath(stateDir))
+	if err := os.Rename(tmpName, RemotesPath(stateDir)); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
