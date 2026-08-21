@@ -61,6 +61,7 @@ examples/web/tmp/
 examples/web/server/tmp/
 
 examples/web/web
+examples/web/server/server
 
 # Local JS dependencies
 /node_modules/
