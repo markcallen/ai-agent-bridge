@@ -220,7 +220,16 @@ export default function SessionList({ remote, onAttach, onWatch, onNewSession }:
                   </td>
                   <td style={styles.td}>{formatDate(s.createdAt)}</td>
                   <td style={styles.td}>
-                    <button style={styles.btnSmall} onClick={() => onAttach(s.sessionId)}>
+                    <button
+                      style={{
+                        ...styles.btnSmall,
+                        ...(s.status === 'SESSION_STATUS_ATTACHED'
+                          ? { opacity: 0.4, cursor: 'not-allowed' }
+                          : {}),
+                      }}
+                      disabled={s.status === 'SESSION_STATUS_ATTACHED'}
+                      onClick={() => onAttach(s.sessionId)}
+                    >
                       Attach
                     </button>
                     <button style={styles.btnSmall} onClick={() => onWatch(s.sessionId)}>

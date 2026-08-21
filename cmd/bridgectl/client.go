@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+	"github.com/markcallen/ai-agent-bridge/internal/localserver"
 	"github.com/markcallen/ai-agent-bridge/internal/pki"
 	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
 )
@@ -75,18 +77,34 @@ with a cert signed by the server's trusted CA can enroll.`,
 			if outDir == "" {
 				outDir = "."
 			}
+			target = normalizeRemoteTarget(target)
 			if serverName == "" {
 				serverName = defaultServerNameFromTarget(target)
 			}
 
-			// Generate JWT keypair locally.
-			pubPath, privPath, err := pki.GenerateJWTKeypair(outDir, "jwt-signing")
-			if err != nil {
-				return fmt.Errorf("generate JWT keypair: %w", err)
+			// Reuse existing JWT keypair if present; generate only if either file is missing.
+			pubPath := filepath.Join(outDir, "jwt-signing.pub")
+			privPath := filepath.Join(outDir, "jwt-signing.key")
+			_, pubErr := os.Stat(pubPath)
+			_, privErr := os.Stat(privPath)
+			if os.IsNotExist(pubErr) || os.IsNotExist(privErr) {
+				var err error
+				pubPath, privPath, err = pki.GenerateJWTKeypair(outDir, "jwt-signing")
+				if err != nil {
+					return fmt.Errorf("generate JWT keypair: %w", err)
+				}
+				fmt.Printf("Generated JWT keypair:\n")
+				fmt.Printf("  Private key: %s\n", privPath)
+				fmt.Printf("  Public key:  %s\n", pubPath)
+			} else if pubErr != nil {
+				return fmt.Errorf("check JWT public key: %w", pubErr)
+			} else if privErr != nil {
+				return fmt.Errorf("check JWT private key: %w", privErr)
+			} else {
+				fmt.Printf("Using existing JWT keypair:\n")
+				fmt.Printf("  Private key: %s\n", privPath)
+				fmt.Printf("  Public key:  %s\n", pubPath)
 			}
-			fmt.Printf("Generated JWT keypair:\n")
-			fmt.Printf("  Private key: %s\n", privPath)
-			fmt.Printf("  Public key:  %s\n", pubPath)
 
 			// Load the public key for the RPC.
 			pubKey, err := pki.LoadEd25519PublicKey(pubPath)
@@ -125,6 +143,17 @@ with a cert signed by the server's trusted CA can enroll.`,
 			}
 
 			fmt.Printf("Enrolled: %s\n", resp.Message)
+
+			// Record this remote in the local remotes registry.
+			// Use the hostname from the target as the display name.
+			remoteName := target
+			if h, _, err := net.SplitHostPort(target); err == nil {
+				remoteName = h
+			}
+			if err := localserver.AddRemote(localserver.StateDir(), remoteName, target); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not save remote to registry: %v\n", err)
+			}
+
 			fmt.Println()
 			fmt.Println("To connect with the Go SDK:")
 			fmt.Println()
@@ -147,7 +176,7 @@ with a cert signed by the server's trusted CA can enroll.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&target, "target", "", "bridge server address (e.g. macbook.ts.net:9445)")
+	cmd.Flags().StringVar(&target, "target", "", "bridge server address (e.g. macbook.ts.net or macbook.ts.net:9445; default port 9445)")
 	_ = cmd.MarkFlagRequired("target")
 	cmd.Flags().StringVar(&caBundle, "ca", "", "path to CA bundle for server verification")
 	_ = cmd.MarkFlagRequired("ca")
@@ -174,6 +203,19 @@ func defaultServerNameFromTarget(target string) string {
 		return "server"
 	}
 	return target
+}
+
+func normalizeRemoteTarget(target string) string {
+	if strings.HasPrefix(target, "unix://") {
+		return target
+	}
+	if _, _, err := net.SplitHostPort(target); err == nil {
+		return target
+	}
+	if strings.Contains(target, ":") && !strings.Contains(target, "://") {
+		return target
+	}
+	return target + ":" + defaultRemotePort
 }
 
 // extractCN reads a PEM certificate file and returns its Common Name.

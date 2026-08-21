@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	ca "github.com/smallstep/certificates/ca"
@@ -73,6 +74,8 @@ making this safe to call from a cron job or systemd timer:
 }
 
 func runClientRenew(stepCAURL, rootPath string, rootExplicit bool, certPath, keyPath string, before time.Duration) error {
+	stepCAURL = strings.TrimRight(stepCAURL, "/")
+
 	stateDir := localserver.StateDir()
 	certsDir := filepath.Join(stateDir, "certs")
 

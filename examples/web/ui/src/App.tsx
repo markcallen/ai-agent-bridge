@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import SessionList from './components/SessionList'
 import StartSessionForm from './components/StartSessionForm'
 import Terminal from './components/Terminal'
+import { listRemotes, type RemoteEntry } from './api'
 
 type ConnectionMode = 'local' | 'remote'
 
@@ -66,6 +67,16 @@ const styles: Record<string, React.CSSProperties> = {
     outline: 'none',
     width: '220px',
   },
+  select: {
+    background: '#0f3460',
+    border: '1px solid #e94560',
+    borderRadius: '4px',
+    color: '#e0e0e0',
+    padding: '4px 10px',
+    fontSize: '14px',
+    outline: 'none',
+    width: '240px',
+  },
   main: {
     flex: 1,
     display: 'flex',
@@ -89,9 +100,17 @@ const styles: Record<string, React.CSSProperties> = {
 export default function App() {
   const [mode, setMode] = useState<ConnectionMode>('local')
   const [remoteHost, setRemoteHost] = useState('')
+  const [customRemote, setCustomRemote] = useState(false)
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
   const [showNewSession, setShowNewSession] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [knownRemotes, setKnownRemotes] = useState<RemoteEntry[]>([])
+
+  useEffect(() => {
+    listRemotes()
+      .then(setKnownRemotes)
+      .catch(() => {})
+  }, [])
 
   const remote = mode === 'remote' && remoteHost ? remoteHost : undefined
 
@@ -142,13 +161,51 @@ export default function App() {
             </label>
           </div>
           {mode === 'remote' && (
-            <input
-              style={styles.input}
-              type="text"
-              placeholder="hostname or host:port"
-              value={remoteHost}
-              onChange={(e) => setRemoteHost(e.target.value)}
-            />
+            <>
+              {knownRemotes.length > 0 && !customRemote ? (
+                <select
+                  style={styles.select}
+                  value={remoteHost}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      setCustomRemote(true)
+                      setRemoteHost('')
+                    } else {
+                      setRemoteHost(e.target.value)
+                    }
+                  }}
+                >
+                  <option value="">Select a server...</option>
+                  {knownRemotes.map((r) => (
+                    <option key={r.host} value={r.host}>
+                      {r.name} ({r.host})
+                    </option>
+                  ))}
+                  <option value="__custom__">Other...</option>
+                </select>
+              ) : (
+                <>
+                  <input
+                    style={styles.input}
+                    type="text"
+                    placeholder="hostname or host:port"
+                    value={remoteHost}
+                    onChange={(e) => setRemoteHost(e.target.value)}
+                  />
+                  {knownRemotes.length > 0 && (
+                    <button
+                      style={{ ...styles.input, width: 'auto', cursor: 'pointer' }}
+                      onClick={() => {
+                        setCustomRemote(false)
+                        setRemoteHost('')
+                      }}
+                    >
+                      Back
+                    </button>
+                  )}
+                </>
+              )}
+            </>
           )}
         </div>
       </header>
@@ -169,6 +226,9 @@ export default function App() {
               role={activeSession.role}
               remote={remote}
               onClose={handleCloseTerminal}
+              onSwitchToWatch={() =>
+                setActiveSession({ id: activeSession.id, role: 'observer' })
+              }
             />
           </div>
         )}

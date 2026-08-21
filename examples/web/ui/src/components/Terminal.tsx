@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -9,6 +9,7 @@ interface Props {
   role: 'observer' | 'writer'
   remote: string | undefined
   onClose: () => void
+  onSwitchToWatch?: () => void
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -47,14 +48,33 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     padding: '4px',
   },
+  conflictOverlay: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#0d0d0d',
+    color: '#e0e0e0',
+  },
+  watchBtn: {
+    background: '#0f3460',
+    border: '1px solid #1a4a8a',
+    borderRadius: '4px',
+    color: '#e0e0e0',
+    padding: '6px 16px',
+    fontSize: '13px',
+    cursor: 'pointer',
+  },
 }
 
-export default function Terminal({ sessionId, role, remote, onClose }: Props) {
+export default function Terminal({ sessionId, role, remote, onClose, onSwitchToWatch }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const clientId = useRef<string>(crypto.randomUUID())
   const abortRef = useRef<AbortController | null>(null)
+  const [writerConflict, setWriterConflict] = useState(false)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -90,9 +110,15 @@ export default function Terminal({ sessionId, role, remote, onClose }: Props) {
           const bytes = Uint8Array.from(atob(event.data), (c) => c.charCodeAt(0))
           term.write(bytes)
         } else if (event.type === 'error' && event.message) {
-          term.writeln(`\r\n\x1b[31m[error] ${event.message}\x1b[0m`)
+          if (event.message.includes('already has an active writer')) {
+            setWriterConflict(true)
+          } else {
+            term.writeln(`\r\n\x1b[31m[error] ${event.message}\x1b[0m`)
+          }
         } else if (event.type === 'end') {
-          term.writeln('\r\n\x1b[33m[session ended]\x1b[0m')
+          if (!writerConflict) {
+            term.writeln('\r\n\x1b[33m[session ended]\x1b[0m')
+          }
         }
       },
       abort.signal
@@ -162,10 +188,28 @@ export default function Terminal({ sessionId, role, remote, onClose }: Props) {
           )}
         </span>
         <button style={styles.closeBtn} onClick={onClose}>
-          Close
+          Detach
         </button>
       </div>
-      <div ref={containerRef} style={styles.termContainer} />
+      {writerConflict ? (
+        <div style={styles.conflictOverlay}>
+          <p style={{ margin: '0 0 12px', fontSize: '15px' }}>
+            This session already has an active writer attached.
+          </p>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {onSwitchToWatch && (
+              <button style={styles.watchBtn} onClick={onSwitchToWatch}>
+                Watch instead
+              </button>
+            )}
+            <button style={styles.closeBtn} onClick={onClose}>
+              Detach
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div ref={containerRef} style={styles.termContainer} />
+      )}
     </div>
   )
 }

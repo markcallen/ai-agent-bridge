@@ -101,7 +101,7 @@ func runServerInit() error {
 
 	if useStepCA {
 		urlDefault := existing.StepCA.URL
-		stepCA.URL = prompt(reader, "Step CA URL", urlDefault)
+		stepCA.URL = strings.TrimRight(prompt(reader, "Step CA URL", urlDefault), "/")
 
 		// Auto-fetch root cert.
 		rootPath := filepath.Join(certsDir, "step-ca-root.crt")
@@ -125,7 +125,7 @@ func runServerInit() error {
 					break
 				}
 				// Otherwise treat as a new URL and retry.
-				stepCA.URL = alt
+				stepCA.URL = strings.TrimRight(alt, "/")
 				continue
 			}
 			fmt.Printf("  Saved to %s\n", rootPath)

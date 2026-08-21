@@ -8,6 +8,7 @@
 /runprompt
 /orchestrator
 *.exe
+/server
 
 # Orchestrator logs
 orchestrator-*.log
@@ -30,6 +31,7 @@ certs/*.pub
 # Step CA local state (docker volumes handle persistence)
 step-ca/certs/
 step-ca/data/
+step-ca.password
 
 # Go
 vendor/

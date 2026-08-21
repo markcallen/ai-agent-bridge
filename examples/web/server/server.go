@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+	"github.com/markcallen/ai-agent-bridge/internal/localserver"
 )
 
 type server struct {
@@ -40,6 +41,7 @@ func (s *server) routes() {
 	s.mux.HandleFunc("GET /api/sessions/{id}/stream", s.streamSession)
 	s.mux.HandleFunc("POST /api/sessions/{id}/input", s.writeInput)
 	s.mux.HandleFunc("POST /api/sessions/{id}/resize", s.resizeSession)
+	s.mux.HandleFunc("GET /api/remotes", s.listRemotes)
 
 	if s.vitePort > 0 {
 		viteURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", s.vitePort))
@@ -70,6 +72,24 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// listRemotes handles GET /api/remotes — returns enrolled remote servers.
+func (s *server) listRemotes(w http.ResponseWriter, r *http.Request) {
+	remotes, err := localserver.LoadRemotes(localserver.StateDir())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type remoteInfo struct {
+		Name string `json:"name"`
+		Host string `json:"host"`
+	}
+	result := make([]remoteInfo, 0, len(remotes))
+	for _, rm := range remotes {
+		result = append(result, remoteInfo{Name: rm.Name, Host: rm.Host})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"remotes": result})
 }
 
 // listSessions handles GET /api/sessions?remote=host

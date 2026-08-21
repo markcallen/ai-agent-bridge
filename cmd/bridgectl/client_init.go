@@ -20,11 +20,12 @@ import (
 
 func newClientInitCmd() *cobra.Command {
 	var (
-		stepCAURL   string
-		rootPath    string
-		provisioner string
-		name        string
-		target      string
+		stepCAURL               string
+		rootPath                string
+		provisioner             string
+		provisionerPasswordFile string
+		name                    string
+		target                  string
 	)
 
 	cmd := &cobra.Command{
@@ -40,15 +41,16 @@ ACME provisioners use HTTP-01 challenge on port 80 (requires root/sudo).
 After obtaining the certificate, pass --target to automatically enroll
 the JWT key with a bridge server.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runClientInit(stepCAURL, rootPath, provisioner, name, target)
+			return runClientInit(stepCAURL, rootPath, provisioner, provisionerPasswordFile, name, target)
 		},
 	}
 
 	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA server URL (e.g. https://step-ca-dev.example.com)")
 	cmd.Flags().StringVar(&rootPath, "step-ca-root", "", "path to Step CA root certificate (auto-fetched if not set)")
 	cmd.Flags().StringVar(&provisioner, "provisioner", "", "provisioner name (skip discovery)")
+	cmd.Flags().StringVar(&provisionerPasswordFile, "step-ca-provisioner-password-file", "", "path to JWK provisioner password file")
 	cmd.Flags().StringVar(&name, "name", "", "client name for the certificate CN (default: hostname)")
-	cmd.Flags().StringVar(&target, "target", "", "bridge server address to auto-enroll after cert issuance (e.g. host:9445)")
+	cmd.Flags().StringVar(&target, "target", "", "bridge server address to auto-enroll after cert issuance (e.g. host or host:9445; default port 9445)")
 
 	return cmd
 }
@@ -87,7 +89,9 @@ func discoverProvisioners(caURL string) ([]caProvisioner, error) {
 	return result.Provisioners, nil
 }
 
-func runClientInit(stepCAURL, rootPath, provisioner, name, target string) error {
+func runClientInit(stepCAURL, rootPath, provisioner, provisionerPasswordFile, name, target string) error {
+	stepCAURL = strings.TrimRight(stepCAURL, "/")
+
 	stateDir := localserver.StateDir()
 	certsDir := filepath.Join(stateDir, "certs")
 
@@ -99,7 +103,7 @@ func runClientInit(stepCAURL, rootPath, provisioner, name, target string) error 
 
 	// Step CA URL.
 	if stepCAURL == "" {
-		stepCAURL = prompt(reader, "Step CA URL", "")
+		stepCAURL = strings.TrimRight(prompt(reader, "Step CA URL", ""), "/")
 		if stepCAURL == "" {
 			return fmt.Errorf("--step-ca-url is required")
 		}
@@ -176,9 +180,10 @@ func runClientInit(stepCAURL, rootPath, provisioner, name, target string) error 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	stepCfg := &localserver.StepCAConfig{
-		URL:         stepCAURL,
-		RootPath:    rootPath,
-		Provisioner: provisioner,
+		URL:                     stepCAURL,
+		RootPath:                rootPath,
+		Provisioner:             provisioner,
+		ProvisionerPasswordFile: provisionerPasswordFile,
 	}
 
 	isACME := strings.EqualFold(provisioner, "acme")
@@ -205,6 +210,7 @@ func runClientInit(stepCAURL, rootPath, provisioner, name, target string) error 
 
 	// Auto-enroll if --target was provided.
 	if target != "" {
+		target = normalizeRemoteTarget(target)
 		fmt.Printf("\nEnrolling with %s...\n", target)
 		enrollArgs := []string{
 			"enroll",

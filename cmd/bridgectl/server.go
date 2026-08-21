@@ -145,7 +145,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 				ConfigPath:                    configPath,
 				DBPath:                        dbPath,
 				Logger:                        logger,
-				StepCAURL:                     stepCAURL,
+				StepCAURL:                     strings.TrimRight(stepCAURL, "/"),
 				StepCARootPath:                stepCARootPath,
 				StepCAProvisioner:             stepCAProvisioner,
 				StepCAProvisionerPasswordFile: stepCAProvisionerPasswordFile,
@@ -379,7 +379,7 @@ for interactive authentication. The 'step' CLI must be on PATH.`,
 			if oidcProvider != "" {
 				// Tier 2: obtain cert from Step CA via OIDC.
 				stepCfg := &localserver.StepCAConfig{
-					URL:             stepCAURL,
+					URL:             strings.TrimRight(stepCAURL, "/"),
 					RootPath:        stepCARootPath,
 					OIDCProviderURL: oidcProvider,
 				}
@@ -432,13 +432,14 @@ for interactive authentication. The 'step' CLI must be on PATH.`,
 			fmt.Println()
 			fmt.Println("Example Go SDK usage:")
 			fmt.Println()
+			serverName := localserver.DiscoverServerName(stateDir)
 			fmt.Printf("  client, err := bridgeclient.New(\n")
 			fmt.Printf("    bridgeclient.WithTarget(\"<server-addr>:9445\"),\n")
 			fmt.Printf("    bridgeclient.WithMTLS(bridgeclient.MTLSConfig{\n")
 			fmt.Printf("      CABundlePath: \"ca-bundle.crt\",\n")
 			fmt.Printf("      CertPath:     \"%s.crt\",\n", clientName)
 			fmt.Printf("      KeyPath:      \"%s.key\",\n", clientName)
-			fmt.Printf("      ServerName:   \"server\",\n")
+			fmt.Printf("      ServerName:   \"%s\",\n", serverName)
 			fmt.Printf("    }),\n")
 			fmt.Printf("    bridgeclient.WithJWT(bridgeclient.JWTConfig{\n")
 			fmt.Printf("      PrivateKeyPath: \"jwt-signing.key\",\n")
@@ -558,7 +559,7 @@ immediate renewal (e.g. when the cert has already expired).`,
 			var stepCA *localserver.StepCAConfig
 			if stepCAURL != "" {
 				stepCA = &localserver.StepCAConfig{
-					URL:                     stepCAURL,
+					URL:                     strings.TrimRight(stepCAURL, "/"),
 					RootPath:                stepCARootPath,
 					Provisioner:             stepCAProvisioner,
 					ProvisionerPasswordFile: stepCAProvisionerPasswordFile,
