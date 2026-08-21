@@ -158,6 +158,10 @@ func TestCodexBuildCommand_WithCodexAuth(t *testing.T) {
 	if codexHome == "" {
 		t.Fatal("CODEX_HOME not set in subprocess env")
 	}
+	wantCodexHome := filepath.Join(os.Getenv("HOME"), ".ai-agent-bridge", "codex-home")
+	if codexHome != wantCodexHome {
+		t.Fatalf("CODEX_HOME=%q want %q", codexHome, wantCodexHome)
+	}
 
 	// Verify auth.json was written with correct contents.
 	data, err := os.ReadFile(filepath.Join(codexHome, "auth.json"))
@@ -175,6 +179,72 @@ func TestCodexBuildCommand_WithCodexAuth(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Fatalf("auth.json perms = %o, want 0600", perm)
+	}
+}
+
+func TestCodexBuildCommand_WithCodexAuthRespectsExplicitCodexHome(t *testing.T) {
+	clearCodexEnv(t)
+	authJSON := `{"auth_mode":"tokens","tokens":{"access_token":"test"}}`
+	explicitCodexHome := filepath.Join(t.TempDir(), "codex-home")
+	t.Setenv("CODEX_AUTH", authJSON)
+	t.Setenv("CODEX_HOME", explicitCodexHome)
+
+	p := newTestCodexProvider()
+	t.Cleanup(p.Cleanup)
+
+	cfg := bridge.SessionConfig{
+		ProjectID: "test",
+		SessionID: "s1",
+		RepoPath:  t.TempDir(),
+	}
+	cmd, err := p.BuildCommand(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("BuildCommand: %v", err)
+	}
+
+	if got := envValue(cmd.Env, "CODEX_HOME"); got != explicitCodexHome {
+		t.Fatalf("CODEX_HOME=%q want %q", got, explicitCodexHome)
+	}
+	data, err := os.ReadFile(filepath.Join(explicitCodexHome, "auth.json"))
+	if err != nil {
+		t.Fatalf("read auth.json: %v", err)
+	}
+	if string(data) != authJSON {
+		t.Fatalf("auth.json content = %q, want %q", string(data), authJSON)
+	}
+}
+
+func TestCodexBuildCommand_WithCodexAuthUsesPreparedEnv(t *testing.T) {
+	clearCodexEnv(t)
+	authJSON := `{"auth_mode":"tokens","tokens":{"access_token":"from-prepared-env"}}`
+	explicitCodexHome := filepath.Join(t.TempDir(), "prepared-codex-home")
+
+	p := newTestCodexProvider()
+	t.Cleanup(p.Cleanup)
+
+	cfg := bridge.SessionConfig{
+		ProjectID: "test",
+		SessionID: "s1",
+		RepoPath:  t.TempDir(),
+		Env: []string{
+			"CODEX_AUTH=" + authJSON,
+			"CODEX_HOME=" + explicitCodexHome,
+		},
+	}
+	cmd, err := p.BuildCommand(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("BuildCommand: %v", err)
+	}
+
+	if got := envValue(cmd.Env, "CODEX_HOME"); got != explicitCodexHome {
+		t.Fatalf("CODEX_HOME=%q want %q", got, explicitCodexHome)
+	}
+	data, err := os.ReadFile(filepath.Join(explicitCodexHome, "auth.json"))
+	if err != nil {
+		t.Fatalf("read auth.json: %v", err)
+	}
+	if string(data) != authJSON {
+		t.Fatalf("auth.json content = %q, want %q", string(data), authJSON)
 	}
 }
 
@@ -228,7 +298,7 @@ func TestCodexCleanup(t *testing.T) {
 
 	p.Cleanup()
 
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("authDir should be removed after Cleanup, stat err: %v", err)
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("authDir should persist after Cleanup, stat err: %v", err)
 	}
 }

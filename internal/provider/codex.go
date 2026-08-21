@@ -17,14 +17,15 @@ import (
 // CODEX_AUTH / CODEX_HOME auth.json (ChatGPT account auth) as valid
 // authentication.
 //
-// When CODEX_AUTH is set, its value is written to a temporary directory
+// When CODEX_AUTH is set, its value is written to a stable per-user directory
 // as auth.json and the subprocess receives CODEX_HOME pointing there so
-// the Codex CLI discovers the device-code credentials.
+// the Codex CLI discovers the device-code credentials and can persist its
+// own helper binaries outside the system temp directory.
 type CodexProvider struct {
 	*StdioProvider
 
 	mu      sync.Mutex
-	authDir string // temp directory holding auth.json, if created
+	authDir string // directory holding auth.json, if created
 }
 
 // NewCodexProvider creates a Codex provider that supports both API-key
@@ -84,24 +85,24 @@ func (p *CodexProvider) BuildCommand(ctx context.Context, cfg bridge.SessionConf
 		return nil, err
 	}
 
-	codexAuth := os.Getenv("CODEX_AUTH")
+	codexAuth := envValue(cmd.Env, "CODEX_AUTH")
 	if strings.TrimSpace(codexAuth) == "" {
 		return cmd, nil
 	}
 
-	// Write the auth credentials to a temp directory so the Codex CLI
+	// Write the auth credentials to a stable directory so the Codex CLI
 	// can discover them via CODEX_HOME.
-	authDir, err := p.ensureAuthDir(codexAuth)
+	authDir, err := p.ensureAuthDir(codexAuth, envValue(cmd.Env, "CODEX_HOME"))
 	if err != nil {
 		return nil, err
 	}
-	cmd.Env = append(cmd.Env, "CODEX_HOME="+authDir)
+	cmd.Env = setEnvValue(cmd.Env, "CODEX_HOME", authDir)
 	return cmd, nil
 }
 
-// ensureAuthDir creates (once) a temporary directory containing auth.json
+// ensureAuthDir creates (once) a directory containing auth.json
 // with the given contents. Subsequent calls return the same directory.
-func (p *CodexProvider) ensureAuthDir(contents string) (string, error) {
+func (p *CodexProvider) ensureAuthDir(contents, codexHome string) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -115,17 +116,50 @@ func (p *CodexProvider) ensureAuthDir(contents string) (string, error) {
 		return p.authDir, nil
 	}
 
-	dir, err := os.MkdirTemp("", "codex-auth-*")
+	dir, err := codexAuthDir(codexHome)
 	if err != nil {
-		return "", fmt.Errorf("create temp dir for codex auth: %w", err)
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create codex auth dir: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", fmt.Errorf("secure codex auth dir: %w", err)
 	}
 	authFile := filepath.Join(dir, "auth.json")
 	if err := os.WriteFile(authFile, []byte(contents), 0o600); err != nil {
-		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("write codex auth file: %w", err)
 	}
 	p.authDir = dir
 	return dir, nil
+}
+
+func codexAuthDir(codexHome string) (string, error) {
+	if codexHome := strings.TrimSpace(codexHome); codexHome != "" {
+		return codexHome, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", fmt.Errorf("resolve codex auth dir: HOME is not available; set CODEX_HOME to a persistent directory")
+	}
+	return filepath.Join(home, ".ai-agent-bridge", "codex-home"), nil
+}
+
+func setEnvValue(env []string, key, value string) []string {
+	prefix := key + "="
+	replacement := prefix + value
+	out := append([]string(nil), env...)
+	replaced := false
+	for i, item := range out {
+		if strings.HasPrefix(item, prefix) {
+			out[i] = replacement
+			replaced = true
+		}
+	}
+	if !replaced {
+		out = append(out, replacement)
+	}
+	return out
 }
 
 // atomicWriteFile writes data to a temp file in the same directory as path,
@@ -155,12 +189,11 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpName, path)
 }
 
-// Cleanup removes the temporary auth directory, if one was created.
+// Cleanup forgets the generated auth directory path. The directory itself is
+// intentionally persistent because Codex stores helper binaries and session
+// state under CODEX_HOME.
 func (p *CodexProvider) Cleanup() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.authDir != "" {
-		_ = os.RemoveAll(p.authDir)
-		p.authDir = ""
-	}
+	p.authDir = ""
 }
