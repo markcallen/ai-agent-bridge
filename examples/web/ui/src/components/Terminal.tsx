@@ -162,7 +162,7 @@ export default function Terminal({ sessionId, role, remote, onClose }: Props) {
           )}
         </span>
         <button style={styles.closeBtn} onClick={onClose}>
-          Close
+          Detach
         </button>
       </div>
       <div ref={containerRef} style={styles.termContainer} />
