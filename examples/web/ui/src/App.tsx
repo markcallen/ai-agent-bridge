@@ -226,6 +226,9 @@ export default function App() {
               role={activeSession.role}
               remote={remote}
               onClose={handleCloseTerminal}
+              onSwitchToWatch={() =>
+                setActiveSession({ id: activeSession.id, role: 'observer' })
+              }
             />
           </div>
         )}
