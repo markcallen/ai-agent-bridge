@@ -57,7 +57,8 @@ with a cert signed by the server's trusted CA can enroll.`,
 			}
 			// Default to port 9445 if not specified.
 			if _, _, err := net.SplitHostPort(target); err != nil {
-				target = net.JoinHostPort(target, "9445")
+				host := strings.TrimRight(strings.TrimLeft(target, "["), "]")
+				target = net.JoinHostPort(host, "9445")
 			}
 			if caBundle == "" {
 				return fmt.Errorf("--ca is required")
