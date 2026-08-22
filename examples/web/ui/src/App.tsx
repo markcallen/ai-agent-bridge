@@ -77,6 +77,16 @@ const styles: Record<string, React.CSSProperties> = {
     outline: 'none',
     width: '240px',
   },
+  refreshBtn: {
+    background: '#0f3460',
+    border: '1px solid #1a4a8a',
+    borderRadius: '4px',
+    color: '#e0e0e0',
+    padding: '4px 8px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    lineHeight: 1,
+  },
   main: {
     flex: 1,
     display: 'flex',
@@ -105,12 +115,23 @@ export default function App() {
   const [showNewSession, setShowNewSession] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [knownRemotes, setKnownRemotes] = useState<RemoteEntry[]>([])
+  const [remotesLoading, setRemotesLoading] = useState(false)
+
+  const refreshRemotes = useCallback(async () => {
+    setRemotesLoading(true)
+    try {
+      const remotes = await listRemotes()
+      setKnownRemotes(remotes)
+    } catch {
+      // ignore
+    } finally {
+      setRemotesLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    listRemotes()
-      .then(setKnownRemotes)
-      .catch(() => {})
-  }, [])
+    void refreshRemotes()
+  }, [refreshRemotes])
 
   const remote = mode === 'remote' && remoteHost ? remoteHost : undefined
 
@@ -163,26 +184,36 @@ export default function App() {
           {mode === 'remote' && (
             <>
               {knownRemotes.length > 0 && !customRemote ? (
-                <select
-                  style={styles.select}
-                  value={remoteHost}
-                  onChange={(e) => {
-                    if (e.target.value === '__custom__') {
-                      setCustomRemote(true)
-                      setRemoteHost('')
-                    } else {
-                      setRemoteHost(e.target.value)
-                    }
-                  }}
-                >
-                  <option value="">Select a server...</option>
-                  {knownRemotes.map((r) => (
-                    <option key={r.host} value={r.host}>
-                      {r.name} ({r.host})
-                    </option>
-                  ))}
-                  <option value="__custom__">Other...</option>
-                </select>
+                <>
+                  <select
+                    style={styles.select}
+                    value={remoteHost}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') {
+                        setCustomRemote(true)
+                        setRemoteHost('')
+                      } else {
+                        setRemoteHost(e.target.value)
+                      }
+                    }}
+                  >
+                    <option value="">Select a server...</option>
+                    {knownRemotes.map((r) => (
+                      <option key={r.host} value={r.host}>
+                        {r.name} ({r.host})
+                      </option>
+                    ))}
+                    <option value="__custom__">Other...</option>
+                  </select>
+                  <button
+                    style={styles.refreshBtn}
+                    onClick={() => void refreshRemotes()}
+                    disabled={remotesLoading}
+                    title="Refresh remotes from config"
+                  >
+                    {remotesLoading ? '...' : '\u21BB'}
+                  </button>
+                </>
               ) : (
                 <>
                   <input
