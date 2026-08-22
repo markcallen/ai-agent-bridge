@@ -228,6 +228,19 @@ export default function App() {
                     value={remoteHost}
                     onChange={(e) => setRemoteHost(e.target.value)}
                   />
+                  <button
+                    type="button"
+                    style={{
+                      ...styles.refreshBtn,
+                      ...(remotesLoading ? { cursor: 'not-allowed', opacity: 0.6 } : {}),
+                    }}
+                    onClick={() => void refreshRemotes()}
+                    disabled={remotesLoading}
+                    aria-label="Refresh remotes from config"
+                    title="Refresh remotes from config"
+                  >
+                    {remotesLoading ? '...' : '\u21BB'}
+                  </button>
                   {knownRemotes.length > 0 && (
                     <button
                       style={{ ...styles.input, width: 'auto', cursor: 'pointer' }}
