@@ -528,8 +528,8 @@ immediate renewal (e.g. when the cert has already expired).`,
 					if stepCAProvisionerPasswordFile == "" && fileCfg.StepCA.ProvisionerPasswordFile != "" {
 						stepCAProvisionerPasswordFile = fileCfg.StepCA.ProvisionerPasswordFile
 					}
-					if len(serverSANs) == 0 && fileCfg.Server.Listen != "" {
-						serverSANs = localserver.BuildServerSANs(fileCfg.Server.Listen, nil)
+					if fileCfg.Server.Listen != "" {
+						serverSANs = localserver.BuildServerSANs(fileCfg.Server.Listen, serverSANs)
 					}
 					if fileCfg.Server.CertValidity != "" {
 						certValidity = config.ParseDuration(fileCfg.Server.CertValidity, 0)
