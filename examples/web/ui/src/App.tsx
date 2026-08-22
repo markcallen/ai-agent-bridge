@@ -206,9 +206,14 @@ export default function App() {
                     <option value="__custom__">Other...</option>
                   </select>
                   <button
-                    style={styles.refreshBtn}
+                    type="button"
+                    style={{
+                      ...styles.refreshBtn,
+                      ...(remotesLoading ? { cursor: 'not-allowed', opacity: 0.6 } : {}),
+                    }}
                     onClick={() => void refreshRemotes()}
                     disabled={remotesLoading}
+                    aria-label="Refresh remotes from config"
                     title="Refresh remotes from config"
                   >
                     {remotesLoading ? '...' : '\u21BB'}

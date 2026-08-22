@@ -17,6 +17,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"log/slog"
+
+	"github.com/markcallen/ai-agent-bridge/internal/localserver"
+	"github.com/markcallen/ai-agent-bridge/internal/pki"
 )
 
 // selfSignedCA generates a self-signed CA cert and returns (certPEM, key).
@@ -191,6 +196,75 @@ tls:
 	}
 	if !strings.Contains(err.Error(), "must set both tls.cert and tls.key or neither") {
 		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+func TestServerRenewCertMergesConfigSANsWithListenAddr(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", stateDir)
+
+	// Bootstrap auto-PKI so renew-cert has a CA and server cert to work with.
+	logger := slog.Default()
+	initialSANs := []string{"server", "127.0.0.1", "localhost"}
+	_, err := localserver.EnsurePKI(stateDir, initialSANs, logger, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a config that sets both server.listen and server.san.
+	configPath := filepath.Join(t.TempDir(), "bridge.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+server:
+  listen: "10.0.0.1:9445"
+  san:
+    - "vpn.example.com"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newServerRenewCertCmd()
+	cmd.SetArgs([]string{"--config", configPath})
+	cmd.SetOut(nil)
+	cmd.SetErr(nil)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	// Load the renewed cert and verify SANs include both the listen
+	// address IP and the configured SAN, plus defaults.
+	cert, err := pki.LoadCert(filepath.Join(stateDir, "certs", "server.crt"))
+	if err != nil {
+		t.Fatalf("LoadCert: %v", err)
+	}
+
+	wantDNS := []string{"vpn.example.com", "server", "localhost"}
+	for _, dns := range wantDNS {
+		found := false
+		for _, san := range cert.DNSNames {
+			if san == dns {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("renewed cert missing DNS SAN %q; got %v", dns, cert.DNSNames)
+		}
+	}
+
+	wantIPs := []string{"10.0.0.1", "127.0.0.1"}
+	for _, ipStr := range wantIPs {
+		wantIP := net.ParseIP(ipStr)
+		found := false
+		for _, ip := range cert.IPAddresses {
+			if ip.Equal(wantIP) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("renewed cert missing IP SAN %s; got %v", ipStr, cert.IPAddresses)
+		}
 	}
 }
 
