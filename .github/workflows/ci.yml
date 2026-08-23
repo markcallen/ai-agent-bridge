@@ -23,9 +23,9 @@ jobs:
           go-version-file: go.mod
 
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          version: "29.3"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
       - name: Install Go tooling
         run: |
