@@ -23,7 +23,7 @@ AI Agent process (claude / codex / opencode / gemini)
 
 The bridge daemon spawns AI agents inside PTYs, buffers their output in a bounded ring buffer with sequence numbers, and serves a gRPC API. Clients can attach at any time, replay buffered output, and stream live PTY bytes. Authentication uses mTLS + JWT (Ed25519).
 
-See [docs/service.md](docs/service.md) for architecture details.
+See the Docusaurus documentation under [docs/](docs/) for architecture details.
 
 ---
 
@@ -67,10 +67,12 @@ The repo-local [`.env.example`](.env.example) contains only the non-secret `ENV_
 ### 2. Start the daemon
 
 ```bash
-make dev-run
+make build
+export PATH="$PWD/bin:$PATH"
+bridgectl server start
 ```
 
-This builds the binaries, installs the pinned AI agent CLIs into `node_modules`, generates dev TLS certificates and JWT signing keys, then starts the daemon on `127.0.0.1:9445` with mTLS + JWT.
+This builds the binaries and starts the bridge in local Unix socket mode. Use `bridgectl server start --listen <tailscale-ip>:9445` when you want secure remote access over Tailscale.
 
 ### 3. Try an interactive session
 
@@ -229,7 +231,7 @@ client, err := bridgeclient.New(
 )
 ```
 
-Full Go SDK reference: [docs/go-sdk.md](docs/go-sdk.md)
+Full Go SDK reference: [docs/docs/reference/go-sdk.md](docs/docs/reference/go-sdk.md)
 
 ---
 
@@ -237,7 +239,7 @@ Full Go SDK reference: [docs/go-sdk.md](docs/go-sdk.md)
 
 Install [grpcurl](https://github.com/fullstorydev/grpcurl) to call the bridge from a shell.
 
-**With mTLS** (after `make dev-run`):
+**With mTLS** (after starting a secure TCP server):
 
 ```bash
 grpcurl \
@@ -279,9 +281,9 @@ grpcurl -plaintext -import-path proto -proto bridge/v1/bridge.proto \
 
 Note: `data` is base64-encoded bytes. `grpcurl` does not support JWT injection — use the Go SDK for JWT-authenticated calls.
 
-Full API reference: [docs/grpc-api.md](docs/grpc-api.md)
+Full API reference: [docs/docs/reference/grpc-api.md](docs/docs/reference/grpc-api.md)
 
-Full documentation index: [docs/README.md](docs/README.md)
+Full documentation source: [docs/docs/intro.md](docs/docs/intro.md)
 
 ---
 
@@ -294,7 +296,7 @@ Full documentation index: [docs/README.md](docs/README.md)
 | `codex` | `./node_modules/.bin/codex` | `OPENAI_API_KEY` |
 | `gemini` | `./node_modules/.bin/gemini` | `GEMINI_API_KEY` |
 
-Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs/service.md) for configuration reference.
+Providers are configured in `config/bridge-dev.yaml`. See [docs/docs/reference/configuration.md](docs/docs/reference/configuration.md) for configuration reference.
 
 ---
 
@@ -302,8 +304,7 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs
 
 | Target | Description |
 |--------|-------------|
-| `make dev-run` | Build, generate dev certs, start the daemon |
-| `make build` | Build `bin/ai-agent-bridge` and `bin/ai-agent-bridge-ca` |
+| `make build` | Build `bin/bridgectl` and `bin/ai-agent-bridge-ca` |
 | `make test` | Run unit tests with race detection |
 | `make test-e2e` | Run the Dockerized end-to-end test suite |
 | `make test-e2e-unprotected` | Manually run live Docker SDK e2e tests for Codex/Claude protected and unprotected modes |
@@ -319,6 +320,7 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/service.md](docs
 | `make lint` | Run golangci-lint |
 | `make fmt` | Format code with gofmt + goimports |
 | `make dev-setup` | Build binaries and generate dev certificates |
+| `make docs-build` | Build the Docusaurus documentation site |
 | `make certs` | Initialize a bridge CA in `certs/` |
 | `make clean` | Remove build artifacts |
 
@@ -342,8 +344,8 @@ Run `ai-agent-bridge-ca <command> --help` for flags.
 ## Project Structure
 
 ```
-cmd/bridge/                    Daemon binary
-cmd/bridge-ca/                 CA and certificate management CLI
+cmd/bridgectl/                 User-session server and CLI
+cmd/bridge-ca/                 Certificate management CLI
 pkg/bridgeclient/              Go SDK
 proto/bridge/v1/               Protobuf service definitions
 gen/bridge/v1/                 Generated protobuf Go code (do not edit)
@@ -354,7 +356,7 @@ internal/pki/                  CA management, cert issuance, cross-signing
 internal/provider/             Stdio/PTY provider adapters
 internal/server/               gRPC server implementation + rate limiting
 examples/chat/                 Interactive PTY passthrough example
-docs/                          Integration guides and API reference
+docs/                          Docusaurus documentation site
 config/                        Default configuration files
 scripts/                       Development helper scripts
 ```
@@ -363,10 +365,12 @@ scripts/                       Development helper scripts
 
 ## Documentation
 
-- [docs/service.md](docs/service.md) — Architecture, configuration reference, security
-- [docs/install-ubuntu.md](docs/install-ubuntu.md) — apt repository installation and package details
-- [docs/go-sdk.md](docs/go-sdk.md) — Go SDK reference
-- [docs/grpc-api.md](docs/grpc-api.md) — Full gRPC API reference
+- [docs/docs/intro.md](docs/docs/intro.md) — Documentation entry point
+- [docs/docs/getting-started/local-server.md](docs/docs/getting-started/local-server.md) — Local server quick start
+- [docs/docs/guides/web-ui.md](docs/docs/guides/web-ui.md) — Web UI example
+- [docs/docs/guides/step-ca-tailscale.md](docs/docs/guides/step-ca-tailscale.md) — Step CA over Tailscale setup
+- [docs/docs/reference/go-sdk.md](docs/docs/reference/go-sdk.md) — Go SDK reference
+- [docs/docs/reference/grpc-api.md](docs/docs/reference/grpc-api.md) — Full gRPC API reference
 
 ---
 

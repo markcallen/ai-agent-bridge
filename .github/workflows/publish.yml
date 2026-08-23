@@ -334,6 +334,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y apt-utils dpkg-dev gnupg
 
+      - name: Setup pnpm for docs
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.22.0
+
+      - name: Set up Node for docs
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+
       - name: Download .deb artifacts
         uses: actions/download-artifact@v8
         with:
@@ -374,7 +386,13 @@ jobs:
           ./scripts/build-apt-repo.sh
           cp scripts/install.sh dist/gh-pages/install.sh
 
-      - name: Publish apt repository to GitHub Pages
+      - name: Build Docusaurus docs
+        run: |
+          pnpm --dir docs install --frozen-lockfile
+          pnpm --dir docs run build
+          cp -a docs/build/. dist/gh-pages/
+
+      - name: Publish docs and apt repository to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -500,5 +518,6 @@ jobs:
             - Go SDK module tag: `${{ env.RELEASE_TAG }}`
             - Docker image: `ghcr.io/${{ github.repository }}:${{ env.RELEASE_TAG }}`
             - Docker image digest: `${{ needs.publish_container.outputs.digest }}`
+            - Documentation site: `https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/`
             - Apt repository: `${{ env.REPO_BASE_URL }}`
             - Install helper: `https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/install.sh`

@@ -23,22 +23,32 @@ services:
       timeout: 2s
       retries: 30
       start_period: 30s
+    networks:
+      default:
+        aliases:
+          - bridge.local
 
-  chat-web:
+  web:
     build:
       context: .
-      dockerfile: examples/chat-web/Dockerfile
+      dockerfile: examples/web/Dockerfile
       target: production
     environment:
-      BRIDGE_ADDR: bridge:9445
-      CA_CERT: /app/certs/ca-bundle.crt
-      CLIENT_CERT: /app/certs/dev-client.crt
-      CLIENT_KEY: /app/certs/dev-client.key
-      JWT_KEY: /app/certs/jwt-signing.key
+      BRIDGE_ADDR: bridge.local:9445
+      BRIDGE_SERVER_NAME: bridge.local
+      CA_CERT: /certs/ca-bundle.crt
+      CLIENT_CERT: /certs/dev-client.crt
+      CLIENT_KEY: /certs/dev-client.key
+      JWT_KEY: /certs/jwt-signing.key
+      JWT_ISSUER: dev
     ports:
       - "3000:3000"
     volumes:
-      - ./certs:/app/certs:ro
+      - ./certs:/certs:ro
     depends_on:
       bridge:
         condition: service_healthy
+    networks:
+      default:
+        aliases:
+          - web.local

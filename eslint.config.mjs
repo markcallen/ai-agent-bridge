@@ -14,7 +14,7 @@ export default [
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['packages/bridge-client-node/**/*.{ts,tsx}', 'examples/chat-ts/**/*.{ts,tsx}', 'examples/chat-web/**/*.{ts,tsx}', 'examples/web/ui/src/**/*.{ts,tsx}'],
+    files: ['examples/web/ui/src/**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -27,7 +27,7 @@ export default [
     }
   },
   {
-    files: ['examples/chat-web/**/*.{ts,tsx}'],
+    files: ['examples/web/ui/src/**/*.{ts,tsx}'],
     languageOptions: {
       globals: {
         ...globals.browser,
