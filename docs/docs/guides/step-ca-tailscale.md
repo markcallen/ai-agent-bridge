@@ -62,7 +62,6 @@ corepack enable
 corepack prepare pnpm@11.22.0 --activate
 pnpm install --frozen-lockfile
 make build
-export PATH="$PWD/bin:$PATH"
 ```
 
 Export any provider credentials needed on each machine.
@@ -76,7 +75,7 @@ mkdir -p ~/.ai-agent-bridge/certs
 curl -sk https://ca-host.tailnet-name.ts.net:9443/roots \
   | jq -r '.crts[0]' > ~/.ai-agent-bridge/certs/step-ca-root.crt
 
-bridgectl server start \
+bin/bridgectl server start \
   --listen 100.a.a.a:9445 \
   --san machine-a.tailnet-name.ts.net \
   --step-ca-url https://ca-host.tailnet-name.ts.net:9443 \
@@ -95,7 +94,7 @@ mkdir -p ~/.ai-agent-bridge/certs
 curl -sk https://ca-host.tailnet-name.ts.net:9443/roots \
   | jq -r '.crts[0]' > ~/.ai-agent-bridge/certs/step-ca-root.crt
 
-bridgectl server start \
+bin/bridgectl server start \
   --listen 100.b.b.b:9445 \
   --san machine-b.tailnet-name.ts.net \
   --step-ca-url https://ca-host.tailnet-name.ts.net:9443 \
@@ -110,7 +109,7 @@ Keep both server terminals open while testing.
 On `machine-a`:
 
 ```bash
-bridgectl client init \
+bin/bridgectl client init \
   --step-ca-url https://ca-host.tailnet-name.ts.net:9443 \
   --step-ca-root ~/.ai-agent-bridge/certs/step-ca-root.crt \
   --provisioner bridge-jwk \
@@ -123,7 +122,7 @@ This obtains a client certificate from Step CA, creates a JWT signing key, regis
 Verify remote access:
 
 ```bash
-bridgectl session list --remote machine-b.tailnet-name.ts.net
+bin/bridgectl session list --remote machine-b.tailnet-name.ts.net
 ```
 
 ## 7. Start a Remote Session from Machine A

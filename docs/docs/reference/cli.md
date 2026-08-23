@@ -4,6 +4,24 @@ title: CLI Reference
 
 The main CLI is `bridgectl`. Build it with `make build`, then add `bin/` to your path.
 
+## Run
+
+The quickest way to start working. Auto-starts a local server if needed, creates a session, and attaches your terminal:
+
+```bash
+bridgectl run [directory]
+bridgectl run --provider codex ~/repos/my-project
+bridgectl run --timeout 1h .
+```
+
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--provider` | `-p` | `claude` | AI provider: `claude`, `codex`, `opencode`, `gemini`, `echo`. |
+| `--timeout` | `-t` | `30m` | Session timeout. |
+| `--no-tty` | | `false` | Run without a terminal (for scripting and tests). |
+
+The directory argument defaults to `.` if omitted. Press **Ctrl-]** to detach without stopping the session.
+
 ## Server Commands
 
 ```bash
@@ -49,7 +67,7 @@ bridgectl client renew
 ## Session Commands
 
 ```bash
-bridgectl session list --project local
+bridgectl session list
 bridgectl session watch <session-id>
 bridgectl session attach <session-id>
 bridgectl session attach --take-over <session-id>

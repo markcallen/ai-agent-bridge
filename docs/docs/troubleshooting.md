@@ -13,13 +13,13 @@ no ai-agent-bridge server running
 Start the server in another terminal:
 
 ```bash
-bridgectl server start
+bin/bridgectl server start
 ```
 
 If the server is running in secure TCP mode, check:
 
 ```bash
-bridgectl server status
+bin/bridgectl server status
 ```
 
 ## Unknown JWT Issuer
@@ -27,7 +27,7 @@ bridgectl server status
 Remote clients need both an mTLS certificate and a registered JWT public key. Re-enroll:
 
 ```bash
-bridgectl client init \
+bin/bridgectl client init \
   --step-ca-url https://ca-host.tailnet-name.ts.net:9443 \
   --target bridge-host.tailnet-name.ts.net:9445
 ```
@@ -35,7 +35,7 @@ bridgectl client init \
 If you already have a client certificate:
 
 ```bash
-bridgectl client enroll \
+bin/bridgectl client enroll \
   --target bridge-host.tailnet-name.ts.net:9445 \
   --ca ~/.ai-agent-bridge/certs/step-ca-root.crt \
   --cert ~/.ai-agent-bridge/certs/<name>.crt \
@@ -47,7 +47,7 @@ bridgectl client enroll \
 The remote hostname must appear in the bridge server certificate SANs. Start the server with the Tailscale DNS name:
 
 ```bash
-bridgectl server start \
+bin/bridgectl server start \
   --listen 100.x.y.z:9445 \
   --san machine.tailnet-name.ts.net
 ```
@@ -59,7 +59,7 @@ If you must dial by IP, pass `--server-name machine.tailnet-name.ts.net` on CLI 
 Run:
 
 ```bash
-bridgectl server status
+bin/bridgectl server status
 ```
 
 Common causes:
@@ -71,7 +71,7 @@ Common causes:
 
 ## Web UI Cannot Connect
 
-For local mode, the web server must run as the same user that started `bridgectl server start`.
+For local mode, the web server must run as the same user that started `bin/bridgectl server start`.
 
 For compose mode, check:
 
