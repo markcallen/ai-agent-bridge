@@ -42,9 +42,12 @@ services:
       JWT_KEY: /certs/jwt-signing.key
       JWT_ISSUER: dev
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
-      - ./certs:/certs:ro
+      - ./certs/ca-bundle.crt:/certs/ca-bundle.crt:ro
+      - ./certs/dev-client.crt:/certs/dev-client.crt:ro
+      - ./certs/dev-client.key:/certs/dev-client.key:ro
+      - ./certs/jwt-signing.key:/certs/jwt-signing.key:ro
     depends_on:
       bridge:
         condition: service_healthy

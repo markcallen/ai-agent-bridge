@@ -16,6 +16,25 @@ Use this setup on every machine that will run a bridge server or use the example
   - `OPENAI_API_KEY` for OpenCode
   - `GEMINI_API_KEY` for Gemini
 
+## Install on Linux (apt)
+
+On Ubuntu, you can install `bridgectl` from the apt repository instead of building from source:
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] \
+  https://markcallen.github.io/ai-agent-bridge/apt noble main" \
+  | sudo tee /etc/apt/sources.list.d/ai-agent-bridge.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y ai-agent-bridge
+```
+
+**Supported suites:** `noble` (24.04 LTS) and `plucky` (25.04). Replace `noble` with `plucky` if you are on Ubuntu 25.04.
+
+If you install via apt, skip the **Clone and Build** section below and go straight to **Install Provider CLIs**.
+
 ## Clone and Build
 
 ```bash
@@ -27,19 +46,10 @@ nvm use
 corepack enable
 corepack prepare pnpm@11.22.0 --activate
 
-make build
+make build-cli
 ```
 
-The build writes:
-
-- `bin/bridgectl`
-- `bin/ai-agent-bridge-ca`
-
-Add the binaries to your shell path for the examples:
-
-```bash
-export PATH="$PWD/bin:$PATH"
-```
+The build writes `bin/bridgectl`. Use `make build` instead if you have `protoc` installed and want to regenerate the gRPC stubs.
 
 ## Install Provider CLIs
 
@@ -63,10 +73,9 @@ Only the variables required by the selected provider need to be set.
 
 The default local config allows repositories under `/home` and `/tmp`. If your working repositories live somewhere else, add that parent directory under `allowed_paths` in the bridge config.
 
-For local testing, a throwaway repo is enough:
+For local testing, clone the demo repository:
 
 ```bash
-mkdir -p ~/repos/bridge-demo
-cd ~/repos/bridge-demo
-git init
+mkdir -p ~/repos
+git clone https://github.com/orchael/bridge-demo.git ~/repos/bridge-demo
 ```

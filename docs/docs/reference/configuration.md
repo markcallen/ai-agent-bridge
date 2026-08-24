@@ -83,7 +83,7 @@ If `claude` is unavailable, the server can select `codex` for the session.
 Use `--db-path` to persist session metadata and PTY chunks:
 
 ```bash
-bridgectl server start --db-path ~/.ai-agent-bridge/sessions.db
+bin/bridgectl server start --db-path ~/.ai-agent-bridge/sessions.db
 ```
 
 On restart, terminal session history can be replayed as terminal history.

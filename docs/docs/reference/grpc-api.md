@@ -43,10 +43,12 @@ service BridgeService {
 
 | Event type | Meaning |
 | --- | --- |
+| `ATTACHED` | Confirms the client is attached to the session. |
 | `OUTPUT` | Raw PTY bytes in `payload`. |
-| `ERROR` | Session or stream error text. |
-| `SESSION_EXIT` | Provider process exited. |
 | `REPLAY_GAP` | Requested replay range is no longer fully buffered. |
+| `SESSION_EXIT` | Provider process exited. |
+| `ERROR` | Session or stream error text. |
+| `THINKING` | A thinking block emitted by the provider. |
 | `WRITER_CLAIMED` | A client claimed the writer slot. |
 | `WRITER_RELEASED` | A client released the writer slot. |
 

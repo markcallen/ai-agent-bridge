@@ -4,6 +4,24 @@ title: CLI Reference
 
 The main CLI is `bridgectl`. Build it with `make build`, then add `bin/` to your path.
 
+## Run
+
+The quickest way to start working. Auto-starts a local server if needed, creates a session, and attaches your terminal:
+
+```bash
+bridgectl run [directory]
+bridgectl run --provider codex ~/repos/my-project
+bridgectl run --timeout 1h .
+```
+
+| Flag | Short | Default | Description |
+| --- | --- | --- | --- |
+| `--provider` | `-p` | `claude` | AI provider: `claude`, `codex`, `opencode`, `gemini`, `echo`. |
+| `--timeout` | `-t` | `30m` | Session timeout. |
+| `--no-tty` | | `false` | Run without a terminal (for scripting and tests). |
+
+The directory argument defaults to `.` if omitted. Press **Ctrl-]** to detach without stopping the session.
+
 ## Server Commands
 
 ```bash
@@ -49,7 +67,7 @@ bridgectl client renew
 ## Session Commands
 
 ```bash
-bridgectl session list --project local
+bridgectl session list
 bridgectl session watch <session-id>
 bridgectl session attach <session-id>
 bridgectl session attach --take-over <session-id>
@@ -66,15 +84,3 @@ Remote session commands accept:
 | `--key <path>` | Client private key override. |
 | `--jwt-key <path>` | JWT signing private key override. |
 | `--server-name <name>` | TLS server name override when dialing by IP or alternate DNS name. |
-
-## Certificate Utility
-
-`ai-agent-bridge-ca` remains available for explicit CA workflows:
-
-```bash
-ai-agent-bridge-ca init --name ai-agent-bridge --out certs/
-ai-agent-bridge-ca issue --type server --cn bridge.local --san bridge.local,127.0.0.1 --out certs/bridge
-ai-agent-bridge-ca issue --type client --cn dev-client --out certs/dev-client
-ai-agent-bridge-ca jwt-keygen --out certs/jwt-signing
-ai-agent-bridge-ca bundle --out certs/ca-bundle.crt certs/ca.crt
-```

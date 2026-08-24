@@ -10,8 +10,7 @@ Terminal 1, start the bridge server:
 
 ```bash
 make build
-export PATH="$PWD/bin:$PATH"
-bridgectl server start
+bin/bridgectl server start
 ```
 
 Terminal 2, start the web UI in production mode:
@@ -20,7 +19,7 @@ Terminal 2, start the web UI in production mode:
 make web-start WEB_PORT=8080
 ```
 
-Open `http://localhost:8080`.
+Open `http://localhost:8080`. The web server binds to all interfaces by default. On a shared network, use a firewall or bind to loopback with `WEB_HOST=127.0.0.1` to prevent unauthorized access.
 
 In the web UI:
 
@@ -71,7 +70,7 @@ Open `http://localhost:5173`.
 Remote connections use credentials from `~/.ai-agent-bridge/certs` on the machine running the web server. Enroll first:
 
 ```bash
-bridgectl client init \
+bin/bridgectl client init \
   --step-ca-url https://<step-ca-tailnet-name>:9443 \
   --provisioner bridge-jwk \
   --target <remote-bridge-tailnet-name>:9445
