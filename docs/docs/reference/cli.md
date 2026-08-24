@@ -2,7 +2,7 @@
 title: CLI Reference
 ---
 
-The main CLI is `bridgectl`. Build it with `make build`, then add `bin/` to your path.
+The main CLI is `bridgectl`. Build it with `make build-cli`.
 
 ## Run
 

@@ -14,7 +14,8 @@ func main() {
 	flag.Parse()
 
 	srv := newServer(*vitePort, os.Getenv("VITE_URL"))
-	addr := fmt.Sprintf(":%d", *port)
+	host := os.Getenv("WEB_HOST")
+	addr := fmt.Sprintf("%s:%d", host, *port)
 	slog.Info("starting web server", "addr", addr, "dev", *vitePort > 0)
 	if err := http.ListenAndServe(addr, srv); err != nil {
 		slog.Error("server failed", "err", err)

@@ -43,10 +43,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
-      - ./certs/ca-bundle.crt:/certs/ca-bundle.crt:ro
-      - ./certs/dev-client.crt:/certs/dev-client.crt:ro
-      - ./certs/dev-client.key:/certs/dev-client.key:ro
-      - ./certs/jwt-signing.key:/certs/jwt-signing.key:ro
+      - ./certs:/certs:ro
     depends_on:
       bridge:
         condition: service_healthy
@@ -66,7 +63,7 @@ services:
     environment:
       VITE_SERVER_TARGET: http://web:3000
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     depends_on:
       - web
     develop:

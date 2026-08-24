@@ -9,7 +9,7 @@ title: Web UI Example
 Terminal 1, start the bridge server:
 
 ```bash
-make build
+make build-cli
 bin/bridgectl server start
 ```
 
@@ -19,7 +19,7 @@ Terminal 2, start the web UI in production mode:
 make web-start WEB_PORT=8080
 ```
 
-Open `http://localhost:8080`. The web server binds to all interfaces by default. On a shared network, use a firewall or bind to loopback with `WEB_HOST=127.0.0.1` to prevent unauthorized access.
+Open `http://localhost:8080`. The web server binds to all interfaces by default. On a shared network, set `WEB_HOST=127.0.0.1` to bind to loopback only.
 
 In the web UI:
 

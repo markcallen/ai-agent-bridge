@@ -24,7 +24,7 @@ On Ubuntu, you can install `bridgectl` from the apt repository instead of buildi
 sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc \
   | sudo gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] \
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] \
   https://markcallen.github.io/ai-agent-bridge/apt noble main" \
   | sudo tee /etc/apt/sources.list.d/ai-agent-bridge.list >/dev/null
 sudo apt-get update
@@ -33,7 +33,7 @@ sudo apt-get install -y ai-agent-bridge
 
 **Supported suites:** `noble` (24.04 LTS) and `plucky` (25.04). Replace `noble` with `plucky` if you are on Ubuntu 25.04.
 
-If you install via apt, skip the **Clone and Build** section below and go straight to **Install Provider CLIs**.
+If you install via apt, you still need to clone the repository to install the provider CLIs (see **Install Provider CLIs** below), but you can skip the **Clone and Build** step.
 
 ## Clone and Build
 
@@ -49,7 +49,7 @@ corepack prepare pnpm@11.22.0 --activate
 make build-cli
 ```
 
-The build writes `bin/bridgectl`. Use `make build` instead if you have `protoc` installed and want to regenerate the gRPC stubs.
+The build writes `bin/bridgectl`. Use `make build` instead if you want to regenerate the gRPC stubs — this requires `protoc` and the Go generators (install them with `make tools`).
 
 ## Install Provider CLIs
 
@@ -71,7 +71,7 @@ Only the variables required by the selected provider need to be set.
 
 ## Repository Paths
 
-The default local config allows repositories under `/home` and `/tmp`. If your working repositories live somewhere else, add that parent directory under `allowed_paths` in the bridge config.
+By default, all repository paths are allowed. To restrict which directories sessions can access, set `allowed_paths` in the bridge config.
 
 For local testing, clone the demo repository:
 

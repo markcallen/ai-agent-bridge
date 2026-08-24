@@ -27,7 +27,7 @@ This creates a session with the chosen provider in the given directory and attac
 
 Replace `claude` with `codex`, `opencode`, or `gemini` if that provider is configured on your machine. The directory argument defaults to `.` if omitted.
 
-Press **Ctrl-]** to detach without stopping the session. You can reattach later with `bin/bridgectl session attach`.
+Press **Ctrl-]** to detach without stopping the session. You can reattach later with `bin/bridgectl session attach <session-id>`.
 
 ## 3. List Sessions
 

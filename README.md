@@ -71,7 +71,7 @@ nvm install
 corepack enable
 corepack prepare pnpm@11.22.0 --activate
 pnpm install --frozen-lockfile
-make build
+make build-cli
 ```
 
 ### 3. Start the daemon

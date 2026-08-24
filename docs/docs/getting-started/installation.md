@@ -2,7 +2,7 @@
 title: Installation
 ---
 
-## apt (Ubuntu / Debian)
+## apt (Ubuntu)
 
 Install `bridgectl` from the signed apt repository:
 
@@ -10,7 +10,7 @@ Install `bridgectl` from the signed apt repository:
 sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc \
   | sudo gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] \
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] \
   https://markcallen.github.io/ai-agent-bridge/apt noble main" \
   | sudo tee /etc/apt/sources.list.d/ai-agent-bridge.list >/dev/null
 sudo apt-get update

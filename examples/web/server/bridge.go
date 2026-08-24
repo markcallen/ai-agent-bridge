@@ -117,6 +117,8 @@ func envBridgeClient(timeout time.Duration) (*bridgeclient.Client, error) {
 		return nil, nil
 	}
 	if _, _, err := net.SplitHostPort(target); err != nil {
+		// Strip brackets from bare IPv6 addresses like [2001:db8::1]
+		target = strings.TrimSuffix(strings.TrimPrefix(target, "["), "]")
 		target = net.JoinHostPort(target, "9445")
 	}
 
