@@ -6,7 +6,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Getting Started',
-      items: ['getting-started/local-machine', 'getting-started/local-server'],
+      items: ['getting-started/installation', 'getting-started/local-machine', 'getting-started/local-server'],
     },
     {
       type: 'category',

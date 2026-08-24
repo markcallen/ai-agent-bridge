@@ -91,8 +91,8 @@ Remote session commands accept:
 
 ```bash
 ai-agent-bridge-ca init --name ai-agent-bridge --out certs/
-ai-agent-bridge-ca issue --type server --cn bridge.local --san bridge.local,127.0.0.1 --out certs/bridge
-ai-agent-bridge-ca issue --type client --cn dev-client --out certs/dev-client
+ai-agent-bridge-ca issue --type server --cn bridge.local --san bridge.local,127.0.0.1 --ca certs/ca.crt --ca-key certs/ca.key --out certs/bridge
+ai-agent-bridge-ca issue --type client --cn dev-client --ca certs/ca.crt --ca-key certs/ca.key --out certs/dev-client
 ai-agent-bridge-ca jwt-keygen --out certs/jwt-signing
 ai-agent-bridge-ca bundle --out certs/ca-bundle.crt certs/ca.crt
 ```

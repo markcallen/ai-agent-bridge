@@ -46,10 +46,10 @@ nvm use
 corepack enable
 corepack prepare pnpm@11.22.0 --activate
 
-make build
+make build-cli
 ```
 
-The build writes `bin/bridgectl`.
+The build writes `bin/bridgectl`. Use `make build` instead if you have `protoc` installed and want to regenerate the gRPC stubs.
 
 ## Install Provider CLIs
 

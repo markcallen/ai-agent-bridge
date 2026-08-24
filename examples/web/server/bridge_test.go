@@ -21,7 +21,7 @@ func TestDefaultServerName(t *testing.T) {
 		{name: "compose alias", target: "bridge.local:9445", want: "bridge.local"},
 		{name: "compose service", target: "bridge:9445", want: "bridge.local"},
 		{name: "localhost", target: "localhost:9445", want: "bridge.local"},
-		{name: "ip", target: "127.0.0.1:9445", want: "bridge.local"},
+		{name: "ip", target: "127.0.0.1:9445", want: "127.0.0.1"},
 		{name: "remote host", target: "machine.tailnet.ts.net:9445", want: "machine.tailnet.ts.net"},
 		{name: "host without port", target: "machine.tailnet.ts.net", want: "machine.tailnet.ts.net"},
 	}

@@ -9,7 +9,7 @@ This is the fastest path for one machine. It starts a local bridge server, creat
 From the repository root:
 
 ```bash
-make build
+make build-cli
 bin/bridgectl server start
 ```
 

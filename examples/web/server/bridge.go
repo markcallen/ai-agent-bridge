@@ -116,8 +116,8 @@ func envBridgeClient(timeout time.Duration) (*bridgeclient.Client, error) {
 	if target == "" {
 		return nil, nil
 	}
-	if !strings.Contains(target, ":") {
-		target += ":9445"
+	if _, _, err := net.SplitHostPort(target); err != nil {
+		target = net.JoinHostPort(target, "9445")
 	}
 
 	caBundle := os.Getenv("CA_CERT")
@@ -159,7 +159,7 @@ func defaultServerName(target string) string {
 	if h, _, err := net.SplitHostPort(target); err == nil {
 		host = h
 	}
-	if host == "bridge" || host == "bridge.local" || host == "localhost" || net.ParseIP(host) != nil {
+	if host == "bridge" || host == "bridge.local" || host == "localhost" {
 		return "bridge.local"
 	}
 	return host

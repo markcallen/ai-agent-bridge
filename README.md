@@ -64,17 +64,25 @@ env-secrets aws secret upsert \
 
 The repo-local [`.env.example`](.env.example) contains only the non-secret `ENV_SECRETS_*` settings. After you copy it to `.env`, the main `make` targets will call `env-secrets aws` automatically and load the secret named by `ENV_SECRETS_AWS_SECRET`.
 
-### 2. Start the daemon
+### 2. Build and install
 
 ```bash
+nvm install
+corepack enable
+corepack prepare pnpm@11.22.0 --activate
+pnpm install --frozen-lockfile
 make build
-export PATH="$PWD/bin:$PATH"
-bridgectl server start
 ```
 
-This builds the binaries and starts the bridge in local Unix socket mode. Use `bridgectl server start --listen <tailscale-ip>:9445` when you want secure remote access over Tailscale.
+### 3. Start the daemon
 
-### 3. Try an interactive session
+```bash
+bin/bridgectl server start
+```
+
+This starts the bridge in local Unix socket mode. Use `bin/bridgectl server start --listen <tailscale-ip>:9445` when you want secure remote access over Tailscale.
+
+### 4. Try an interactive session
 
 ```bash
 make chat-claude     # or chat-opencode, chat-codex, chat-gemini

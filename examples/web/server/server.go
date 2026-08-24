@@ -50,7 +50,11 @@ func (s *server) routes() {
 		if target == "" {
 			target = fmt.Sprintf("http://localhost:%d", s.vitePort)
 		}
-		viteURL, _ := url.Parse(target)
+		viteURL, err := url.Parse(target)
+		if err != nil {
+			slog.Error("invalid VITE_URL", "url", target, "err", err)
+			return
+		}
 		proxy := httputil.NewSingleHostReverseProxy(viteURL)
 		s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			proxy.ServeHTTP(w, r)
