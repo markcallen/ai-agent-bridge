@@ -8,6 +8,9 @@ echo "==> Enforcing maintained package coverage"
 ./scripts/check-go-coverage.sh
 
 echo "==> Building TypeScript packages"
-npm --prefix packages/bridge-client-node run build
-npm --prefix examples/chat-ts run build
-corepack pnpm --dir examples/chat-web run build
+corepack pnpm --dir examples/web/ui install --frozen-lockfile
+corepack pnpm --dir examples/web/ui run build
+
+echo "==> Building documentation site"
+corepack pnpm --dir docs install --frozen-lockfile
+corepack pnpm --dir docs run build

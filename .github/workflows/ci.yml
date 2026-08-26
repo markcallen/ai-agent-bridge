@@ -23,9 +23,9 @@ jobs:
           go-version-file: go.mod
 
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          version: "29.3"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
       - name: Install Go tooling
         run: |
@@ -113,6 +113,28 @@ jobs:
       - name: Build web UI
         run: pnpm --dir examples/web/ui run build
 
+  docs-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.22.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+
+      - name: Install docs dependencies
+        run: pnpm --dir docs install --frozen-lockfile
+
+      - name: Build docs
+        run: pnpm --dir docs run build
+
   smoke:
     if: github.event_name == 'pull_request'
     needs:
@@ -120,6 +142,7 @@ jobs:
       - go-test
       - typescript-lint
       - typescript-test
+      - docs-build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

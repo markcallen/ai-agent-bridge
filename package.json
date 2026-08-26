@@ -9,6 +9,7 @@
   "scripts": {
     "setup:agents": "bash ./scripts/setup_ai_agents.sh",
     "build:ts": "corepack pnpm --dir examples/web/ui run build",
+    "build:docs": "corepack pnpm --dir docs run build",
     "lint:ts": "eslint \"examples/web/ui/src/**/*.{ts,tsx}\"",
     "test:ts": "echo 'no ts tests'",
     "test:ts:coverage": "echo 'no ts tests'",

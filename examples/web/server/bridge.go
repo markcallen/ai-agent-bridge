@@ -111,12 +111,71 @@ func remoteClient(host string, timeout time.Duration) (*bridgeclient.Client, err
 	)
 }
 
+func envBridgeClient(timeout time.Duration) (*bridgeclient.Client, error) {
+	target := os.Getenv("BRIDGE_ADDR")
+	if target == "" {
+		return nil, nil
+	}
+	if _, _, err := net.SplitHostPort(target); err != nil {
+		// Strip brackets from bare IPv6 addresses like [2001:db8::1]
+		target = strings.TrimSuffix(strings.TrimPrefix(target, "["), "]")
+		target = net.JoinHostPort(target, "9445")
+	}
+
+	caBundle := os.Getenv("CA_CERT")
+	certPath := os.Getenv("CLIENT_CERT")
+	keyPath := os.Getenv("CLIENT_KEY")
+	jwtKey := os.Getenv("JWT_KEY")
+	if caBundle == "" || certPath == "" || keyPath == "" || jwtKey == "" {
+		return nil, fmt.Errorf("BRIDGE_ADDR requires CA_CERT, CLIENT_CERT, CLIENT_KEY, and JWT_KEY")
+	}
+
+	serverName := os.Getenv("BRIDGE_SERVER_NAME")
+	if serverName == "" {
+		serverName = defaultServerName(target)
+	}
+	issuer := os.Getenv("JWT_ISSUER")
+	if issuer == "" {
+		issuer = "dev"
+	}
+
+	return bridgeclient.New(
+		bridgeclient.WithTarget(target),
+		bridgeclient.WithTimeout(timeout),
+		bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
+			CABundlePath: caBundle,
+			CertPath:     certPath,
+			KeyPath:      keyPath,
+			ServerName:   serverName,
+		}),
+		bridgeclient.WithJWT(bridgeclient.JWTConfig{
+			PrivateKeyPath: jwtKey,
+			Issuer:         issuer,
+			Audience:       "bridge",
+		}),
+	)
+}
+
+func defaultServerName(target string) string {
+	host := target
+	if h, _, err := net.SplitHostPort(target); err == nil {
+		host = h
+	}
+	if host == "bridge" || host == "bridge.local" || host == "localhost" {
+		return "bridge.local"
+	}
+	return host
+}
+
 // clientForRequest returns either a local or remote client depending on
 // whether the "remote" query param is set.
 func clientForRequest(r *http.Request, timeout time.Duration) (*bridgeclient.Client, error) {
 	remote := r.URL.Query().Get("remote")
 	if remote != "" {
 		return remoteClient(remote, timeout)
+	}
+	if client, err := envBridgeClient(timeout); client != nil || err != nil {
+		return client, err
 	}
 	return localClient(localserver.StateDir(), timeout)
 }

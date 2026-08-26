@@ -19,12 +19,14 @@ import (
 type server struct {
 	mux      *http.ServeMux
 	vitePort int
+	viteURL  string
 }
 
-func newServer(vitePort int) *server {
+func newServer(vitePort int, viteURL string) *server {
 	s := &server{
 		mux:      http.NewServeMux(),
 		vitePort: vitePort,
+		viteURL:  viteURL,
 	}
 	s.routes()
 	return s
@@ -44,7 +46,15 @@ func (s *server) routes() {
 	s.mux.HandleFunc("GET /api/remotes", s.listRemotes)
 
 	if s.vitePort > 0 {
-		viteURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", s.vitePort))
+		target := s.viteURL
+		if target == "" {
+			target = fmt.Sprintf("http://localhost:%d", s.vitePort)
+		}
+		viteURL, err := url.Parse(target)
+		if err != nil {
+			slog.Error("invalid VITE_URL", "url", target, "err", err)
+			return
+		}
 		proxy := httputil.NewSingleHostReverseProxy(viteURL)
 		s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			proxy.ServeHTTP(w, r)
