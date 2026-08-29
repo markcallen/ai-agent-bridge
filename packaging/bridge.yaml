@@ -35,7 +35,7 @@ rate_limits:
   send_input_per_session_burst: 20
 
 persistence:
-  # db_path: "~/.bridgectl/sessions.db"
+  # db_path: "~/.config/bridgectl/sessions.db"
 
 repo_setup:
   enabled: true

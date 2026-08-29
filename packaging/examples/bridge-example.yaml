@@ -12,7 +12,7 @@
 # SECURITY MODES:
 #   - No server.listen (unix socket): local-only, no authentication required.
 #   - server.listen set (TCP): always uses mTLS + JWT. When tls.ca_bundle/cert/key
-#     are empty the server auto-generates PKI material in ~/.bridgectl/certs/
+#     are empty the server auto-generates PKI material in ~/.config/bridgectl/certs/
 #     on first start. Supply explicit paths only when integrating with an external CA
 #     (e.g. Step CA). Do not expose the TCP port to the public internet; use
 #     WireGuard or Tailscale for remote access.
@@ -59,7 +59,7 @@ rate_limits:
   send_input_per_session_burst: 20
 
 persistence:
-  # db_path: "/home/youruser/.bridgectl/sessions.db"
+  # db_path: "/home/youruser/.config/bridgectl/sessions.db"
   # Use an absolute path; ~ is not expanded. Omit to disable persistence.
 
 runtime:

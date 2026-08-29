@@ -38,9 +38,9 @@ server:
 
 step_ca:
   url: "https://ca-host.tailnet-name.ts.net:9443"
-  root: "/home/me/.bridgectl/certs/step-ca-root.crt"
+  root: "/home/me/.config/bridgectl/certs/step-ca-root.crt"
   provisioner: "bridge-jwk"
-  provisioner_password_file: "/home/me/.bridgectl/step-ca-password"
+  provisioner_password_file: "/home/me/.config/bridgectl/step-ca-password"
 
 allowed_paths:
   - "/home/me/repos"
