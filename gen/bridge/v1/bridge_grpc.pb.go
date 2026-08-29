@@ -31,6 +31,7 @@ const (
 	BridgeService_Health_FullMethodName         = "/bridge.v1.BridgeService/Health"
 	BridgeService_ListProviders_FullMethodName  = "/bridge.v1.BridgeService/ListProviders"
 	BridgeService_RegisterJWTKey_FullMethodName = "/bridge.v1.BridgeService/RegisterJWTKey"
+	BridgeService_EnrollClient_FullMethodName   = "/bridge.v1.BridgeService/EnrollClient"
 )
 
 // BridgeServiceClient is the client API for BridgeService service.
@@ -58,6 +59,11 @@ type BridgeServiceClient interface {
 	// certificate itself authorizes the enrollment). After registration, the client
 	// can mint JWT tokens signed with the corresponding private key.
 	RegisterJWTKey(ctx context.Context, in *RegisterJWTKeyRequest, opts ...grpc.CallOption) (*RegisterJWTKeyResponse, error)
+	// Enroll bootstraps a new client identity using a one-time enrollment token.
+	// This RPC does not require mTLS or JWT — it is the bootstrap path for
+	// clients that do not yet have credentials. The enrollment token itself
+	// provides authorization.
+	EnrollClient(ctx context.Context, in *EnrollClientRequest, opts ...grpc.CallOption) (*EnrollClientResponse, error)
 }
 
 type bridgeServiceClient struct {
@@ -197,6 +203,16 @@ func (c *bridgeServiceClient) RegisterJWTKey(ctx context.Context, in *RegisterJW
 	return out, nil
 }
 
+func (c *bridgeServiceClient) EnrollClient(ctx context.Context, in *EnrollClientRequest, opts ...grpc.CallOption) (*EnrollClientResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnrollClientResponse)
+	err := c.cc.Invoke(ctx, BridgeService_EnrollClient_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BridgeServiceServer is the server API for BridgeService service.
 // All implementations must embed UnimplementedBridgeServiceServer
 // for forward compatibility.
@@ -222,6 +238,11 @@ type BridgeServiceServer interface {
 	// certificate itself authorizes the enrollment). After registration, the client
 	// can mint JWT tokens signed with the corresponding private key.
 	RegisterJWTKey(context.Context, *RegisterJWTKeyRequest) (*RegisterJWTKeyResponse, error)
+	// Enroll bootstraps a new client identity using a one-time enrollment token.
+	// This RPC does not require mTLS or JWT — it is the bootstrap path for
+	// clients that do not yet have credentials. The enrollment token itself
+	// provides authorization.
+	EnrollClient(context.Context, *EnrollClientRequest) (*EnrollClientResponse, error)
 	mustEmbedUnimplementedBridgeServiceServer()
 }
 
@@ -267,6 +288,9 @@ func (UnimplementedBridgeServiceServer) ListProviders(context.Context, *ListProv
 }
 func (UnimplementedBridgeServiceServer) RegisterJWTKey(context.Context, *RegisterJWTKeyRequest) (*RegisterJWTKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterJWTKey not implemented")
+}
+func (UnimplementedBridgeServiceServer) EnrollClient(context.Context, *EnrollClientRequest) (*EnrollClientResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EnrollClient not implemented")
 }
 func (UnimplementedBridgeServiceServer) mustEmbedUnimplementedBridgeServiceServer() {}
 func (UnimplementedBridgeServiceServer) testEmbeddedByValue()                       {}
@@ -498,6 +522,24 @@ func _BridgeService_RegisterJWTKey_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _BridgeService_EnrollClient_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnrollClientRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BridgeServiceServer).EnrollClient(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: BridgeService_EnrollClient_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BridgeServiceServer).EnrollClient(ctx, req.(*EnrollClientRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // BridgeService_ServiceDesc is the grpc.ServiceDesc for BridgeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -548,6 +590,10 @@ var BridgeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterJWTKey",
 			Handler:    _BridgeService_RegisterJWTKey_Handler,
+		},
+		{
+			MethodName: "EnrollClient",
+			Handler:    _BridgeService_EnrollClient_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

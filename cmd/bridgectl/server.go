@@ -78,6 +78,7 @@ func newServerCmd() *cobra.Command {
 func newServerStartCmd() *cobra.Command {
 	var (
 		listenAddr                    string
+		securityMode                  string
 		serverSANs                    []string
 		configPath                    string
 		dbPath                        string
@@ -140,6 +141,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 			}
 
 			cfg := localserver.Config{
+				SecurityMode:                  localserver.ServerMode(securityMode),
 				ListenAddr:                    listenAddr,
 				ServerSANs:                    serverSANs,
 				ConfigPath:                    configPath,
@@ -161,11 +163,17 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 				return err
 			}
 
-			mode := "local (unix socket, no auth)"
-			if localserver.DiscoverMode(localserver.StateDir()) == localserver.ModeSecure {
-				mode = fmt.Sprintf("secure (mTLS+JWT on %s)", srv.Addr())
+			discoveredMode := localserver.DiscoverMode(localserver.StateDir())
+			var modeDesc string
+			switch {
+			case localserver.IsMutualTLS(discoveredMode):
+				modeDesc = fmt.Sprintf("secure (mTLS+JWT on %s)", srv.Addr())
+			case discoveredMode == localserver.ModeTLS:
+				modeDesc = fmt.Sprintf("secure (TLS+JWT on %s)", srv.Addr())
+			default:
+				modeDesc = "local (unix socket, no auth)"
 			}
-			fmt.Fprintf(os.Stderr, "bridgectl server listening — %s (pid %d)\n", mode, os.Getpid())
+			fmt.Fprintf(os.Stderr, "bridgectl server listening — %s (pid %d)\n", modeDesc, os.Getpid())
 
 			// Notify systemd that the server is ready and start the watchdog
 			// heartbeat. Both are no-ops when not running under systemd.
@@ -184,6 +192,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 		},
 	}
 
+	cmd.Flags().StringVar(&securityMode, "mode", "", "security mode: local, tls, or mtls (default: auto-detect from --listen)")
 	cmd.Flags().StringVar(&listenAddr, "listen", "", "TCP address for secure mode (e.g. 10.0.0.1:9445 or 0.0.0.0:9445)")
 	cmd.Flags().StringSliceVar(&serverSANs, "san", nil, "additional server cert SANs (DNS names or IPs)")
 	cmd.Flags().StringVar(&configPath, "config", "", "path to YAML config file (merged with flag values; flags take precedence)")

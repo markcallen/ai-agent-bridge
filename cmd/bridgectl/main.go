@@ -27,6 +27,8 @@ across terminal windows.`,
 		newSessionCmd(),
 		newServerCmd(),
 		newClientCmd(),
+		newEnrollmentCmd(),
+		newIdentityCmd(),
 	)
 
 	if err := root.Execute(); err != nil {

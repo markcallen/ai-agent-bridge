@@ -23,6 +23,7 @@ import (
 	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
 	"github.com/orchael/bridgectl/internal/auth"
 	"github.com/orchael/bridgectl/internal/bridge"
+	"github.com/orchael/bridgectl/internal/certprovider"
 	"github.com/orchael/bridgectl/internal/config"
 	"github.com/orchael/bridgectl/internal/pki"
 	"github.com/orchael/bridgectl/internal/provider"
@@ -82,12 +83,13 @@ type Server struct {
 	stopped    bool
 
 	// Certificate renewal (secure mode only).
-	renewCancel              context.CancelFunc // cancels the renewal goroutine
-	serverSANs               []string           // SANs for cert re-issuance
-	stepCA                   *StepCAConfig      // nil for auto-PKI mode
-	pkiMat                   *PKIMaterial       // paths to cert/key files
-	certValidity             time.Duration      // server cert validity for auto-PKI renewal
-	certRenewalCheckInterval time.Duration      // how often to check cert expiry
+	renewCancel              context.CancelFunc               // cancels the renewal goroutine
+	serverSANs               []string                         // SANs for cert re-issuance
+	stepCA                   *StepCAConfig                    // nil for auto-PKI mode (legacy)
+	certProvider             certprovider.CertificateProvider // v1.1 provider (may be nil during transition)
+	pkiMat                   *PKIMaterial                     // paths to cert/key files
+	certValidity             time.Duration                    // server cert validity for auto-PKI renewal
+	certRenewalCheckInterval time.Duration                    // how often to check cert expiry
 }
 
 // ServerMode represents how the server is running.
@@ -96,11 +98,27 @@ type ServerMode string
 const (
 	// ModeLocal is the default mode: unix socket, no auth.
 	ModeLocal ServerMode = "local"
-	// ModeSecure uses TCP + mTLS + JWT for remote access.
+	// ModeTLS uses TCP + server TLS + JWT for remote access on trusted networks.
+	ModeTLS ServerMode = "tls"
+	// ModeMTLS uses TCP + mutual TLS + JWT for production/zero-trust access.
+	ModeMTLS ServerMode = "mtls"
+	// ModeSecure is a deprecated alias for ModeMTLS. It is recognized for
+	// backward compatibility with existing server.mode files and tests.
 	ModeSecure ServerMode = "secure"
 
 	sessionDrainShutdownTimeout = 30 * time.Second
 )
+
+// IsSecureMode reports whether the given mode requires TLS (either
+// server-only TLS or mutual TLS).
+func IsSecureMode(mode ServerMode) bool {
+	return mode == ModeSecure || mode == ModeMTLS || mode == ModeTLS
+}
+
+// IsMutualTLS reports whether the given mode requires client certificates.
+func IsMutualTLS(mode ServerMode) bool {
+	return mode == ModeSecure || mode == ModeMTLS
+}
 
 // ModePath returns the path to the server mode file.
 func ModePath() string {
@@ -108,7 +126,8 @@ func ModePath() string {
 }
 
 // DiscoverMode reads the server.mode file to determine how to connect.
-// Returns ModeLocal if the file is missing or unreadable.
+// Returns ModeLocal if the file is missing or unreadable. Recognizes
+// "mtls" and "tls" as new v1.1 mode values alongside the legacy "secure".
 func DiscoverMode(stateDir string) ServerMode {
 	if stateDir == "" {
 		stateDir = StateDir()
@@ -118,10 +137,16 @@ func DiscoverMode(stateDir string) ServerMode {
 		return ModeLocal
 	}
 	mode := ServerMode(strings.TrimSpace(string(data)))
-	if mode == ModeSecure {
+	switch mode {
+	case ModeSecure, ModeMTLS:
 		return ModeSecure
+	case ModeTLS:
+		return ModeTLS
+	case ModeLocal:
+		return ModeLocal
+	default:
+		return ModeLocal
 	}
-	return ModeLocal
 }
 
 // DiscoverServerName reads the TLS server name recorded by secure startup.
@@ -173,6 +198,13 @@ type Config struct {
 	// AllowedPaths restricts which repo paths sessions may use.
 	// Empty means allow all.
 	AllowedPaths []string
+
+	// SecurityMode overrides the security mode determined from ListenAddr.
+	// When set to ModeTLS, the server uses server-only TLS + JWT.
+	// When set to ModeMTLS or ModeSecure, the server uses mTLS + JWT.
+	// When empty, the mode is determined from ListenAddr: non-empty
+	// ListenAddr → ModeSecure (mTLS), empty → ModeLocal.
+	SecurityMode ServerMode
 
 	// ListenAddr, when set, enables secure mode: the server binds to this
 	// TCP address with mTLS + JWT instead of a unix socket. Example:
@@ -254,6 +286,13 @@ type Config struct {
 	// JWK provisioner password. When set, `step ca certificate` runs
 	// non-interactively (required in Docker/headless environments).
 	StepCAProvisionerPasswordFile string
+
+	// securityConfig is the resolved v1.1 SecurityConfig. It is set
+	// internally during config merging when the YAML file contains a
+	// security: block. It is unexported because callers use the
+	// individual fields above; this field exists to construct a
+	// CertificateProvider when the new config model is active.
+	securityConfig *config.SecurityConfig
 
 	// CertValidity overrides the server certificate validity duration.
 	// Zero uses the default (90 days). Useful for testing renewal flows.
@@ -373,6 +412,10 @@ func Start(cfg Config) (*Server, error) {
 			}
 			if cfg.StepCAProvisionerPasswordFile == "" && fileCfg.StepCA.ProvisionerPasswordFile != "" {
 				cfg.StepCAProvisionerPasswordFile = fileCfg.StepCA.ProvisionerPasswordFile
+			}
+			// Capture the resolved security config for provider construction.
+			if fileCfg.Security.IsSecurityConfigured() {
+				cfg.securityConfig = &fileCfg.Security
 			}
 		}
 	}
@@ -592,8 +635,16 @@ func Start(cfg Config) (*Server, error) {
 	renewExplicitCerts := false
 	tlsServerName := "server"
 
-	if cfg.ListenAddr != "" {
-		// Secure mode: TCP + mTLS + JWT.
+	// Determine the effective security mode. SecurityMode takes
+	// precedence; otherwise fall back to the legacy ListenAddr heuristic.
+	if cfg.SecurityMode != "" && cfg.SecurityMode != ModeLocal {
+		mode = cfg.SecurityMode
+	} else if cfg.ListenAddr != "" {
+		mode = ModeSecure
+	}
+
+	if IsSecureMode(mode) {
+		// Secure mode: TCP + TLS or mTLS + JWT.
 		// TODO(windows): Secure mode (mTLS+JWT) is not yet supported on Windows.
 		// Windows support requires named-pipe ACLs or equivalent transport security.
 		if runtime.GOOS == "windows" {
@@ -603,8 +654,6 @@ func Start(cfg Config) (*Server, error) {
 			}
 			return nil, fmt.Errorf("secure mode (--listen) is not yet supported on Windows")
 		}
-
-		mode = ModeSecure
 
 		var mat *PKIMaterial
 
@@ -669,13 +718,20 @@ func Start(cfg Config) (*Server, error) {
 		}
 		pkiMat = mat
 
-		secureOpts, verifier, err := buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys, cfg.StepCAClients)
-		if err != nil {
+		var secureOpts []grpc.ServerOption
+		var verifier *auth.JWTVerifier
+		var buildErr error
+		if mode == ModeTLS {
+			secureOpts, verifier, buildErr = buildTLSOnlyGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys, cfg.StepCAClients)
+		} else {
+			secureOpts, verifier, buildErr = buildSecureGRPCOpts(mat, stateDir, logger, cfg.JWTPublicKeys, cfg.StepCAClients)
+		}
+		if buildErr != nil {
 			sup.Close()
 			if store != nil {
 				_ = store.Close()
 			}
-			return nil, fmt.Errorf("build secure gRPC options: %w", err)
+			return nil, fmt.Errorf("build gRPC options (%s): %w", mode, buildErr)
 		}
 		grpcOpts = secureOpts
 		jwtVerifier = verifier
@@ -698,7 +754,7 @@ func Start(cfg Config) (*Server, error) {
 	var ln net.Listener
 	var listenAddr string
 	var err error
-	if mode == ModeSecure {
+	if IsSecureMode(mode) {
 		ln, err = net.Listen("tcp", cfg.ListenAddr)
 		if err != nil {
 			sup.Close()
@@ -736,7 +792,7 @@ func Start(cfg Config) (*Server, error) {
 		sup.Close()
 		return nil, fmt.Errorf("write mode file: %w", err)
 	}
-	if mode == ModeSecure {
+	if IsSecureMode(mode) {
 		nameFile := filepath.Join(stateDir, "server.name")
 		if err := os.WriteFile(nameFile, []byte(tlsServerName), 0o644); err != nil {
 			_ = ln.Close()
@@ -757,10 +813,22 @@ func Start(cfg Config) (*Server, error) {
 		stateDir:   stateDir,
 	}
 
+	// Construct a CertificateProvider from the security config when the
+	// new config model is explicitly used. This is stored for future use
+	// by the enrollment system and identity commands.
+	if cfg.securityConfig != nil && cfg.securityConfig.IsSecurityConfigured() {
+		cp, cpErr := CertProviderFromConfig(*cfg.securityConfig, stateDir, logger)
+		if cpErr != nil {
+			logger.Warn("failed to construct certificate provider from security config", "error", cpErr)
+		} else {
+			s.certProvider = cp
+		}
+	}
+
 	// Start background certificate renewal for managed PKI. Explicit certs are
 	// normally externally managed, but when Step CA settings are also present
 	// we can safely renew the configured cert/key paths in-place.
-	if mode == ModeSecure && (!explicitCerts || renewExplicitCerts) {
+	if IsSecureMode(mode) && (!explicitCerts || renewExplicitCerts) {
 		s.serverSANs = serverSANs
 		s.stepCA = stepCAConfig
 		s.pkiMat = pkiMat
@@ -854,6 +922,77 @@ func buildSecureGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger,
 	}, verifier, nil
 }
 
+// buildTLSOnlyGRPCOpts creates gRPC server options for TLS-only mode
+// (server certificate presented, no client certificate required).
+// JWT is still used for authorization.
+func buildTLSOnlyGRPCOpts(mat *PKIMaterial, stateDir string, logger *slog.Logger, extraKeys map[string]string, stepCAClients []ConfiguredJWTClient) ([]grpc.ServerOption, *auth.JWTVerifier, error) {
+	// TLS credentials without client cert verification.
+	tlsCfg, err := auth.ServerTLSOnlyConfig(auth.TLSConfig{
+		CABundlePath: mat.CABundlePath,
+		CertPath:     mat.ServerCertPath,
+		KeyPath:      mat.ServerKeyPath,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("server TLS-only config: %w", err)
+	}
+
+	// JWT verifier: same key loading logic as mTLS mode.
+	keys := make(map[string]ed25519.PublicKey)
+
+	if len(extraKeys) > 0 {
+		for issuer, keyPath := range extraKeys {
+			pub, keyErr := pki.LoadEd25519PublicKey(keyPath)
+			if keyErr != nil {
+				return nil, nil, fmt.Errorf("load JWT public key for issuer %q: %w", issuer, keyErr)
+			}
+			keys[issuer] = pub
+		}
+	} else if mat.JWTSigningPub != "" {
+		localPub, keyErr := pki.LoadEd25519PublicKey(mat.JWTSigningPub)
+		if keyErr != nil {
+			return nil, nil, fmt.Errorf("load JWT public key: %w", keyErr)
+		}
+		keys["local"] = localPub
+	}
+
+	clientKeysDir := filepath.Join(CertsDir(stateDir), "jwt-clients")
+	entries, _ := os.ReadDir(clientKeysDir)
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".pub" {
+			continue
+		}
+		issuer := strings.TrimSuffix(e.Name(), ".pub")
+		pub, loadErr := pki.LoadEd25519PublicKey(filepath.Join(clientKeysDir, e.Name()))
+		if loadErr != nil {
+			logger.Warn("skip client JWT key", "file", e.Name(), "error", loadErr)
+			continue
+		}
+		keys[issuer] = pub
+		logger.Info("loaded client JWT key", "issuer", issuer)
+	}
+
+	verifier := &auth.JWTVerifier{
+		Keys:     keys,
+		Audience: "bridge",
+		MaxTTL:   10 * time.Minute,
+	}
+	if err := loadConfiguredJWTClients(verifier, stateDir, logger, stepCAClients); err != nil {
+		return nil, nil, err
+	}
+
+	return []grpc.ServerOption{
+		grpc.Creds(credentials.NewTLS(tlsCfg)),
+		grpc.ChainUnaryInterceptor(
+			auth.UnaryJWTInterceptor(verifier, logger),
+			auth.UnaryAuditInterceptor(logger),
+		),
+		grpc.ChainStreamInterceptor(
+			auth.StreamJWTInterceptor(verifier, logger),
+			auth.StreamAuditInterceptor(logger),
+		),
+	}, verifier, nil
+}
+
 // BuildServerSANs extracts the host from listenAddr and merges it with
 // any additional SANs. Deduplicates entries.
 func BuildServerSANs(listenAddr string, extra []string) []string {
@@ -916,6 +1055,13 @@ func (s *Server) Target() string {
 		return "unix://" + addr.String()
 	}
 	return addr.String()
+}
+
+// CertProvider returns the v1.1 CertificateProvider, if one was constructed
+// during startup. Returns nil when the server is running with legacy config
+// or in local mode.
+func (s *Server) CertProvider() certprovider.CertificateProvider {
+	return s.certProvider
 }
 
 // Stop gracefully shuts down the server and cleans up state files.
@@ -1200,8 +1346,8 @@ func discoverTarget(stateDir string) string {
 	// previous crashed local-mode server masking a running secure server.
 	mode := DiscoverMode(stateDir)
 
-	if mode == ModeSecure {
-		// Secure mode uses TCP — read the addr file directly.
+	if IsSecureMode(mode) {
+		// Secure mode (TLS or mTLS) uses TCP — read the addr file directly.
 		addrData, err := os.ReadFile(filepath.Join(stateDir, "server.addr"))
 		if err != nil {
 			return ""
@@ -1239,7 +1385,8 @@ func discoverTarget(stateDir string) string {
 func probeHealth(target string, mode ServerMode, stateDir string) bool {
 	var dialOpts []grpc.DialOption
 
-	if mode == ModeSecure {
+	switch {
+	case IsMutualTLS(mode):
 		mat := LoadPKIMaterial(stateDir)
 		tlsCfg, err := auth.ClientTLSConfig(auth.TLSConfig{
 			CABundlePath: mat.CABundlePath,
@@ -1251,7 +1398,17 @@ func probeHealth(target string, mode ServerMode, stateDir string) bool {
 			return false
 		}
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
-	} else {
+	case mode == ModeTLS:
+		mat := LoadPKIMaterial(stateDir)
+		tlsCfg, err := auth.ClientTLSOnlyConfig(auth.TLSConfig{
+			CABundlePath: mat.CABundlePath,
+			ServerName:   DiscoverServerName(stateDir),
+		})
+		if err != nil {
+			return false
+		}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	default:
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 

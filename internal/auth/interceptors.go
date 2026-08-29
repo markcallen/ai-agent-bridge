@@ -29,10 +29,12 @@ func ContextWithClaims(ctx context.Context, claims *BridgeClaims) context.Contex
 func UnaryJWTInterceptor(v *JWTVerifier, logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		// Skip JWT auth for unauthenticated RPCs (Health is public;
-		// RegisterJWTKey authenticates via mTLS instead of JWT).
+		// RegisterJWTKey authenticates via mTLS instead of JWT;
+		// EnrollClient authenticates via enrollment token).
 		switch info.FullMethod {
 		case "/bridge.v1.BridgeService/Health",
-			"/bridge.v1.BridgeService/RegisterJWTKey":
+			"/bridge.v1.BridgeService/RegisterJWTKey",
+			"/bridge.v1.BridgeService/EnrollClient":
 			return handler(ctx, req)
 		}
 		claims, err := extractAndVerify(ctx, v)

@@ -722,3 +722,225 @@ providers:
 		})
 	}
 }
+
+// --- SecurityConfig synthesis and validation tests ---
+
+// minimalYAML is the smallest valid config with the given extra content
+// prepended to the YAML.
+func writeTestConfig(t *testing.T, extra string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bridge.yaml")
+	content := extra + `
+providers:
+  echo:
+    binary: "cat"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+func TestSecuritySynthesis_DefaultsToLocal(t *testing.T) {
+	// No server.listen, no step_ca, no tls — should synthesize local mode.
+	// Note: applyDefaults sets server.listen to "0.0.0.0:9445", but since
+	// synthesizeSecurity runs after applyDefaults and checks for the
+	// default value, it still treats the default listen as "no explicit listen".
+	path := writeTestConfig(t, `
+server:
+  listen: "0.0.0.0:9445"
+auth:
+  jwt_max_ttl: "5m"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Security.Transport.Mode != TransportModeLocal {
+		t.Errorf("Transport.Mode = %q, want %q", cfg.Security.Transport.Mode, TransportModeLocal)
+	}
+	if cfg.Security.Authorization.Mode != "none" {
+		t.Errorf("Authorization.Mode = %q, want %q", cfg.Security.Authorization.Mode, "none")
+	}
+	if cfg.Security.Certificates.Provider != "auto" {
+		t.Errorf("Certificates.Provider = %q, want %q", cfg.Security.Certificates.Provider, "auto")
+	}
+}
+
+func TestSecuritySynthesis_StepCA(t *testing.T) {
+	path := writeTestConfig(t, `
+server:
+  listen: "10.0.0.1:9445"
+step_ca:
+  url: "https://step-ca.internal:443"
+  root: "/etc/step/root.crt"
+  provisioner: "bridge-jwk"
+auth:
+  jwt_max_ttl: "5m"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Security.Transport.Mode != TransportModeMTLS {
+		t.Errorf("Transport.Mode = %q, want %q", cfg.Security.Transport.Mode, TransportModeMTLS)
+	}
+	if cfg.Security.Certificates.Provider != "stepca" {
+		t.Errorf("Certificates.Provider = %q, want %q", cfg.Security.Certificates.Provider, "stepca")
+	}
+	if cfg.Security.Certificates.StepCA.URL != "https://step-ca.internal:443" {
+		t.Errorf("StepCA.URL = %q, want %q", cfg.Security.Certificates.StepCA.URL, "https://step-ca.internal:443")
+	}
+	if cfg.Security.Authorization.Mode != "jwt" {
+		t.Errorf("Authorization.Mode = %q, want %q", cfg.Security.Authorization.Mode, "jwt")
+	}
+}
+
+func TestSecuritySynthesis_ExplicitTLS(t *testing.T) {
+	path := writeTestConfig(t, `
+server:
+  listen: "10.0.0.1:9445"
+tls:
+  ca_bundle: "/etc/bridgectl/ca.pem"
+  cert: "/etc/bridgectl/server.crt"
+  key: "/etc/bridgectl/server.key"
+auth:
+  jwt_max_ttl: "5m"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Security.Transport.Mode != TransportModeMTLS {
+		t.Errorf("Transport.Mode = %q, want %q", cfg.Security.Transport.Mode, TransportModeMTLS)
+	}
+	if cfg.Security.Certificates.Provider != "filesystem" {
+		t.Errorf("Certificates.Provider = %q, want %q", cfg.Security.Certificates.Provider, "filesystem")
+	}
+	if cfg.Security.Certificates.Filesystem.CA != "/etc/bridgectl/ca.pem" {
+		t.Errorf("Filesystem.CA = %q, want %q", cfg.Security.Certificates.Filesystem.CA, "/etc/bridgectl/ca.pem")
+	}
+}
+
+func TestSecuritySynthesis_AutoPKI(t *testing.T) {
+	// Non-default listen but no step_ca or tls → auto provider.
+	path := writeTestConfig(t, `
+server:
+  listen: "10.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Security.Transport.Mode != TransportModeMTLS {
+		t.Errorf("Transport.Mode = %q, want %q", cfg.Security.Transport.Mode, TransportModeMTLS)
+	}
+	if cfg.Security.Certificates.Provider != "auto" {
+		t.Errorf("Certificates.Provider = %q, want %q", cfg.Security.Certificates.Provider, "auto")
+	}
+}
+
+func TestSecurityExplicit_NewFormat(t *testing.T) {
+	// Explicit security block should be used as-is without synthesis.
+	path := writeTestConfig(t, `
+server:
+  listen: "10.0.0.1:9445"
+security:
+  transport:
+    mode: tls
+  certificates:
+    provider: filesystem
+    filesystem:
+      ca: "/ca.pem"
+      server_certificate: "/server.crt"
+      server_private_key: "/server.key"
+  authorization:
+    mode: jwt
+auth:
+  jwt_max_ttl: "5m"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Security.Transport.Mode != TransportModeTLS {
+		t.Errorf("Transport.Mode = %q, want %q", cfg.Security.Transport.Mode, TransportModeTLS)
+	}
+	if cfg.Security.Certificates.Provider != "filesystem" {
+		t.Errorf("Certificates.Provider = %q, want %q", cfg.Security.Certificates.Provider, "filesystem")
+	}
+	if cfg.Security.Certificates.Filesystem.ServerCert != "/server.crt" {
+		t.Errorf("Filesystem.ServerCert = %q, want %q", cfg.Security.Certificates.Filesystem.ServerCert, "/server.crt")
+	}
+	if cfg.Security.Authorization.Mode != "jwt" {
+		t.Errorf("Authorization.Mode = %q, want %q", cfg.Security.Authorization.Mode, "jwt")
+	}
+}
+
+func TestSecurityValidation_InvalidMode(t *testing.T) {
+	path := writeTestConfig(t, `
+server:
+  listen: "10.0.0.1:9445"
+security:
+  transport:
+    mode: "insecure"
+auth:
+  jwt_max_ttl: "5m"
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected validation error for invalid transport mode")
+	}
+	if !strings.Contains(err.Error(), "security.transport.mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSecurityValidation_InvalidProvider(t *testing.T) {
+	path := writeTestConfig(t, `
+server:
+  listen: "10.0.0.1:9445"
+security:
+  transport:
+    mode: mtls
+  certificates:
+    provider: "vault"
+auth:
+  jwt_max_ttl: "5m"
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected validation error for unsupported provider")
+	}
+	if !strings.Contains(err.Error(), "security.certificates.provider") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSecurityValidation_InvalidAuthMode(t *testing.T) {
+	path := writeTestConfig(t, `
+server:
+  listen: "10.0.0.1:9445"
+security:
+  transport:
+    mode: mtls
+  authorization:
+    mode: "oauth"
+auth:
+  jwt_max_ttl: "5m"
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected validation error for unsupported auth mode")
+	}
+	if !strings.Contains(err.Error(), "security.authorization.mode") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

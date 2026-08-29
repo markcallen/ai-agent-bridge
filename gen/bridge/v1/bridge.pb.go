@@ -1849,6 +1849,151 @@ func (x *RegisterJWTKeyResponse) GetMessage() string {
 	return ""
 }
 
+type EnrollClientRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// One-time enrollment token (e.g. "brg_enroll_...").
+	Token string `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	// PKCS#10 DER-encoded Certificate Signing Request.
+	Csr []byte `protobuf:"bytes,2,opt,name=csr,proto3" json:"csr,omitempty"`
+	// PKIX DER-encoded Ed25519 public key for JWT authentication.
+	// Registered as a JWT issuer upon successful enrollment.
+	JwtPublicKey  []byte `protobuf:"bytes,3,opt,name=jwt_public_key,json=jwtPublicKey,proto3" json:"jwt_public_key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnrollClientRequest) Reset() {
+	*x = EnrollClientRequest{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollClientRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollClientRequest) ProtoMessage() {}
+
+func (x *EnrollClientRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollClientRequest.ProtoReflect.Descriptor instead.
+func (*EnrollClientRequest) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *EnrollClientRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *EnrollClientRequest) GetCsr() []byte {
+	if x != nil {
+		return x.Csr
+	}
+	return nil
+}
+
+func (x *EnrollClientRequest) GetJwtPublicKey() []byte {
+	if x != nil {
+		return x.JwtPublicKey
+	}
+	return nil
+}
+
+type EnrollClientResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// PEM-encoded certificate chain issued to the client.
+	Certificate []byte `protobuf:"bytes,1,opt,name=certificate,proto3" json:"certificate,omitempty"`
+	// PEM-encoded CA trust bundle for verifying server certificates.
+	CaBundle []byte `protobuf:"bytes,2,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	// JWT issuer name assigned to this client.
+	Issuer string `protobuf:"bytes,3,opt,name=issuer,proto3" json:"issuer,omitempty"`
+	// Certificate Common Name (identity).
+	Identity string `protobuf:"bytes,4,opt,name=identity,proto3" json:"identity,omitempty"`
+	// Certificate expiry.
+	Expires       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires,proto3" json:"expires,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnrollClientResponse) Reset() {
+	*x = EnrollClientResponse{}
+	mi := &file_bridge_v1_bridge_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollClientResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollClientResponse) ProtoMessage() {}
+
+func (x *EnrollClientResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_bridge_v1_bridge_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollClientResponse.ProtoReflect.Descriptor instead.
+func (*EnrollClientResponse) Descriptor() ([]byte, []int) {
+	return file_bridge_v1_bridge_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *EnrollClientResponse) GetCertificate() []byte {
+	if x != nil {
+		return x.Certificate
+	}
+	return nil
+}
+
+func (x *EnrollClientResponse) GetCaBundle() []byte {
+	if x != nil {
+		return x.CaBundle
+	}
+	return nil
+}
+
+func (x *EnrollClientResponse) GetIssuer() string {
+	if x != nil {
+		return x.Issuer
+	}
+	return ""
+}
+
+func (x *EnrollClientResponse) GetIdentity() string {
+	if x != nil {
+		return x.Identity
+	}
+	return ""
+}
+
+func (x *EnrollClientResponse) GetExpires() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Expires
+	}
+	return nil
+}
+
 var File_bridge_v1_bridge_proto protoreflect.FileDescriptor
 
 const file_bridge_v1_bridge_proto_rawDesc = "" +
@@ -1990,7 +2135,17 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x06issuer\x18\x02 \x01(\tR\x06issuer\"J\n" +
 	"\x16RegisterJWTKeyResponse\x12\x16\n" +
 	"\x06issuer\x18\x01 \x01(\tR\x06issuer\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage*\xd9\x01\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"c\n" +
+	"\x13EnrollClientRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x12\x10\n" +
+	"\x03csr\x18\x02 \x01(\fR\x03csr\x12$\n" +
+	"\x0ejwt_public_key\x18\x03 \x01(\fR\fjwtPublicKey\"\xbf\x01\n" +
+	"\x14EnrollClientResponse\x12 \n" +
+	"\vcertificate\x18\x01 \x01(\fR\vcertificate\x12\x1b\n" +
+	"\tca_bundle\x18\x02 \x01(\fR\bcaBundle\x12\x16\n" +
+	"\x06issuer\x18\x03 \x01(\tR\x06issuer\x12\x1a\n" +
+	"\bidentity\x18\x04 \x01(\tR\bidentity\x124\n" +
+	"\aexpires\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\aexpires*\xd9\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17SESSION_STATUS_STARTING\x10\x01\x12\x1a\n" +
@@ -2013,7 +2168,7 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x17ATTACH_EVENT_TYPE_ERROR\x10\x05\x12\x1e\n" +
 	"\x1aATTACH_EVENT_TYPE_THINKING\x10\x06\x12$\n" +
 	" ATTACH_EVENT_TYPE_WRITER_CLAIMED\x10\a\x12%\n" +
-	"!ATTACH_EVENT_TYPE_WRITER_RELEASED\x10\b2\xc8\a\n" +
+	"!ATTACH_EVENT_TYPE_WRITER_RELEASED\x10\b2\x99\b\n" +
 	"\rBridgeService\x12O\n" +
 	"\fStartSession\x12\x1e.bridge.v1.StartSessionRequest\x1a\x1f.bridge.v1.StartSessionResponse\x12L\n" +
 	"\vStopSession\x12\x1d.bridge.v1.StopSessionRequest\x1a\x1e.bridge.v1.StopSessionResponse\x12I\n" +
@@ -2028,7 +2183,8 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\rReleaseWriter\x12\x1f.bridge.v1.ReleaseWriterRequest\x1a .bridge.v1.ReleaseWriterResponse\x12=\n" +
 	"\x06Health\x12\x18.bridge.v1.HealthRequest\x1a\x19.bridge.v1.HealthResponse\x12R\n" +
 	"\rListProviders\x12\x1f.bridge.v1.ListProvidersRequest\x1a .bridge.v1.ListProvidersResponse\x12U\n" +
-	"\x0eRegisterJWTKey\x12 .bridge.v1.RegisterJWTKeyRequest\x1a!.bridge.v1.RegisterJWTKeyResponseB5Z3github.com/orchael/bridgectl/gen/bridge/v1;bridgev1b\x06proto3"
+	"\x0eRegisterJWTKey\x12 .bridge.v1.RegisterJWTKeyRequest\x1a!.bridge.v1.RegisterJWTKeyResponse\x12O\n" +
+	"\fEnrollClient\x12\x1e.bridge.v1.EnrollClientRequest\x1a\x1f.bridge.v1.EnrollClientResponseB5Z3github.com/orchael/bridgectl/gen/bridge/v1;bridgev1b\x06proto3"
 
 var (
 	file_bridge_v1_bridge_proto_rawDescOnce sync.Once
@@ -2043,7 +2199,7 @@ func file_bridge_v1_bridge_proto_rawDescGZIP() []byte {
 }
 
 var file_bridge_v1_bridge_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_bridge_v1_bridge_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_bridge_v1_bridge_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_bridge_v1_bridge_proto_goTypes = []any{
 	(SessionStatus)(0),             // 0: bridge.v1.SessionStatus
 	(AttachRole)(0),                // 1: bridge.v1.AttachRole
@@ -2074,52 +2230,57 @@ var file_bridge_v1_bridge_proto_goTypes = []any{
 	(*ProviderInfo)(nil),           // 26: bridge.v1.ProviderInfo
 	(*RegisterJWTKeyRequest)(nil),  // 27: bridge.v1.RegisterJWTKeyRequest
 	(*RegisterJWTKeyResponse)(nil), // 28: bridge.v1.RegisterJWTKeyResponse
-	nil,                            // 29: bridge.v1.StartSessionRequest.AgentOptsEntry
-	(*timestamppb.Timestamp)(nil),  // 30: google.protobuf.Timestamp
+	(*EnrollClientRequest)(nil),    // 29: bridge.v1.EnrollClientRequest
+	(*EnrollClientResponse)(nil),   // 30: bridge.v1.EnrollClientResponse
+	nil,                            // 31: bridge.v1.StartSessionRequest.AgentOptsEntry
+	(*timestamppb.Timestamp)(nil),  // 32: google.protobuf.Timestamp
 }
 var file_bridge_v1_bridge_proto_depIdxs = []int32{
-	29, // 0: bridge.v1.StartSessionRequest.agent_opts:type_name -> bridge.v1.StartSessionRequest.AgentOptsEntry
+	31, // 0: bridge.v1.StartSessionRequest.agent_opts:type_name -> bridge.v1.StartSessionRequest.AgentOptsEntry
 	0,  // 1: bridge.v1.StartSessionResponse.status:type_name -> bridge.v1.SessionStatus
-	30, // 2: bridge.v1.StartSessionResponse.created_at:type_name -> google.protobuf.Timestamp
+	32, // 2: bridge.v1.StartSessionResponse.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 3: bridge.v1.StopSessionResponse.status:type_name -> bridge.v1.SessionStatus
 	0,  // 4: bridge.v1.GetSessionResponse.status:type_name -> bridge.v1.SessionStatus
-	30, // 5: bridge.v1.GetSessionResponse.created_at:type_name -> google.protobuf.Timestamp
-	30, // 6: bridge.v1.GetSessionResponse.stopped_at:type_name -> google.protobuf.Timestamp
+	32, // 5: bridge.v1.GetSessionResponse.created_at:type_name -> google.protobuf.Timestamp
+	32, // 6: bridge.v1.GetSessionResponse.stopped_at:type_name -> google.protobuf.Timestamp
 	8,  // 7: bridge.v1.ListSessionsResponse.sessions:type_name -> bridge.v1.GetSessionResponse
 	1,  // 8: bridge.v1.AttachSessionRequest.role:type_name -> bridge.v1.AttachRole
 	2,  // 9: bridge.v1.AttachSessionEvent.type:type_name -> bridge.v1.AttachEventType
-	30, // 10: bridge.v1.AttachSessionEvent.timestamp:type_name -> google.protobuf.Timestamp
+	32, // 10: bridge.v1.AttachSessionEvent.timestamp:type_name -> google.protobuf.Timestamp
 	23, // 11: bridge.v1.HealthResponse.providers:type_name -> bridge.v1.ProviderHealth
 	26, // 12: bridge.v1.ListProvidersResponse.providers:type_name -> bridge.v1.ProviderInfo
-	3,  // 13: bridge.v1.BridgeService.StartSession:input_type -> bridge.v1.StartSessionRequest
-	5,  // 14: bridge.v1.BridgeService.StopSession:input_type -> bridge.v1.StopSessionRequest
-	7,  // 15: bridge.v1.BridgeService.GetSession:input_type -> bridge.v1.GetSessionRequest
-	9,  // 16: bridge.v1.BridgeService.ListSessions:input_type -> bridge.v1.ListSessionsRequest
-	11, // 17: bridge.v1.BridgeService.AttachSession:input_type -> bridge.v1.AttachSessionRequest
-	13, // 18: bridge.v1.BridgeService.WriteInput:input_type -> bridge.v1.WriteInputRequest
-	15, // 19: bridge.v1.BridgeService.ResizeSession:input_type -> bridge.v1.ResizeSessionRequest
-	17, // 20: bridge.v1.BridgeService.ClaimWriter:input_type -> bridge.v1.ClaimWriterRequest
-	19, // 21: bridge.v1.BridgeService.ReleaseWriter:input_type -> bridge.v1.ReleaseWriterRequest
-	21, // 22: bridge.v1.BridgeService.Health:input_type -> bridge.v1.HealthRequest
-	24, // 23: bridge.v1.BridgeService.ListProviders:input_type -> bridge.v1.ListProvidersRequest
-	27, // 24: bridge.v1.BridgeService.RegisterJWTKey:input_type -> bridge.v1.RegisterJWTKeyRequest
-	4,  // 25: bridge.v1.BridgeService.StartSession:output_type -> bridge.v1.StartSessionResponse
-	6,  // 26: bridge.v1.BridgeService.StopSession:output_type -> bridge.v1.StopSessionResponse
-	8,  // 27: bridge.v1.BridgeService.GetSession:output_type -> bridge.v1.GetSessionResponse
-	10, // 28: bridge.v1.BridgeService.ListSessions:output_type -> bridge.v1.ListSessionsResponse
-	12, // 29: bridge.v1.BridgeService.AttachSession:output_type -> bridge.v1.AttachSessionEvent
-	14, // 30: bridge.v1.BridgeService.WriteInput:output_type -> bridge.v1.WriteInputResponse
-	16, // 31: bridge.v1.BridgeService.ResizeSession:output_type -> bridge.v1.ResizeSessionResponse
-	18, // 32: bridge.v1.BridgeService.ClaimWriter:output_type -> bridge.v1.ClaimWriterResponse
-	20, // 33: bridge.v1.BridgeService.ReleaseWriter:output_type -> bridge.v1.ReleaseWriterResponse
-	22, // 34: bridge.v1.BridgeService.Health:output_type -> bridge.v1.HealthResponse
-	25, // 35: bridge.v1.BridgeService.ListProviders:output_type -> bridge.v1.ListProvidersResponse
-	28, // 36: bridge.v1.BridgeService.RegisterJWTKey:output_type -> bridge.v1.RegisterJWTKeyResponse
-	25, // [25:37] is the sub-list for method output_type
-	13, // [13:25] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	32, // 13: bridge.v1.EnrollClientResponse.expires:type_name -> google.protobuf.Timestamp
+	3,  // 14: bridge.v1.BridgeService.StartSession:input_type -> bridge.v1.StartSessionRequest
+	5,  // 15: bridge.v1.BridgeService.StopSession:input_type -> bridge.v1.StopSessionRequest
+	7,  // 16: bridge.v1.BridgeService.GetSession:input_type -> bridge.v1.GetSessionRequest
+	9,  // 17: bridge.v1.BridgeService.ListSessions:input_type -> bridge.v1.ListSessionsRequest
+	11, // 18: bridge.v1.BridgeService.AttachSession:input_type -> bridge.v1.AttachSessionRequest
+	13, // 19: bridge.v1.BridgeService.WriteInput:input_type -> bridge.v1.WriteInputRequest
+	15, // 20: bridge.v1.BridgeService.ResizeSession:input_type -> bridge.v1.ResizeSessionRequest
+	17, // 21: bridge.v1.BridgeService.ClaimWriter:input_type -> bridge.v1.ClaimWriterRequest
+	19, // 22: bridge.v1.BridgeService.ReleaseWriter:input_type -> bridge.v1.ReleaseWriterRequest
+	21, // 23: bridge.v1.BridgeService.Health:input_type -> bridge.v1.HealthRequest
+	24, // 24: bridge.v1.BridgeService.ListProviders:input_type -> bridge.v1.ListProvidersRequest
+	27, // 25: bridge.v1.BridgeService.RegisterJWTKey:input_type -> bridge.v1.RegisterJWTKeyRequest
+	29, // 26: bridge.v1.BridgeService.EnrollClient:input_type -> bridge.v1.EnrollClientRequest
+	4,  // 27: bridge.v1.BridgeService.StartSession:output_type -> bridge.v1.StartSessionResponse
+	6,  // 28: bridge.v1.BridgeService.StopSession:output_type -> bridge.v1.StopSessionResponse
+	8,  // 29: bridge.v1.BridgeService.GetSession:output_type -> bridge.v1.GetSessionResponse
+	10, // 30: bridge.v1.BridgeService.ListSessions:output_type -> bridge.v1.ListSessionsResponse
+	12, // 31: bridge.v1.BridgeService.AttachSession:output_type -> bridge.v1.AttachSessionEvent
+	14, // 32: bridge.v1.BridgeService.WriteInput:output_type -> bridge.v1.WriteInputResponse
+	16, // 33: bridge.v1.BridgeService.ResizeSession:output_type -> bridge.v1.ResizeSessionResponse
+	18, // 34: bridge.v1.BridgeService.ClaimWriter:output_type -> bridge.v1.ClaimWriterResponse
+	20, // 35: bridge.v1.BridgeService.ReleaseWriter:output_type -> bridge.v1.ReleaseWriterResponse
+	22, // 36: bridge.v1.BridgeService.Health:output_type -> bridge.v1.HealthResponse
+	25, // 37: bridge.v1.BridgeService.ListProviders:output_type -> bridge.v1.ListProvidersResponse
+	28, // 38: bridge.v1.BridgeService.RegisterJWTKey:output_type -> bridge.v1.RegisterJWTKeyResponse
+	30, // 39: bridge.v1.BridgeService.EnrollClient:output_type -> bridge.v1.EnrollClientResponse
+	27, // [27:40] is the sub-list for method output_type
+	14, // [14:27] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_bridge_v1_bridge_proto_init() }
@@ -2133,7 +2294,7 @@ func file_bridge_v1_bridge_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_bridge_v1_bridge_proto_rawDesc), len(file_bridge_v1_bridge_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   27,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

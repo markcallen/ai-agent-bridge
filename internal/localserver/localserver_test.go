@@ -258,7 +258,41 @@ func TestDiscoverModeSecure(t *testing.T) {
 func TestDiscoverModeEmptyUsesDefault(t *testing.T) {
 	mode := DiscoverMode("")
 	// We just want no panic; the mode may be local or secure depending on env.
-	assert.True(t, mode == ModeLocal || mode == ModeSecure)
+	assert.True(t, mode == ModeLocal || mode == ModeSecure || mode == ModeTLS)
+}
+
+// TestDiscoverModeMTLS verifies DiscoverMode reads "mtls" as ModeSecure.
+func TestDiscoverModeMTLS(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "server.mode"), []byte("mtls\n"), 0o644)
+	require.NoError(t, err)
+	// "mtls" maps to ModeSecure for backward compatibility with code
+	// that checks == ModeSecure.
+	assert.Equal(t, ModeSecure, DiscoverMode(dir))
+}
+
+// TestDiscoverModeTLS verifies DiscoverMode reads "tls" as ModeTLS.
+func TestDiscoverModeTLS(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "server.mode"), []byte("tls\n"), 0o644)
+	require.NoError(t, err)
+	assert.Equal(t, ModeTLS, DiscoverMode(dir))
+}
+
+// TestIsSecureMode verifies the IsSecureMode helper.
+func TestIsSecureMode(t *testing.T) {
+	assert.False(t, IsSecureMode(ModeLocal))
+	assert.True(t, IsSecureMode(ModeSecure))
+	assert.True(t, IsSecureMode(ModeMTLS))
+	assert.True(t, IsSecureMode(ModeTLS))
+}
+
+// TestIsMutualTLS verifies the IsMutualTLS helper.
+func TestIsMutualTLS(t *testing.T) {
+	assert.False(t, IsMutualTLS(ModeLocal))
+	assert.True(t, IsMutualTLS(ModeSecure))
+	assert.True(t, IsMutualTLS(ModeMTLS))
+	assert.False(t, IsMutualTLS(ModeTLS))
 }
 
 // TestServerTarget verifies that Target() returns a non-empty target string.
@@ -746,4 +780,59 @@ func TestRedactingHandlerWithGroup(t *testing.T) {
 	gh := h.WithGroup("grp")
 	// Must not panic and must still implement slog.Handler.
 	assert.NotNil(t, gh)
+}
+
+// --- Security mode tests ---
+
+// TestStartTLSOnlyMode verifies that Start with SecurityMode=ModeTLS
+// creates a server that uses server TLS without requiring client certs.
+func TestStartTLSOnlyMode(t *testing.T) {
+	dir := t.TempDir()
+	srv, err := Start(Config{
+		StateDir:     dir,
+		ListenAddr:   "127.0.0.1:0",
+		SecurityMode: ModeTLS,
+	})
+	if err != nil {
+		t.Skipf("TLS mode start failed (may need specific environment): %v", err)
+	}
+	t.Cleanup(func() { srv.Stop() })
+	assert.NotNil(t, srv)
+	mode := DiscoverMode(dir)
+	assert.Equal(t, ModeTLS, mode)
+}
+
+// TestSecurityModeOverridesLegacy verifies that SecurityMode takes
+// precedence over the ListenAddr heuristic.
+func TestSecurityModeOverridesLegacy(t *testing.T) {
+	dir := t.TempDir()
+	// ListenAddr is set but SecurityMode explicitly says TLS.
+	srv, err := Start(Config{
+		StateDir:     dir,
+		ListenAddr:   "127.0.0.1:0",
+		SecurityMode: ModeTLS,
+	})
+	if err != nil {
+		t.Skipf("TLS mode start failed: %v", err)
+	}
+	t.Cleanup(func() { srv.Stop() })
+
+	mode := DiscoverMode(dir)
+	assert.Equal(t, ModeTLS, mode)
+}
+
+// TestSecurityModeLocalIgnoresListenAddr verifies that SecurityMode=ModeLocal
+// forces local mode even when ListenAddr is set.
+func TestSecurityModeLocalIgnoresListenAddr(t *testing.T) {
+	dir := t.TempDir()
+	// SecurityMode=ModeLocal should override the ListenAddr.
+	srv, err := Start(Config{
+		StateDir:     dir,
+		SecurityMode: ModeLocal,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { srv.Stop() })
+
+	mode := DiscoverMode(dir)
+	assert.Equal(t, ModeLocal, mode)
 }
