@@ -75,15 +75,15 @@ if [ -n "$STEP_CA_URL" ] && [ -n "$STEP_CA_ROOT" ]; then
   # bridgectl server start --step-ca-url.
   if [ ! -f "$CERT_DIR/ca.crt" ]; then
     echo "==> Generating local CA for dev-client credentials..."
-    bridgectl-ca init --name bridgectl-ca --out "$CERT_DIR"
+    bridge-ca init --name bridge-ca --out "$CERT_DIR"
 
     echo "==> Issuing dev-client certificate..."
-    bridgectl-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
+    bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
       --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
       --out "$CERT_DIR"
 
     echo "==> Generating JWT signing keypair..."
-    bridgectl-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
+    bridge-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
 
     chmod 644 "$CERT_DIR"/*
   fi
@@ -91,24 +91,24 @@ else
   # Tier-1 auto-PKI: generate everything locally.
   if [ ! -f "$CERT_DIR/ca.crt" ]; then
     echo "==> Initializing CA..."
-    bridgectl-ca init --name bridgectl-ca --out "$CERT_DIR"
+    bridge-ca init --name bridge-ca --out "$CERT_DIR"
 
     echo "==> Issuing server certificate..."
-    bridgectl-ca issue --type server --cn "$BRIDGE_CN" \
+    bridge-ca issue --type server --cn "$BRIDGE_CN" \
       --san "$BRIDGE_SANS" \
       --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
       --out "$CERT_DIR"
 
     echo "==> Issuing client certificate..."
-    bridgectl-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
+    bridge-ca issue --type client --cn "$BRIDGE_CLIENT_CN" \
       --ca "$CERT_DIR/ca.crt" --ca-key "$CERT_DIR/ca.key" \
       --out "$CERT_DIR"
 
     echo "==> Generating JWT signing keypair..."
-    bridgectl-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
+    bridge-ca jwt-keygen --out "$CERT_DIR/jwt-signing"
 
     echo "==> Building trust bundle..."
-    bridgectl-ca bundle --out "$CERT_DIR/ca-bundle.crt" "$CERT_DIR/ca.crt"
+    bridge-ca bundle --out "$CERT_DIR/ca-bundle.crt" "$CERT_DIR/ca.crt"
 
     chmod 644 "$CERT_DIR"/*
   fi
