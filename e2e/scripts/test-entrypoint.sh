@@ -21,7 +21,7 @@ if [ -d "/tmp/bridgectl/.git" ]; then
   echo "    Repo already present, pulling latest main..."
   git -C /tmp/bridgectl pull origin main
 else
-  git clone --depth 1 https://github.com/markcallen/cache-cleaner /tmp/bridgectl-src
+  git clone --depth 1 https://github.com/orchael/bridge-demo /tmp/bridgectl-src
   cp -a /tmp/bridgectl-src/. /tmp/bridgectl/
   rm -rf /tmp/bridgectl-src
 fi
