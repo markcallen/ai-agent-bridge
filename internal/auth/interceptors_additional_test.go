@@ -19,7 +19,7 @@ import (
 	"log/slog"
 
 	jwt "github.com/golang-jwt/jwt/v5"
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
+	"github.com/orchael/bridgectl/internal/pki"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"

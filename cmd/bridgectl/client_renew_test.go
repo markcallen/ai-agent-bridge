@@ -31,7 +31,7 @@ func TestRunClientRenewUsesFetchedRootWhenItVerifiesEndpoint(t *testing.T) {
 	if err := os.MkdirAll(certsDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", dir)
+	t.Setenv("BRIDGECTL_STATE_DIR", dir)
 
 	rootPath := filepath.Join(certsDir, "step-ca-root.crt")
 	certPath, keyPath, renewedCert := writeRenewTestFiles(t, certsDir, time.Now().Add(time.Hour))
@@ -61,7 +61,7 @@ func TestRunClientRenewOmitsDefaultRootWhenEndpointUsesDifferentTLSRoot(t *testi
 	if err := os.MkdirAll(certsDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", dir)
+	t.Setenv("BRIDGECTL_STATE_DIR", dir)
 
 	rootPath := filepath.Join(certsDir, "step-ca-root.crt")
 	certPath, keyPath, renewedCert := writeRenewTestFiles(t, certsDir, time.Now().Add(time.Hour))
@@ -94,7 +94,7 @@ func TestRunClientRenewHonorsExplicitRoot(t *testing.T) {
 	if err := os.MkdirAll(certsDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", dir)
+	t.Setenv("BRIDGECTL_STATE_DIR", dir)
 
 	rootPath := writePEM(t, certsDir, "custom-root.crt", stepCA)
 	certPath, keyPath, renewedCert := writeRenewTestFiles(t, certsDir, time.Now().Add(time.Hour))
@@ -118,7 +118,7 @@ func TestRunClientRenewRejectsExpiredCertificateBeforeRenewal(t *testing.T) {
 	if err := os.MkdirAll(certsDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", dir)
+	t.Setenv("BRIDGECTL_STATE_DIR", dir)
 
 	rootPath := filepath.Join(certsDir, "step-ca-root.crt")
 	certPath, keyPath, renewedCert := writeRenewTestFiles(t, certsDir, time.Now().Add(-time.Hour))

@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.step.sm/crypto/jose"
 
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
+	"github.com/orchael/bridgectl/internal/localserver"
 )
 
 type renewMode int

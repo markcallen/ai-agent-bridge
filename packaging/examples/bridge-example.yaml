@@ -1,8 +1,8 @@
-# bridge-example.yaml — example ai-agent-bridge configuration profile.
+# bridge-example.yaml — example bridgectl configuration profile.
 #
-# Copy this file to /etc/ai-agent-bridge/bridge.yaml, uncomment the providers
+# Copy this file to /etc/bridgectl/bridge.yaml, uncomment the providers
 # you want to enable, and supply credentials via your shell environment or a
-# ~/.config/ai-agent-bridge/agents.env file sourced by the user service.
+# ~/.config/bridgectl/agents.env file sourced by the user service.
 #
 # This profile:
 #   - binds to 127.0.0.1:9445 in SECURE mode (mTLS + JWT via auto-generated PKI)
@@ -12,7 +12,7 @@
 # SECURITY MODES:
 #   - No server.listen (unix socket): local-only, no authentication required.
 #   - server.listen set (TCP): always uses mTLS + JWT. When tls.ca_bundle/cert/key
-#     are empty the server auto-generates PKI material in ~/.ai-agent-bridge/certs/
+#     are empty the server auto-generates PKI material in ~/.config/bridgectl/certs/
 #     on first start. Supply explicit paths only when integrating with an external CA
 #     (e.g. Step CA). Do not expose the TCP port to the public internet; use
 #     WireGuard or Tailscale for remote access.
@@ -59,22 +59,22 @@ rate_limits:
   send_input_per_session_burst: 20
 
 persistence:
-  # db_path: "/home/youruser/.ai-agent-bridge/sessions.db"
+  # db_path: "/home/youruser/.config/bridgectl/sessions.db"
   # Use an absolute path; ~ is not expanded. Omit to disable persistence.
 
 runtime:
-  provider_root: "$HOME/.local/share/ai-agent-bridge/providers"
+  provider_root: "$HOME/.local/share/bridgectl/providers"
 
 repo_setup:
   enabled: true
-  config_path: ".ai-agent-bridge.yaml"
+  config_path: ".bridgectl.yaml"
   default_timeout: "2m"
   max_timeout: "15m"
 
 # Enable one or more providers below. Credentials are read from the environment
-# (injected via /etc/ai-agent-bridge/agents.env at service startup).
+# (injected via /etc/bridgectl/agents.env at service startup).
 #
-# Run /usr/lib/ai-agent-bridge/install-provider-runtime as the bridge login user
+# Run /usr/lib/bridgectl/install-provider-runtime as the bridge login user
 # to install the CLIs before enabling any provider here.
 
 providers:

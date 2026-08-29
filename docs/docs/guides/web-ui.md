@@ -67,7 +67,7 @@ Open `http://localhost:5173`.
 
 ## Connecting to a Remote Server
 
-Remote connections use credentials from `~/.ai-agent-bridge/certs` on the machine running the web server. Enroll first:
+Remote connections use credentials from `~/.config/bridgectl/certs` on the machine running the web server. Enroll first:
 
 ```bash
 bin/bridgectl client init \

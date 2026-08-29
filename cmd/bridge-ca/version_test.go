@@ -11,7 +11,7 @@ import (
 
 func TestVersionFlag(t *testing.T) {
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "ai-agent-bridge-ca")
+	bin := filepath.Join(dir, "bridge-ca")
 
 	build := exec.Command("go", "build", "-o", bin, ".")
 	build.Dir = "."
@@ -28,7 +28,7 @@ func TestVersionFlag(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("--version exited non-zero: %v\n%s", err, out.String())
 	}
-	if !strings.HasPrefix(out.String(), "ai-agent-bridge-ca ") {
+	if !strings.HasPrefix(out.String(), "bridge-ca ") {
 		t.Errorf("unexpected --version output: %q", out.String())
 	}
 }

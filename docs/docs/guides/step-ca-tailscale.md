@@ -32,7 +32,7 @@ The bridge and Step CA should bind only to Tailscale or another private interfac
 On `ca-host`:
 
 ```bash
-cd /path/to/ai-agent-bridge
+cd /path/to/bridgectl
 
 export STEP_CA_PASSWORD='change-this-dev-password'
 export STEP_CA_SANS='ca-host.tailnet-name.ts.net'
@@ -57,8 +57,8 @@ make step-ca-health
 On both bridge hosts:
 
 ```bash
-git clone https://github.com/markcallen/ai-agent-bridge.git
-cd ai-agent-bridge
+git clone https://github.com/orchael/bridgectl.git
+cd bridgectl
 nvm install
 nvm use
 corepack enable
@@ -74,15 +74,15 @@ Export any provider credentials needed on each machine.
 On `machine-a`:
 
 ```bash
-mkdir -p ~/.ai-agent-bridge/certs
+mkdir -p ~/.config/bridgectl/certs
 curl -sk https://ca-host.tailnet-name.ts.net:9443/roots \
-  | jq -r '.crts[0]' > ~/.ai-agent-bridge/certs/step-ca-root.crt
+  | jq -r '.crts[0]' > ~/.config/bridgectl/certs/step-ca-root.crt
 
 bin/bridgectl server start \
   --listen 100.a.a.a:9445 \
   --san machine-a.tailnet-name.ts.net \
   --step-ca-url https://ca-host.tailnet-name.ts.net:9443 \
-  --step-ca-root ~/.ai-agent-bridge/certs/step-ca-root.crt \
+  --step-ca-root ~/.config/bridgectl/certs/step-ca-root.crt \
   --step-ca-provisioner bridge-jwk
 ```
 
@@ -97,15 +97,15 @@ If the JWK provisioner requires a password non-interactively, write it to a `060
 On `machine-b`:
 
 ```bash
-mkdir -p ~/.ai-agent-bridge/certs
+mkdir -p ~/.config/bridgectl/certs
 curl -sk https://ca-host.tailnet-name.ts.net:9443/roots \
-  | jq -r '.crts[0]' > ~/.ai-agent-bridge/certs/step-ca-root.crt
+  | jq -r '.crts[0]' > ~/.config/bridgectl/certs/step-ca-root.crt
 
 bin/bridgectl server start \
   --listen 100.b.b.b:9445 \
   --san machine-b.tailnet-name.ts.net \
   --step-ca-url https://ca-host.tailnet-name.ts.net:9443 \
-  --step-ca-root ~/.ai-agent-bridge/certs/step-ca-root.crt \
+  --step-ca-root ~/.config/bridgectl/certs/step-ca-root.crt \
   --step-ca-provisioner bridge-jwk
 ```
 
@@ -118,13 +118,13 @@ On `machine-a`:
 ```bash
 bin/bridgectl client init \
   --step-ca-url https://ca-host.tailnet-name.ts.net:9443 \
-  --step-ca-root ~/.ai-agent-bridge/certs/step-ca-root.crt \
+  --step-ca-root ~/.config/bridgectl/certs/step-ca-root.crt \
   --provisioner bridge-jwk \
   --name machine-a \
   --target machine-b.tailnet-name.ts.net:9445
 ```
 
-This obtains a client certificate from Step CA, creates a JWT signing key, registers the JWT public key with the bridge server on `machine-b`, and stores the remote in `~/.ai-agent-bridge/remotes.json`.
+This obtains a client certificate from Step CA, creates a JWT signing key, registers the JWT public key with the bridge server on `machine-b`, and stores the remote in `~/.config/bridgectl/remotes.json`.
 
 Verify remote access:
 

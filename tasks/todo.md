@@ -6,7 +6,7 @@
 
 ## Scope
 
-- Add Debian packaging for `ai-agent-bridge` using `nfpm`.
+- Add Debian packaging for `bridgectl` using `nfpm`.
 - Extend the release workflow to build `.deb` artifacts, publish them into a signed apt repository, and attach release artifacts.
 - Add an `install.sh` helper and Ubuntu installation docs.
 - Add packaging-focused tests and smoke coverage.
@@ -120,7 +120,7 @@ Governing PRD section: `7.6 Debian/Ubuntu Distribution`.
 
 Scope:
 - Make the packaged provider runtime installer default to a user-owned runtime directory for self-updating provider CLIs.
-- Preserve `/opt/ai-agent-bridge` as an explicit root-controlled runtime path for pinned provider installs.
+- Preserve `/opt/bridgectl` as an explicit root-controlled runtime path for pinned provider installs.
 - Update package docs and examples so native provider updaters do not target root-owned `/opt` by default.
 - Add unit coverage for config expansion/validation and Linux e2e coverage for the packaged installer path.
 
@@ -132,7 +132,7 @@ Constraints:
 
 Tradeoffs:
 - User-owned runtime directories fit fast-moving native provider updaters but reduce package-level version pinning.
-- Root-owned `/opt/ai-agent-bridge` remains useful for reproducible deployments that accept privileged updates.
+- Root-owned `/opt/bridgectl` remains useful for reproducible deployments that accept privileged updates.
 
 Risks:
 - Provider runtime installs rely on Node.js being present for unprivileged runs; root-only Node bootstrap must not obscure that requirement.
@@ -144,7 +144,7 @@ Test Strategy:
 - Run focused Go tests plus the new Linux e2e script.
 
 Rollback:
-- Set `INSTALL_DIR=/opt/ai-agent-bridge` when running `/usr/lib/ai-agent-bridge/install-provider-runtime`.
+- Set `INSTALL_DIR=/opt/bridgectl` when running `/usr/lib/bridgectl/install-provider-runtime`.
 - Revert the installer default and docs if user-owned provider self-updates are no longer supported.
 
 Execution Checklist:
@@ -160,7 +160,7 @@ Evidence:
 - `go test ./internal/config -run TestLoadRuntimeProviderRoot -count=1` failed before implementation because `${HOME}` and `$XDG_DATA_HOME` were not expanded.
 - `go test ./internal/config -count=1` -> passed.
 - `go test ./...` -> passed.
-- `SUITE=noble scripts/smoke-provider-runtime-user.sh` -> passed with Docker escalation; verified non-root install to `/home/ubuntu/.local/share/ai-agent-bridge/providers` and no `/opt/ai-agent-bridge` directory.
+- `SUITE=noble scripts/smoke-provider-runtime-user.sh` -> passed with Docker escalation; verified non-root install to `/home/ubuntu/.local/share/bridgectl/providers` and no `/opt/bridgectl` directory.
 
 ---
 
@@ -223,8 +223,8 @@ Evidence:
 - `bash -n docker-entrypoint.sh e2e/scripts/test-entrypoint.sh` -> passed.
 - `docker compose -f e2e/docker-compose.yml config` -> passed.
 - `docker compose -f e2e/docker-compose.yml -f e2e/docker-compose.unprotected.yml config` -> passed.
-- `docker build -t ai-agent-bridge:issue-180 .` -> passed.
-- `docker run --rm --entrypoint sh ai-agent-bridge:issue-180 -lc 'command -v codex && command -v claude && command -v opencode && command -v gemini'` -> passed.
-- `docker run --rm ai-agent-bridge:issue-180 id -un` -> passed; command args executed as `bridge` after initialization.
-- Detached default-start smoke with `docker run -d --name issue180-default ai-agent-bridge:issue-180` stayed running and logged `secure (mTLS+JWT on [::]:9445)`.
-- `env-secrets aws -s /ai-agent-bridge/e2e -- make test-e2e-unprotected` -> passed. Protected pass verified Claude and Codex did not write `.git` markers; unprotected pass verified Claude and Codex wrote provider-specific `.git` markers through SDK-started sessions.
+- `docker build -t bridgectl:issue-180 .` -> passed.
+- `docker run --rm --entrypoint sh bridgectl:issue-180 -lc 'command -v codex && command -v claude && command -v opencode && command -v gemini'` -> passed.
+- `docker run --rm bridgectl:issue-180 id -un` -> passed; command args executed as `bridge` after initialization.
+- Detached default-start smoke with `docker run -d --name issue180-default bridgectl:issue-180` stayed running and logged `secure (mTLS+JWT on [::]:9445)`.
+- `env-secrets aws -s /bridgectl/e2e -- make test-e2e-unprotected` -> passed. Protected pass verified Claude and Codex did not write `.git` markers; unprotected pass verified Claude and Codex wrote provider-specific `.git` markers through SDK-started sessions.

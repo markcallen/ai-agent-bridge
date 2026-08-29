@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	"github.com/orchael/bridgectl/internal/localserver"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 // localClient builds a bridgeclient for the local server via DiscoverTarget.
@@ -49,7 +49,7 @@ func localClient(stateDir string, timeout time.Duration) (*bridgeclient.Client, 
 
 // remoteClient builds a bridgeclient for a remote Step CA server.
 // host is hostname or host:port (default port 9445).
-// Credentials are auto-discovered from ~/.ai-agent-bridge/certs/.
+// Credentials are auto-discovered from ~/.config/bridgectl/certs/.
 func remoteClient(host string, timeout time.Duration) (*bridgeclient.Client, error) {
 	// Normalise host to include port
 	if !strings.Contains(host, ":") {

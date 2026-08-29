@@ -5,14 +5,14 @@ title: Go SDK
 The Go SDK lives in `pkg/bridgeclient`.
 
 ```bash
-go get github.com/markcallen/ai-agent-bridge/pkg/bridgeclient
+go get github.com/orchael/bridgectl/pkg/bridgeclient
 ```
 
 ## Local Client
 
 ```go
 client, err := bridgeclient.New(
-    bridgeclient.WithTarget("unix:///home/me/.ai-agent-bridge/server.sock"),
+    bridgeclient.WithTarget("unix:///home/me/.config/bridgectl/server.sock"),
 )
 if err != nil {
     return err
@@ -28,13 +28,13 @@ Most local tools use `internal/localserver.DiscoverTarget` instead of hard-codin
 client, err := bridgeclient.New(
     bridgeclient.WithTarget("machine-b.tailnet-name.ts.net:9445"),
     bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
-        CABundlePath: "/home/me/.ai-agent-bridge/certs/step-ca-root.crt",
-        CertPath:     "/home/me/.ai-agent-bridge/certs/machine-a.crt",
-        KeyPath:      "/home/me/.ai-agent-bridge/certs/machine-a.key",
+        CABundlePath: "/home/me/.config/bridgectl/certs/step-ca-root.crt",
+        CertPath:     "/home/me/.config/bridgectl/certs/machine-a.crt",
+        KeyPath:      "/home/me/.config/bridgectl/certs/machine-a.key",
         ServerName:   "machine-b.tailnet-name.ts.net",
     }),
     bridgeclient.WithJWT(bridgeclient.JWTConfig{
-        PrivateKeyPath: "/home/me/.ai-agent-bridge/certs/jwt-signing.key",
+        PrivateKeyPath: "/home/me/.config/bridgectl/certs/jwt-signing.key",
         Issuer:         "machine-a",
         Audience:       "bridge",
     }),

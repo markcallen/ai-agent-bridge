@@ -55,9 +55,9 @@ bridgectl client init \
 
 bridgectl client enroll \
   --target bridge-host:9445 \
-  --ca ~/.ai-agent-bridge/certs/step-ca-root.crt \
-  --cert ~/.ai-agent-bridge/certs/<name>.crt \
-  --key ~/.ai-agent-bridge/certs/<name>.key
+  --ca ~/.config/bridgectl/certs/step-ca-root.crt \
+  --cert ~/.config/bridgectl/certs/<name>.crt \
+  --key ~/.config/bridgectl/certs/<name>.key
 
 bridgectl client renew
 ```

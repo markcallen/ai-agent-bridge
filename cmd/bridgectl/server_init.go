@@ -19,14 +19,14 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
+	"github.com/orchael/bridgectl/internal/localserver"
 )
 
 func newServerInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize server configuration",
-		Long: `Interactively create or update ~/.ai-agent-bridge/bridge.yaml.
+		Long: `Interactively create or update ~/.config/bridgectl/bridge.yaml.
 
 Asks for listen address, server SANs (auto-detects Tailscale FQDN),
 and optional Step CA integration. The generated config is used

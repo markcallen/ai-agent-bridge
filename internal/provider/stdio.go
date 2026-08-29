@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/markcallen/ai-agent-bridge/internal/bridge"
+	"github.com/orchael/bridgectl/internal/bridge"
 )
 
 // StdioConfig configures an interactive PTY-backed provider.

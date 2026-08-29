@@ -73,7 +73,7 @@ This is the only deployment mode. There is no separate system daemon.
 | Process context | Login session of the operating user |
 | Windowing access | Full — inherits `$DISPLAY`, `$WAYLAND_DISPLAY`, `$XDG_RUNTIME_DIR` |
 | Credential source | Inherits the user's shell environment and native CLI auth |
-| Local access | Unix socket at `~/.ai-agent-bridge/server.sock`, no auth |
+| Local access | Unix socket at `~/.config/bridgectl/server.sock`, no auth |
 | Remote access | TCP with auto-generated mTLS + JWT (`--listen <addr>`) |
 | Startup | Systemd user service (Linux) or LaunchAgent (macOS) |
 | Persistence | Optional BoltDB session store (`--db-path`) |
@@ -87,7 +87,7 @@ without recreating the user's environment, which reintroduces all the trust
 problems mTLS is designed to eliminate.
 
 **Remote access model**: when `--listen` is set, the server binds to the
-specified TCP address and generates PKI material in `~/.ai-agent-bridge/certs/`
+specified TCP address and generates PKI material in `~/.config/bridgectl/certs/`
 on first start. SDK clients authenticate with mTLS + JWT. Human operators
 authenticate using OIDC via `bridgectl server issue-client --oidc` (see
 Security Architecture). The server must be reachable via WireGuard or Tailscale;
@@ -208,7 +208,7 @@ Add flags:
 After all features are ported and the system daemon e2e tests are passing via
 `bridgectl --listen`, remove the directory.
 
-**`packaging/ai-agent-bridge.service` — delete**
+**`packaging/bridgectl.service` — delete**
 
 Replace with Phase 3 user service units.
 
@@ -236,7 +236,7 @@ This path was only for the system daemon.
 ### Acceptance Criteria
 
 - `bridgectl server start --config bridge.yaml` loads YAML and applies settings
-- `bridgectl server start --db-path ~/.ai-agent-bridge/sessions.db` persists
+- `bridgectl server start --db-path ~/.config/bridgectl/sessions.db` persists
   sessions across restart
 - `make test` passes at ≥ 75% coverage
 - `cmd/bridge/` directory does not exist
@@ -416,7 +416,7 @@ Create `packaging/bridge.user.service`:
 ```ini
 [Unit]
 Description=AI Agent Bridge (user session)
-Documentation=https://github.com/markcallen/ai-agent-bridge
+Documentation=https://github.com/orchael/bridgectl
 After=default.target
 
 [Service]
@@ -449,7 +449,7 @@ ExecStart=%h/.local/bin/bridgectl server start --listen 0.0.0.0:9445
 
 ### macOS: LaunchAgent
 
-Create `packaging/com.markcallen.ai-agent-bridge.plist`:
+Create `packaging/com.orchael.bridgectl.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -458,7 +458,7 @@ Create `packaging/com.markcallen.ai-agent-bridge.plist`:
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.markcallen.ai-agent-bridge</string>
+  <string>com.orchael.bridgectl</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/local/bin/bridgectl</string>
@@ -470,9 +470,9 @@ Create `packaging/com.markcallen.ai-agent-bridge.plist`:
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/tmp/ai-agent-bridge.log</string>
+  <string>/tmp/bridgectl.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/ai-agent-bridge.err</string>
+  <string>/tmp/bridgectl.err</string>
 </dict>
 </plist>
 ```
@@ -481,7 +481,7 @@ Install to `~/Library/LaunchAgents/`. Load with `launchctl load`.
 
 ### Packaging changes
 
-- Remove `packaging/ai-agent-bridge.service` (system unit)
+- Remove `packaging/bridgectl.service` (system unit)
 - Remove `User=bridge`, `ProtectHome`, `ProtectSystem` constraints from any
   remaining units — these are incompatible with windowing access
 - `.deb` installs `bridgectl` to `/usr/bin/` and the user unit to
@@ -498,7 +498,7 @@ Install to `~/Library/LaunchAgents/`. Load with `launchctl load`.
 ### Acceptance Criteria
 
 - `systemctl --user enable --now bridge` starts the server on login (Linux)
-- `launchctl load ~/Library/LaunchAgents/com.markcallen.ai-agent-bridge.plist`
+- `launchctl load ~/Library/LaunchAgents/com.orchael.bridgectl.plist`
   starts the server on login (macOS)
 - `bridgectl server status` reports the running server
 - `bridgectl run --provider claude .` works without manual server start

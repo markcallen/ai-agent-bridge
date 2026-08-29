@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 func main() {

@@ -10,7 +10,7 @@ PACKAGES_DIR="$TMP_DIR/packages"
 CONTAINER="provider-runtime-user-smoke-$$"
 
 : "${SUITE:=noble}"
-: "${GOCACHE:=/tmp/ai-agent-bridge-go-build}"
+: "${GOCACHE:=/tmp/bridgectl-go-build}"
 : "${GOFLAGS:=-buildvcs=false}"
 
 export GOCACHE
@@ -32,7 +32,7 @@ case "$SUITE" in
 esac
 
 VERSION="0.0.0-provider-runtime-smoke" OUTPUT_DIR="$PACKAGES_DIR" "$ROOT_DIR/scripts/build-deb.sh"
-DEB_PATH="$PACKAGES_DIR/ai-agent-bridge_0.0.0-provider-runtime-smoke_amd64.deb"
+DEB_PATH="$PACKAGES_DIR/bridgectl_0.0.0-provider-runtime-smoke_amd64.deb"
 DEB_BASENAME="$(basename "$DEB_PATH")"
 
 docker run -d \
@@ -92,22 +92,22 @@ if ! docker exec "$CONTAINER" test -f /tmp/provider-runtime-smoke-ready >/dev/nu
 fi
 
 docker exec "$CONTAINER" su - ubuntu -c \
-  'if PATH=/tmp/fakebin:$PATH INSTALL_DIR=relative/providers /usr/lib/ai-agent-bridge/install-provider-runtime >/tmp/relative-install-dir.out 2>&1; then cat /tmp/relative-install-dir.out >&2; exit 1; fi'
+  'if PATH=/tmp/fakebin:$PATH INSTALL_DIR=relative/providers /usr/lib/bridgectl/install-provider-runtime >/tmp/relative-install-dir.out 2>&1; then cat /tmp/relative-install-dir.out >&2; exit 1; fi'
 docker exec "$CONTAINER" su - ubuntu -c \
   'grep -q "INSTALL_DIR must be an absolute path" /tmp/relative-install-dir.out'
 docker exec "$CONTAINER" su - ubuntu -c \
-  'if PATH=/tmp/fakebin:$PATH XDG_DATA_HOME=relative-data /usr/lib/ai-agent-bridge/install-provider-runtime >/tmp/relative-xdg-data-home.out 2>&1; then cat /tmp/relative-xdg-data-home.out >&2; exit 1; fi'
+  'if PATH=/tmp/fakebin:$PATH XDG_DATA_HOME=relative-data /usr/lib/bridgectl/install-provider-runtime >/tmp/relative-xdg-data-home.out 2>&1; then cat /tmp/relative-xdg-data-home.out >&2; exit 1; fi'
 docker exec "$CONTAINER" su - ubuntu -c \
   'grep -q "INSTALL_DIR must be an absolute path" /tmp/relative-xdg-data-home.out'
 
 docker exec "$CONTAINER" su - ubuntu -c \
-  'PATH=/tmp/fakebin:$PATH /usr/lib/ai-agent-bridge/install-provider-runtime'
+  'PATH=/tmp/fakebin:$PATH /usr/lib/bridgectl/install-provider-runtime'
 
 docker exec "$CONTAINER" su - ubuntu -c \
-  'test -x "$HOME/.local/share/ai-agent-bridge/providers/node_modules/.bin/codex"'
+  'test -x "$HOME/.local/share/bridgectl/providers/node_modules/.bin/codex"'
 docker exec "$CONTAINER" su - ubuntu -c \
-  'test -w "$HOME/.local/share/ai-agent-bridge/providers"'
+  'test -w "$HOME/.local/share/bridgectl/providers"'
 docker exec "$CONTAINER" sh -c \
-  'test ! -d /opt/ai-agent-bridge'
+  'test ! -d /opt/bridgectl'
 
 echo "PROVIDER RUNTIME USER SMOKE PASSED: suite=$SUITE"

@@ -46,7 +46,7 @@ services:
       STEP_CA_PROVISIONER: "bridge-jwk"
       STEP_CA_PROVISIONER_PASSWORD: "step-ca-e2e-password"
     volumes:
-      - bridge-state:/home/bridge/.ai-agent-bridge
+      - bridge-state:/home/bridge/.config/bridgectl
       - ./bridge-stepca-e2e.yaml:/app/config/bridge-stepca-e2e.yaml:ro
       - step-ca-data:/step-ca:ro
     depends_on:

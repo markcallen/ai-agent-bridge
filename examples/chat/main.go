@@ -16,13 +16,13 @@ import (
 	"github.com/creack/pty"
 	"github.com/google/uuid"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/internal/localserver"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 func main() {
-	stateDir := flag.String("state-dir", "", "bridge state directory (default: ~/.ai-agent-bridge)")
+	stateDir := flag.String("state-dir", "", "bridge state directory (default: ~/.config/bridgectl)")
 	project := flag.String("project", "local", "project ID")
 	provider := flag.String("provider", "claude", "provider name")
 	timeout := flag.Duration("timeout", 30*time.Minute, "session timeout")
@@ -41,7 +41,7 @@ func main() {
 
 	target, mode := localserver.DiscoverTarget(sd)
 	if target == "" {
-		fmt.Fprintln(os.Stderr, "no ai-agent-bridge server running")
+		fmt.Fprintln(os.Stderr, "no bridgectl server running")
 		fmt.Fprintln(os.Stderr, "start one with: bridgectl server start")
 		os.Exit(1)
 	}

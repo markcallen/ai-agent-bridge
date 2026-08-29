@@ -17,15 +17,15 @@ for i in $(seq 1 60); do
 done
 
 echo "==> Preparing test repository in shared volume..."
-if [ -d "/tmp/ai-agent-bridge/.git" ]; then
+if [ -d "/tmp/bridgectl/.git" ]; then
   echo "    Repo already present, pulling latest main..."
-  git -C /tmp/ai-agent-bridge pull origin main
+  git -C /tmp/bridgectl pull origin main
 else
-  git clone --depth 1 https://github.com/markcallen/cache-cleaner /tmp/ai-agent-bridge-src
-  cp -a /tmp/ai-agent-bridge-src/. /tmp/ai-agent-bridge/
-  rm -rf /tmp/ai-agent-bridge-src
+  git clone --depth 1 https://github.com/markcallen/cache-cleaner /tmp/bridgectl-src
+  cp -a /tmp/bridgectl-src/. /tmp/bridgectl/
+  rm -rf /tmp/bridgectl-src
 fi
-chmod -R a+rwX /tmp/ai-agent-bridge
+chmod -R a+rwX /tmp/bridgectl
 
 echo "==> Running e2e test suite..."
 E2E_TEST_TIMEOUT="${E2E_TEST_TIMEOUT:-300s}"
@@ -50,7 +50,7 @@ e2e-suite \
   -bridge.key "$CERT_DIR/e2e-client.key" \
   -bridge.jwt-key "$CERT_DIR/jwt-signing.key" \
   -bridge.jwt-issuer e2e \
-  -bridge.repo /tmp/ai-agent-bridge \
+  -bridge.repo /tmp/bridgectl \
   -bridge.timeout "$E2E_TEST_TIMEOUT"
 
 exit_code=$?

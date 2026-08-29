@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/markcallen/ai-agent-bridge/internal/bridge"
+	"github.com/orchael/bridgectl/internal/bridge"
 )
 
 // CodexProvider wraps StdioProvider with Codex-specific auth handling.
@@ -142,7 +142,7 @@ func codexAuthDir(codexHome string) (string, error) {
 	if err != nil || strings.TrimSpace(home) == "" {
 		return "", fmt.Errorf("resolve codex auth dir: HOME is not available; set CODEX_HOME to a persistent directory")
 	}
-	return filepath.Join(home, ".ai-agent-bridge", "codex-home"), nil
+	return filepath.Join(home, ".config/bridgectl", "codex-home"), nil
 }
 
 func setEnvValue(env []string, key, value string) []string {

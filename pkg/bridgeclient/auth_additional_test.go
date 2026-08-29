@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
+	"github.com/orchael/bridgectl/internal/pki"
 )
 
 func TestJWTCredentialsAndTransportTLS(t *testing.T) {

@@ -1,6 +1,6 @@
 # Examples
 
-These examples show how to connect to an `ai-agent-bridge` server, start AI agent sessions, and interact with them. All examples auto-discover credentials from `~/.ai-agent-bridge/` — no flags to memorise.
+These examples show how to connect to an `bridgectl` server, start AI agent sessions, and interact with them. All examples auto-discover credentials from `~/.config/bridgectl/` — no flags to memorise.
 
 ## Prerequisites
 
@@ -24,18 +24,18 @@ bridgectl client init --step-ca-url https://your-step-ca:443
 ```
 
 The command will:
-1. Fetch the CA root certificate (saved to `~/.ai-agent-bridge/certs/step-ca-root.crt`).
+1. Fetch the CA root certificate (saved to `~/.config/bridgectl/certs/step-ca-root.crt`).
 2. Discover available provisioners and let you choose one.
-3. Issue a client certificate and key (saved to `~/.ai-agent-bridge/certs/<name>.crt` and `<name>.key`).
+3. Issue a client certificate and key (saved to `~/.config/bridgectl/certs/<name>.crt` and `<name>.key`).
 
 After the certificate is issued, enroll it with the remote bridge server:
 
 ```bash
 bridgectl client enroll \
   --target <host>:9445 \
-  --ca ~/.ai-agent-bridge/certs/step-ca-root.crt \
-  --cert ~/.ai-agent-bridge/certs/<name>.crt \
-  --key ~/.ai-agent-bridge/certs/<name>.key
+  --ca ~/.config/bridgectl/certs/step-ca-root.crt \
+  --cert ~/.config/bridgectl/certs/<name>.crt \
+  --key ~/.config/bridgectl/certs/<name>.key
 ```
 
 Or combine both steps by passing `--target` to `client init`:
@@ -60,7 +60,7 @@ make chat-gemini CHAT_REPO=/path/to/repo
 ```
 
 **Flags:**
-- `--state-dir` — override state directory (default: `~/.ai-agent-bridge`)
+- `--state-dir` — override state directory (default: `~/.config/bridgectl`)
 - `--project` — project ID (default: `local`)
 - `--provider` — provider name (default: `claude`)
 - `--timeout` — session timeout (default: `30m`)
@@ -69,7 +69,7 @@ make chat-gemini CHAT_REPO=/path/to/repo
 
 ## `examples/chat-ca` — Interactive session (remote via Step CA)
 
-Same as `chat` but connects to a remote bridge server. Credentials are auto-discovered from `~/.ai-agent-bridge/certs/`.
+Same as `chat` but connects to a remote bridge server. Credentials are auto-discovered from `~/.config/bridgectl/certs/`.
 
 ```bash
 go run ./examples/chat-ca --remote macbook.ts.net <repo-path>
@@ -113,7 +113,7 @@ make orchestrator-claude \
 - `--model` — OpenAI model for the orchestrator (default: `gpt-5.6`)
 - `--interval` — how often to analyze buffered output (default: `15s`)
 - `--timeout` — total session lifetime (default: `30m`)
-- `--state-dir` — credential directory (default: `~/.ai-agent-bridge`)
+- `--state-dir` — credential directory (default: `~/.config/bridgectl`)
 
 **Orchestration loop:**
 
@@ -221,7 +221,7 @@ Then open `http://localhost:8080`.
 
 ### Connecting to a remote server
 
-The web UI has a **Remote host** field in the header. Enter a hostname (e.g. `macbook.ts.net`) and all API calls will be routed to that remote bridge server using credentials from `~/.ai-agent-bridge/certs/`. Leave it empty to use the local server.
+The web UI has a **Remote host** field in the header. Enter a hostname (e.g. `macbook.ts.net`) and all API calls will be routed to that remote bridge server using credentials from `~/.config/bridgectl/certs/`. Leave it empty to use the local server.
 
 ---
 

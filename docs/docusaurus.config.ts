@@ -2,13 +2,13 @@ import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
-  title: 'AI Agent Bridge',
+  title: 'Bridgectl',
   tagline: 'Run, attach to, and replay local or remote AI agent sessions.',
 
-  url: 'https://markcallen.github.io',
-  baseUrl: '/ai-agent-bridge/',
-  organizationName: 'markcallen',
-  projectName: 'ai-agent-bridge',
+  url: 'https://orchael.github.io',
+  baseUrl: '/bridgectl/',
+  organizationName: 'orchael',
+  projectName: 'bridgectl',
   trailingSlash: false,
 
   onBrokenLinks: 'throw',
@@ -34,7 +34,7 @@ const config: Config = {
         docs: {
           routeBasePath: '/',
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/markcallen/ai-agent-bridge/tree/main/docs/',
+          editUrl: 'https://github.com/orchael/bridgectl/tree/main/docs/',
         },
         blog: false,
         theme: {
@@ -55,7 +55,7 @@ const config: Config = {
           label: 'Docs',
         },
         {
-          href: 'https://github.com/markcallen/ai-agent-bridge',
+          href: 'https://github.com/orchael/bridgectl',
           label: 'GitHub',
           position: 'right',
         },

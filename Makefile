@@ -1,7 +1,7 @@
 .PHONY: build proto tools test test-e2e test-e2e-unprotected test-step-ca-e2e test-cover test-cover-maintained lint clean certs dev-certs dev-setup agents-setup setup-hosts fmt smoke smoke-apt-local smoke-deb smoke-provider-runtime-user smoke-container smoke-ec2 up down logs up-local down-local logs-local up-step-ca down-step-ca logs-step-ca step-ca-health step-ca-issue-client chat-example chat-claude chat-opencode chat-codex chat-gemini chat-ca-example chat-ca-claude chat-ca-opencode chat-ca-codex chat-ca-gemini sessions-list sessions-watch sessions-attach orchestrator-claude orchestrator-opencode web-install web-dev web-build web-start docs-install docs-build docs-start build-cli test-cli-e2e test-cli-e2e-docker install-user-service check-deps
 
 BIN_DIR := bin
-BRIDGE_CA := $(BIN_DIR)/ai-agent-bridge-ca
+BRIDGE_CA := $(BIN_DIR)/bridge-ca
 BRIDGE_CLI := $(BIN_DIR)/bridgectl
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
@@ -78,7 +78,7 @@ clean:
 	rm -rf $(BIN_DIR) coverage.out coverage.html
 
 certs: build
-	$(BRIDGE_CA) init --name ai-agent-bridge --out certs/
+	$(BRIDGE_CA) init --name bridgectl --out certs/
 
 dev-certs: build
 	./scripts/dev_certs.sh
@@ -172,7 +172,7 @@ chat-codex: chat-example
 chat-gemini: CHAT_PROVIDER=gemini
 chat-gemini: chat-example
 
-# chat-ca: connects via Step CA-issued mTLS credentials auto-discovered from ~/.ai-agent-bridge/certs/
+# chat-ca: connects via Step CA-issued mTLS credentials auto-discovered from ~/.config/bridgectl/certs/
 CHAT_CA_REMOTE ?= macbook.tail6198c2.ts.net
 
 chat-ca-example:
@@ -278,9 +278,9 @@ install-user-service:
 	@OS=$$(uname -s); \
 	if [ "$$OS" = "Darwin" ]; then \
 		mkdir -p ~/Library/LaunchAgents; \
-		cp packaging/com.markcallen.ai-agent-bridge.plist ~/Library/LaunchAgents/; \
-		launchctl load ~/Library/LaunchAgents/com.markcallen.ai-agent-bridge.plist 2>/dev/null || true; \
-		echo "LaunchAgent installed. Run 'launchctl start com.markcallen.ai-agent-bridge' to start now."; \
+		cp packaging/com.orchael.bridgectl.plist ~/Library/LaunchAgents/; \
+		launchctl load ~/Library/LaunchAgents/com.orchael.bridgectl.plist 2>/dev/null || true; \
+		echo "LaunchAgent installed. Run 'launchctl start com.orchael.bridgectl' to start now."; \
 	elif [ "$$OS" = "Linux" ]; then \
 		mkdir -p ~/.config/systemd/user; \
 		cp packaging/bridge.user.service ~/.config/systemd/user/bridge.service; \

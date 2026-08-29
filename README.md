@@ -1,9 +1,9 @@
-# AI Agent Bridge
+# Bridgectl
 
-[![CI](https://github.com/markcallen/ai-agent-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/ci.yml)
-[![Publish](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml/badge.svg)](https://github.com/markcallen/ai-agent-bridge/actions/workflows/publish.yml)
-[![License](https://img.shields.io/github/license/markcallen/ai-agent-bridge)](LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/markcallen/ai-agent-bridge)](https://github.com/markcallen/ai-agent-bridge/releases)
+[![CI](https://github.com/orchael/bridgectl/actions/workflows/ci.yml/badge.svg)](https://github.com/orchael/bridgectl/actions/workflows/ci.yml)
+[![Publish](https://github.com/orchael/bridgectl/actions/workflows/publish.yml/badge.svg)](https://github.com/orchael/bridgectl/actions/workflows/publish.yml)
+[![License](https://img.shields.io/github/license/orchael/bridgectl)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/orchael/bridgectl)](https://github.com/orchael/bridgectl/releases)
 
 A standalone gRPC daemon and SDK that manages AI agent subprocess lifecycles and exposes a PTY transport so any client can attach to, interact with, and replay the terminal output of a running AI agent — regardless of when it connected.
 
@@ -16,7 +16,7 @@ Supported providers: **Claude**, **Codex**, **OpenCode**, **Gemini**
 ```
 Your App (Go)
     ↕ Go SDK  or  raw gRPC
-ai-agent-bridge daemon
+bridgectl daemon
     ↕ PTY
 AI Agent process (claude / codex / opencode / gemini)
 ```
@@ -38,8 +38,8 @@ See the Docusaurus documentation under [docs/](docs/) for architecture details.
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/markcallen/ai-agent-bridge.git
-cd ai-agent-bridge
+git clone https://github.com/orchael/bridgectl.git
+cd bridgectl
 nvm install
 nvm use
 ```
@@ -49,15 +49,15 @@ Set up `env-secrets` once for this repo. `env-secrets` in this environment uses 
 ```bash
 cp .env.example .env
 $EDITOR .env
-cat > /tmp/ai-agent-bridge.secrets.env <<'EOF'
+cat > /tmp/bridgectl.secrets.env <<'EOF'
 CLAUDE_CODE_OAUTH_TOKEN=
 OPENAI_API_KEY=
 GEMINI_API_KEY=
 EOF
-$EDITOR /tmp/ai-agent-bridge.secrets.env
+$EDITOR /tmp/bridgectl.secrets.env
 env-secrets aws secret upsert \
-  --name ai-agent-bridge/dev \
-  --file /tmp/ai-agent-bridge.secrets.env \
+  --name bridgectl/dev \
+  --file /tmp/bridgectl.secrets.env \
   --profile <aws-profile> \
   --region <aws-region>
 ```
@@ -94,7 +94,7 @@ make chat-claude     # or chat-opencode, chat-codex, chat-gemini
 make up
 ```
 
-Mounts `~/repos` → `/repos` and `./certs` → `/app/certs`. The prebuilt image is available at `ghcr.io/markcallen/ai-agent-bridge`.
+Mounts `~/repos` → `/repos` and `./certs` → `/app/certs`. The prebuilt image is available at `ghcr.io/orchael/bridgectl`.
 
 ### Smoke Test
 
@@ -112,22 +112,22 @@ Supported releases: Ubuntu **24.04 (noble)** and **25.04 (plucky)** on `amd64`.
 **Quick install:**
 
 ```bash
-curl -fsSL https://markcallen.github.io/ai-agent-bridge/install.sh | sudo bash
-sudo systemctl enable --now ai-agent-bridge
+curl -fsSL https://orchael.github.io/bridgectl/install.sh | sudo bash
+sudo systemctl enable --now bridgectl
 ```
 
 **Manual apt setup (noble example):**
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc \
-  | sudo gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] \
-  https://markcallen.github.io/ai-agent-bridge/apt noble main" \
-  | sudo tee /etc/apt/sources.list.d/ai-agent-bridge.list >/dev/null
+curl -fsSL https://orchael.github.io/bridgectl/apt/bridgectl-archive-keyring.asc \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/bridgectl.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/bridgectl.gpg] \
+  https://orchael.github.io/bridgectl/apt noble main" \
+  | sudo tee /etc/apt/sources.list.d/bridgectl.list >/dev/null
 sudo apt-get update
-sudo apt-get install -y ai-agent-bridge
-sudo systemctl enable --now ai-agent-bridge
+sudo apt-get install -y bridgectl
+sudo systemctl enable --now bridgectl
 ```
 
 **Supported Ubuntu suites:** `noble` (24.04 LTS) and `plucky` (25.04). Replace `noble` above with `plucky` if you are on Ubuntu 25.04. The repository does not publish a `stable` or `jammy` suite — using any other suite name will result in a "does not have a Release file" error from apt.
@@ -146,27 +146,27 @@ sudo systemctl enable --now ai-agent-bridge
     state: directory
     mode: '0755'
 
-- name: Download ai-agent-bridge signing key
+- name: Download bridgectl signing key
   ansible.builtin.get_url:
-    url: https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc
-    dest: /tmp/ai-agent-bridge-keyring.asc
+    url: https://orchael.github.io/bridgectl/apt/bridgectl-archive-keyring.asc
+    dest: /tmp/bridgectl-keyring.asc
     mode: '0644'
 
 - name: Dearmor signing key
   ansible.builtin.command: >
-    gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg /tmp/ai-agent-bridge-keyring.asc
+    gpg --dearmor -o /etc/apt/keyrings/bridgectl.gpg /tmp/bridgectl-keyring.asc
   args:
-    creates: /etc/apt/keyrings/ai-agent-bridge.gpg
+    creates: /etc/apt/keyrings/bridgectl.gpg
 
-- name: Add ai-agent-bridge apt repository
+- name: Add bridgectl apt repository
   ansible.builtin.apt_repository:
-    repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] https://markcallen.github.io/ai-agent-bridge/apt {{ ansible_distribution_release }} main"
+    repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/bridgectl.gpg] https://orchael.github.io/bridgectl/apt {{ ansible_distribution_release }} main"
     state: present
-    filename: ai-agent-bridge
+    filename: bridgectl
   notify: Update apt cache
 ```
 
-The packaged service installs a minimal config at `/etc/ai-agent-bridge/bridge.yaml` and listens on `127.0.0.1:9445` by default. It does not bundle provider CLIs or API keys. For production use you must install the provider CLIs separately, add provider configuration, and decide how the service account should access the target repositories.
+The packaged service installs a minimal config at `/etc/bridgectl/bridge.yaml` and listens on `127.0.0.1:9445` by default. It does not bundle provider CLIs or API keys. For production use you must install the provider CLIs separately, add provider configuration, and decide how the service account should access the target repositories.
 
 ---
 
@@ -175,7 +175,7 @@ The packaged service installs a minimal config at `/etc/ai-agent-bridge/bridge.y
 Add the SDK to your Go module:
 
 ```bash
-go get github.com/markcallen/ai-agent-bridge/pkg/bridgeclient
+go get github.com/orchael/bridgectl/pkg/bridgeclient
 ```
 
 ### Minimal example
@@ -183,8 +183,8 @@ go get github.com/markcallen/ai-agent-bridge/pkg/bridgeclient
 ```go
 import (
     "context"
-    "github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
-    bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+    "github.com/orchael/bridgectl/pkg/bridgeclient"
+    bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
 )
 
 // Connect (no TLS — for local dev with auth disabled)
@@ -312,7 +312,7 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/docs/reference/c
 
 | Target | Description |
 |--------|-------------|
-| `make build` | Build `bin/bridgectl` and `bin/ai-agent-bridge-ca` |
+| `make build` | Build `bin/bridgectl` and `bin/bridge-ca` |
 | `make test` | Run unit tests with race detection |
 | `make test-e2e` | Run the Dockerized end-to-end test suite |
 | `make test-e2e-unprotected` | Manually run live Docker SDK e2e tests for Codex/Claude protected and unprotected modes |
@@ -334,18 +334,18 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/docs/reference/c
 
 ---
 
-## ai-agent-bridge-ca: Certificate and Key Management
+## bridge-ca: Certificate and Key Management
 
 ```bash
-ai-agent-bridge-ca init          # Initialize a new ECDSA P-384 CA
-ai-agent-bridge-ca issue         # Issue a server or client certificate
-ai-agent-bridge-ca cross-sign    # Cross-sign an external CA for multi-tenant trust
-ai-agent-bridge-ca bundle        # Build a trust bundle from multiple CA certs
-ai-agent-bridge-ca jwt-keygen    # Generate an Ed25519 keypair for JWT signing
-ai-agent-bridge-ca verify        # Verify a certificate against a trust bundle
+bridge-ca init          # Initialize a new ECDSA P-384 CA
+bridge-ca issue         # Issue a server or client certificate
+bridge-ca cross-sign    # Cross-sign an external CA for multi-tenant trust
+bridge-ca bundle        # Build a trust bundle from multiple CA certs
+bridge-ca jwt-keygen    # Generate an Ed25519 keypair for JWT signing
+bridge-ca verify        # Verify a certificate against a trust bundle
 ```
 
-Run `ai-agent-bridge-ca <command> --help` for flags.
+Run `bridge-ca <command> --help` for flags.
 
 ---
 
@@ -403,17 +403,17 @@ gpg --batch --gen-key <<'EOF'
 Key-Type: RSA
 Key-Length: 4096
 Name-Real: AI Agent Bridge APT Signing
-Name-Email: apt-signing@markcallen.com
+Name-Email: apt-signing@orchael.com
 Expire-Date: 0
 %no-protection
 %commit
 EOF
 
 # Export and base64-encode the private key
-gpg --export-secret-keys --armor apt-signing@markcallen.com | base64 -w 0
+gpg --export-secret-keys --armor apt-signing@orchael.com | base64 -w 0
 ```
 
-Add the base64 output as `APT_REPO_GPG_PRIVATE_KEY_B64` in **Settings → Secrets and variables → Actions**. The public key is exported automatically into the apt repository at publish time as `ai-agent-bridge-archive-keyring.asc`.
+Add the base64 output as `APT_REPO_GPG_PRIVATE_KEY_B64` in **Settings → Secrets and variables → Actions**. The public key is exported automatically into the apt repository at publish time as `bridgectl-archive-keyring.asc`.
 
 ---
 

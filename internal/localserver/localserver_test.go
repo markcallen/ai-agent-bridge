@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
-	"github.com/markcallen/ai-agent-bridge/internal/redact"
-	"github.com/markcallen/ai-agent-bridge/internal/server"
+	"github.com/orchael/bridgectl/internal/pki"
+	"github.com/orchael/bridgectl/internal/redact"
+	"github.com/orchael/bridgectl/internal/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -333,11 +333,11 @@ func TestDiscoverTargetEmptyWhenNoServer(t *testing.T) {
 	assert.Empty(t, target)
 }
 
-// TestStateDirEnvOverride verifies that AI_AGENT_BRIDGE_STATE_DIR overrides
+// TestStateDirEnvOverride verifies that BRIDGECTL_STATE_DIR overrides
 // the default path.
 func TestStateDirEnvOverride(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", dir)
+	t.Setenv("BRIDGECTL_STATE_DIR", dir)
 	assert.Equal(t, dir, StateDir())
 }
 

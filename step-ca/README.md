@@ -132,7 +132,7 @@ bridgectl server init
 ```
 
 This auto-detects your Tailscale hostname, fetches the Step CA root cert,
-and writes `~/.ai-agent-bridge/bridge.yaml`. Then start the server:
+and writes `~/.config/bridgectl/bridge.yaml`. Then start the server:
 
 ```bash
 bridgectl server start
@@ -145,16 +145,16 @@ provisioner configured during init (ACME by default, JWK if specified).
 
 ```bash
 # Fetch the Step CA root cert
-mkdir -p ~/.ai-agent-bridge/certs
+mkdir -p ~/.config/bridgectl/certs
 curl -sk https://step-ca-dev.example.com/roots | \
-  jq -r '.crts[0]' > ~/.ai-agent-bridge/certs/step-ca-root.crt
+  jq -r '.crts[0]' > ~/.config/bridgectl/certs/step-ca-root.crt
 
 # Start the server with ACME provisioner
 bridgectl server start \
   --listen 0.0.0.0:9445 \
   --san myhost.example.com \
   --step-ca-url https://step-ca-dev.example.com \
-  --step-ca-root ~/.ai-agent-bridge/certs/step-ca-root.crt \
+  --step-ca-root ~/.config/bridgectl/certs/step-ca-root.crt \
   --step-ca-provisioner acme
 ```
 
@@ -195,14 +195,14 @@ Google account — no shared passwords needed. This requires the `step` CLI:
 # Linux: curl -fsSL https://dl.smallstep.com/cli/install-step-cli.sh | bash
 
 # Fetch root cert
-mkdir -p ~/.ai-agent-bridge/certs
+mkdir -p ~/.config/bridgectl/certs
 curl -sk https://step-ca-dev.example.com/roots | \
-  jq -r '.crts[0]' > ~/.ai-agent-bridge/certs/step-ca-root.crt
+  jq -r '.crts[0]' > ~/.config/bridgectl/certs/step-ca-root.crt
 
 # Get a client cert via Google OIDC (opens browser for login)
 step ca certificate my-name \
-  ~/.ai-agent-bridge/certs/my-name.crt \
-  ~/.ai-agent-bridge/certs/my-name.key \
+  ~/.config/bridgectl/certs/my-name.crt \
+  ~/.config/bridgectl/certs/my-name.key \
   --ca-url https://step-ca-dev.example.com \
   --root /etc/ssl/certs/ca-certificates.crt \
   --provisioner google
@@ -210,9 +210,9 @@ step ca certificate my-name \
 # Enroll with the bridge server
 bridgectl client enroll \
   --target bridge-host.example.com:9445 \
-  --ca ~/.ai-agent-bridge/certs/step-ca-root.crt \
-  --cert ~/.ai-agent-bridge/certs/my-name.crt \
-  --key ~/.ai-agent-bridge/certs/my-name.key
+  --ca ~/.config/bridgectl/certs/step-ca-root.crt \
+  --cert ~/.config/bridgectl/certs/my-name.crt \
+  --key ~/.config/bridgectl/certs/my-name.key
 ```
 
 > **Note**: The `--root` for the `step` CLI points to the system CA bundle
@@ -222,15 +222,15 @@ bridgectl client enroll \
 ### After enrollment
 
 Both options produce the same result — a client certificate and JWT keypair
-in `~/.ai-agent-bridge/certs/`. Connect with the Go SDK:
+in `~/.config/bridgectl/certs/`. Connect with the Go SDK:
 
 ```go
 client, _ := bridgeclient.New(
     bridgeclient.WithTarget("bridge-host.example.com:9445"),
     bridgeclient.WithMTLS(bridgeclient.MTLSConfig{
-        CABundlePath: "~/.ai-agent-bridge/certs/step-ca-root.crt",
-        CertPath:     "~/.ai-agent-bridge/certs/my-name.crt",
-        KeyPath:      "~/.ai-agent-bridge/certs/my-name.key",
+        CABundlePath: "~/.config/bridgectl/certs/step-ca-root.crt",
+        CertPath:     "~/.config/bridgectl/certs/my-name.crt",
+        KeyPath:      "~/.config/bridgectl/certs/my-name.key",
         ServerName:   "server",
     }),
     bridgeclient.WithJWT(bridgeclient.JWTConfig{
@@ -262,7 +262,7 @@ To extract and enroll:
 ```bash
 CLIENT=test-client
 COMPOSE="docker compose -f step-ca/docker-compose.step-ca.yaml"
-CERTS=/home/bridge/.ai-agent-bridge/certs
+CERTS=/home/bridge/.config/bridgectl/certs
 mkdir -p /tmp/bridge-creds
 
 $COMPOSE exec bridge cat $CERTS/ca-bundle.crt              > /tmp/bridge-creds/ca-bundle.crt
@@ -335,16 +335,16 @@ make up-step-ca
     --target bridge-host.vpn.internal:9445
 
   # On each developer machine (OIDC — Google SSO, no password)
-  step ca certificate my-name ~/.ai-agent-bridge/certs/my-name.crt \
-    ~/.ai-agent-bridge/certs/my-name.key \
+  step ca certificate my-name ~/.config/bridgectl/certs/my-name.crt \
+    ~/.config/bridgectl/certs/my-name.key \
     --ca-url https://step-ca.vpn.internal \
     --root /etc/ssl/certs/ca-certificates.crt \
     --provisioner google
   bridgectl client enroll \
     --target bridge-host.vpn.internal:9445 \
-    --ca ~/.ai-agent-bridge/certs/step-ca-root.crt \
-    --cert ~/.ai-agent-bridge/certs/my-name.crt \
-    --key ~/.ai-agent-bridge/certs/my-name.key
+    --ca ~/.config/bridgectl/certs/step-ca-root.crt \
+    --cert ~/.config/bridgectl/certs/my-name.crt \
+    --key ~/.config/bridgectl/certs/my-name.key
   ```
 
 ### Tier 3: Production

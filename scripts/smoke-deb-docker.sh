@@ -24,7 +24,7 @@ TMP_DIR="$(mktemp -d)"
 HEALTHCHECK_BIN="$TMP_DIR/plain-healthcheck"
 CONTAINER="deb-smoke-$SUITE-$$"
 
-: "${GOCACHE:=/tmp/ai-agent-bridge-go-build}"
+: "${GOCACHE:=/tmp/bridgectl-go-build}"
 : "${GOFLAGS:=-buildvcs=false}"
 export GOCACHE GOFLAGS
 
@@ -58,7 +58,7 @@ docker run -d \
     apt-get update -qq
     dpkg -i /tmp/$DEB_BASENAME || true
     apt-get install -f -y -qq
-    /usr/bin/bridgectl server start --config /etc/ai-agent-bridge/bridge.yaml >/tmp/bridge.log 2>&1 &
+    /usr/bin/bridgectl server start --config /etc/bridgectl/bridge.yaml >/tmp/bridge.log 2>&1 &
     bridge_pid=\$!
     for i in \$(seq 1 15); do
       if ! kill -0 \"\$bridge_pid\" 2>/dev/null; then

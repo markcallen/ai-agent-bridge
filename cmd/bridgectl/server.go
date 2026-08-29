@@ -14,8 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/markcallen/ai-agent-bridge/internal/config"
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
+	"github.com/orchael/bridgectl/internal/config"
+	"github.com/orchael/bridgectl/internal/localserver"
 )
 
 // sdNotify sends a notification to the systemd service manager via
@@ -100,7 +100,7 @@ socket with no authentication. Use --listen to bind to a TCP address
 with mTLS + JWT for remote access (e.g. over a WireGuard VPN).
 
 Tier 1 (default): PKI material (CA, server cert, JWT keypair) is
-auto-generated on first start and stored in ~/.ai-agent-bridge/certs/.
+auto-generated on first start and stored in ~/.config/bridgectl/certs/.
 
 Tier 2 (optional): Pass --step-ca-url and --step-ca-root to delegate
 certificate issuance to a Step CA instance instead of auto-generating.
@@ -165,7 +165,7 @@ infrastructure (Google, GitHub, Okta, etc.) managed through Step CA.`,
 			if localserver.DiscoverMode(localserver.StateDir()) == localserver.ModeSecure {
 				mode = fmt.Sprintf("secure (mTLS+JWT on %s)", srv.Addr())
 			}
-			fmt.Fprintf(os.Stderr, "ai-agent-bridge server listening — %s (pid %d)\n", mode, os.Getpid())
+			fmt.Fprintf(os.Stderr, "bridgectl server listening — %s (pid %d)\n", mode, os.Getpid())
 
 			// Notify systemd that the server is ready and start the watchdog
 			// heartbeat. Both are no-ops when not running under systemd.
@@ -585,7 +585,7 @@ immediate renewal (e.g. when the cert has already expired).`,
 		},
 	}
 
-	cmd.Flags().StringVar(&configPath, "config", "", "path to YAML config file (default: ~/.ai-agent-bridge/bridge.yaml)")
+	cmd.Flags().StringVar(&configPath, "config", "", "path to YAML config file (default: ~/.config/bridgectl/bridge.yaml)")
 	cmd.Flags().StringSliceVar(&serverSANs, "san", nil, "server cert SANs (overrides config file)")
 	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA URL (overrides config file)")
 	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "Step CA root cert path (overrides config file)")

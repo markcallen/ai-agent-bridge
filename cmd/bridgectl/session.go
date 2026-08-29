@@ -17,8 +17,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 func newSessionCmd() *cobra.Command {
@@ -40,9 +40,9 @@ func newSessionCmd() *cobra.Command {
 // These are the standard flags for connecting to a remote bridge server.
 func addRemoteFlags(cmd *cobra.Command, remote, cert, key, jwtKey, serverName *string) {
 	cmd.Flags().StringVar(remote, "remote", "", "remote bridge server hostname (e.g. macbook.ts.net or macbook.ts.net:9445)")
-	cmd.Flags().StringVar(cert, "cert", "", "path to client certificate (auto-discovered from ~/.ai-agent-bridge/certs/ if omitted)")
+	cmd.Flags().StringVar(cert, "cert", "", "path to client certificate (auto-discovered from ~/.config/bridgectl/certs/ if omitted)")
 	cmd.Flags().StringVar(key, "key", "", "path to client private key (derived from --cert if omitted)")
-	cmd.Flags().StringVar(jwtKey, "jwt-key", "", "path to JWT signing key (auto-discovered from ~/.ai-agent-bridge/certs/ if omitted)")
+	cmd.Flags().StringVar(jwtKey, "jwt-key", "", "path to JWT signing key (auto-discovered from ~/.config/bridgectl/certs/ if omitted)")
 	cmd.Flags().StringVar(serverName, "server-name", "", "TLS server name to verify (defaults to host from --remote)")
 }
 
@@ -66,7 +66,7 @@ func newSessionListCmd() *cobra.Command {
 				if remote != "" {
 					return err
 				}
-				fmt.Println("No ai-agent-bridge server running.")
+				fmt.Println("No bridgectl server running.")
 				return nil
 			}
 			defer func() { _ = client.Close() }()
@@ -123,7 +123,7 @@ func remoteAuthHint(err error, remote, jwtKey string) string {
 	}
 
 	return fmt.Sprintf(
-		"Found a JWT signing key in the current directory. Remote commands use JWT keys from ~/.ai-agent-bridge/certs/ or ~/.ai-agent-bridge unless --jwt-key is set. If this local key is intended, retry with:\n  bridgectl session list --remote %s --jwt-key %s",
+		"Found a JWT signing key in the current directory. Remote commands use JWT keys from ~/.config/bridgectl/certs/ or ~/.config/bridgectl unless --jwt-key is set. If this local key is intended, retry with:\n  bridgectl session list --remote %s --jwt-key %s",
 		remote,
 		localJWTKey,
 	)
@@ -369,7 +369,7 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 			_, writeErr := os.Stdout.Write(ev.Payload)
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_REPLAY_GAP:
-			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[ai-agent-bridge] replay gap: oldest=%d last=%d\r\n", ev.OldestSeq, ev.LastSeq)
+			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[bridgectl] replay gap: oldest=%d last=%d\r\n", ev.OldestSeq, ev.LastSeq)
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
 			return errors.New(ev.Error)
@@ -377,10 +377,10 @@ func attachSession(sessionID string, role bridgev1.AttachRole, takeOver bool, re
 			sessionExit = sessionExitMessage(ev)
 			return errSessionExit
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED:
-			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[ai-agent-bridge] writer claimed by %s\r\n", ev.WriterClientId)
+			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[bridgectl] writer claimed by %s\r\n", ev.WriterClientId)
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED:
-			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[ai-agent-bridge] writer released by %s\r\n", ev.WriterClientId)
+			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[bridgectl] writer released by %s\r\n", ev.WriterClientId)
 			return writeErr
 		default:
 			return nil

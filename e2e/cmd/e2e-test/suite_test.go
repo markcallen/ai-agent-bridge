@@ -16,8 +16,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 // Flag variables for the test binary.
@@ -29,7 +29,7 @@ var (
 	suiteKey     = flag.String("bridge.key", "", "client key path")
 	suiteJWTKey  = flag.String("bridge.jwt-key", "", "JWT signing key path")
 	suiteIssuer  = flag.String("bridge.jwt-issuer", "e2e", "JWT issuer")
-	suiteRepo    = flag.String("bridge.repo", "/tmp/ai-agent-bridge", "repo path")
+	suiteRepo    = flag.String("bridge.repo", "/tmp/bridgectl", "repo path")
 	suiteTimeout = flag.Duration("bridge.timeout", 15*time.Minute, "per-scenario timeout")
 )
 

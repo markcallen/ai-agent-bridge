@@ -16,10 +16,10 @@
 # working runtime at INSTALL_DIR.
 #
 # By default, INSTALL_DIR is user-owned:
-#   $XDG_DATA_HOME/ai-agent-bridge/providers
-#   or $HOME/.local/share/ai-agent-bridge/providers when XDG_DATA_HOME is unset.
+#   $XDG_DATA_HOME/bridgectl/providers
+#   or $HOME/.local/share/bridgectl/providers when XDG_DATA_HOME is unset.
 #
-# Set INSTALL_DIR=/opt/ai-agent-bridge explicitly for a root-controlled runtime.
+# Set INSTALL_DIR=/opt/bridgectl explicitly for a root-controlled runtime.
 #
 # MANIFEST_DIR and INSTALL_DIR may be overridden for testing:
 #   MANIFEST_DIR=/custom/src INSTALL_DIR=/custom/dst install-provider-runtime
@@ -31,16 +31,16 @@ say() { printf '==> %s\n' "$*"; }
 
 default_install_dir() {
   if [ -n "${XDG_DATA_HOME:-}" ]; then
-    printf '%s\n' "${XDG_DATA_HOME}/ai-agent-bridge/providers"
+    printf '%s\n' "${XDG_DATA_HOME}/bridgectl/providers"
     return
   fi
   if [ -z "${HOME:-}" ]; then
     die "HOME is required when INSTALL_DIR is not set"
   fi
-  printf '%s\n' "${HOME}/.local/share/ai-agent-bridge/providers"
+  printf '%s\n' "${HOME}/.local/share/bridgectl/providers"
 }
 
-MANIFEST_DIR="${MANIFEST_DIR:-/usr/share/ai-agent-bridge/provider-runtime}"
+MANIFEST_DIR="${MANIFEST_DIR:-/usr/share/bridgectl/provider-runtime}"
 INSTALL_DIR="${INSTALL_DIR:-$(default_install_dir)}"
 REQUIRED_NODE_MAJOR=24
 export DEBIAN_FRONTEND=noninteractive
@@ -95,7 +95,7 @@ say "Node.js $(node --version)"
 
 if [ "$VERIFY_ONLY" -eq 0 ]; then
   if [ ! -d "$MANIFEST_DIR" ]; then
-    die "runtime manifest directory not found: ${MANIFEST_DIR}; is ai-agent-bridge installed?"
+    die "runtime manifest directory not found: ${MANIFEST_DIR}; is bridgectl installed?"
   fi
 
   say "Copying runtime manifest to ${INSTALL_DIR}..."

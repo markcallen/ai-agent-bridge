@@ -17,7 +17,7 @@
 //	--model     OpenAI model for the orchestrator  (default: gpt-5.6)
 //	--timeout   total session lifetime  (default: 30m)
 //	--interval  how often to analyze output  (default: 15s)
-//	--state-dir credential directory  (default: ~/.ai-agent-bridge)
+//	--state-dir credential directory  (default: ~/.config/bridgectl)
 //
 // Environment:
 //
@@ -34,8 +34,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	"github.com/orchael/bridgectl/internal/localserver"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 func main() {
@@ -46,7 +46,7 @@ func main() {
 	model := flag.String("model", "gpt-5.6", "OpenAI model for the orchestrator analyzer")
 	timeout := flag.Duration("timeout", 30*time.Minute, "total session lifetime")
 	interval := flag.Duration("interval", 15*time.Second, "how often the orchestrator analyzes buffered output")
-	stateDir := flag.String("state-dir", "", "credential directory (default: ~/.ai-agent-bridge)")
+	stateDir := flag.String("state-dir", "", "credential directory (default: ~/.config/bridgectl)")
 	logFile := flag.String("log", "", "path to write LLM conversation log (default: orchestrator-<timestamp>.log)")
 	flag.Parse()
 

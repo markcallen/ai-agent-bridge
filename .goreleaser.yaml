@@ -1,10 +1,10 @@
 version: 2
 
-project_name: ai-agent-bridge
+project_name: bridgectl
 
 builds:
   - id: bridge-ca
-    binary: ai-agent-bridge-ca
+    binary: bridge-ca
     main: ./cmd/bridge-ca
     env:
       - CGO_ENABLED=0
@@ -36,8 +36,8 @@ dockers:
     goos: linux
     goarch: amd64
     image_templates:
-      - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-amd64"
-      - "ghcr.io/markcallen/ai-agent-bridge:latest-amd64"
+      - "ghcr.io/orchael/bridgectl:{{ .Tag }}-amd64"
+      - "ghcr.io/orchael/bridgectl:latest-amd64"
     dockerfile: Dockerfile
     use: buildx
     extra_files:
@@ -55,8 +55,8 @@ dockers:
     goos: linux
     goarch: arm64
     image_templates:
-      - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-arm64"
-      - "ghcr.io/markcallen/ai-agent-bridge:latest-arm64"
+      - "ghcr.io/orchael/bridgectl:{{ .Tag }}-arm64"
+      - "ghcr.io/orchael/bridgectl:latest-arm64"
     dockerfile: Dockerfile
     use: buildx
     extra_files:
@@ -71,15 +71,15 @@ dockers:
       - "--label=org.opencontainers.image.version={{.Version}}"
 
 docker_manifests:
-  - name_template: "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}"
+  - name_template: "ghcr.io/orchael/bridgectl:{{ .Tag }}"
     image_templates:
-      - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-amd64"
-      - "ghcr.io/markcallen/ai-agent-bridge:{{ .Tag }}-arm64"
+      - "ghcr.io/orchael/bridgectl:{{ .Tag }}-amd64"
+      - "ghcr.io/orchael/bridgectl:{{ .Tag }}-arm64"
 
-  - name_template: "ghcr.io/markcallen/ai-agent-bridge:latest"
+  - name_template: "ghcr.io/orchael/bridgectl:latest"
     image_templates:
-      - "ghcr.io/markcallen/ai-agent-bridge:latest-amd64"
-      - "ghcr.io/markcallen/ai-agent-bridge:latest-arm64"
+      - "ghcr.io/orchael/bridgectl:latest-amd64"
+      - "ghcr.io/orchael/bridgectl:latest-arm64"
 
 changelog:
   sort: asc

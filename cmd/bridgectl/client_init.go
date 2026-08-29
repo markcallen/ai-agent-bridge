@@ -15,7 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
+	"github.com/orchael/bridgectl/internal/localserver"
 )
 
 func newClientInitCmd() *cobra.Command {

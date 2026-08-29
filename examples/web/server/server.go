@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/internal/localserver"
 )
 
 type server struct {

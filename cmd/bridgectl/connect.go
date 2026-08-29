@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	"github.com/orchael/bridgectl/internal/localserver"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 const defaultRemotePort = "9445"
@@ -33,14 +33,14 @@ func connectClient(stateDir string, timeout time.Duration) (*bridgeclient.Client
 
 	target, mode := localserver.DiscoverTarget(stateDir)
 	if target == "" {
-		return nil, fmt.Errorf("no ai-agent-bridge server running")
+		return nil, fmt.Errorf("no bridgectl server running")
 	}
 
 	return dialClient(target, mode, stateDir, timeout)
 }
 
 // resolveRemoteCredentials discovers mTLS+JWT credentials for a remote
-// connection from ~/.ai-agent-bridge/certs/. Explicit overrides take
+// connection from ~/.config/bridgectl/certs/. Explicit overrides take
 // precedence over auto-discovery.
 //
 // Discovery rules:
@@ -205,7 +205,7 @@ func findJWTKey(certsDir, stateDir string) string {
 }
 
 // connectRemoteClient connects to a remote bridge server using auto-discovered
-// credentials from ~/.ai-agent-bridge/certs/. Explicit overrides take
+// credentials from ~/.config/bridgectl/certs/. Explicit overrides take
 // precedence over auto-discovery.
 //
 // hostname may include a port (e.g. "macbook.ts.net:9445"); if no port is

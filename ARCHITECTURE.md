@@ -233,7 +233,7 @@ React App (Browser)
     ↕ WebSocket (JSON protocol)
 Next.js / Go HTTP server   ← bridge-client-node or go-websocket-integration
     ↕ gRPC
-ai-agent-bridge daemon
+bridgectl daemon
 ```
 
 **`BridgeGrpcClient`** — Node.js gRPC client using `@grpc/grpc-js`. Loads the proto file dynamically at runtime. Exposes the same operations as the Go SDK with an async generator for `streamEvents`.
@@ -279,30 +279,30 @@ Each consumer project runs its own CA. The bridge cross-signs consumer CAs to bu
 
 ```bash
 # 1. Each project initializes its own CA
-ai-agent-bridge-ca init --name my-app --out my-app/certs/
-ai-agent-bridge-ca init --name ai-agent-bridge --out bridge/certs/
+bridge-ca init --name my-app --out my-app/certs/
+bridge-ca init --name bridgectl --out bridge/certs/
 
 # 2. Bridge cross-signs consumer CAs
-ai-agent-bridge-ca cross-sign \
+bridge-ca cross-sign \
   --signer-ca bridge/certs/ca.crt --signer-key bridge/certs/ca.key \
   --target-ca my-app/certs/ca.crt \
   --out bridge/certs/my-app-cross.crt
 
 # 3. Build trust bundle
-ai-agent-bridge-ca bundle --out bridge/certs/ca-bundle.crt \
+bridge-ca bundle --out bridge/certs/ca-bundle.crt \
   bridge/certs/ca.crt \
   bridge/certs/my-app-cross.crt
 
 # 4. Issue certs
-ai-agent-bridge-ca issue --type server --cn bridge.local --san "bridge.local,127.0.0.1" \
+bridge-ca issue --type server --cn bridge.local --san "bridge.local,127.0.0.1" \
   --ca bridge/certs/ca.crt --ca-key bridge/certs/ca.key --out bridge/certs/
 
-ai-agent-bridge-ca issue --type client --cn my-app \
+bridge-ca issue --type client --cn my-app \
   --ca my-app/certs/ca.crt --ca-key my-app/certs/ca.key \
   --out my-app/certs/
 
 # 5. Generate JWT keys
-ai-agent-bridge-ca jwt-keygen --out my-app/certs/jwt-signing
+bridge-ca jwt-keygen --out my-app/certs/jwt-signing
 ```
 
 ## Data Flow
@@ -488,7 +488,7 @@ client.StopSession(ctx, &bridgev1.StopSessionRequest{
 ## Directory Structure
 
 ```
-ai-agent-bridge/
+bridgectl/
 ├── cmd/
 │   ├── bridge/           # Daemon entry point
 │   └── bridge-ca/        # CA management CLI

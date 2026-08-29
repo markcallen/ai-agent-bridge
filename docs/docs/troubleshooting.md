@@ -7,7 +7,7 @@ title: Troubleshooting
 Error:
 
 ```text
-no ai-agent-bridge server running
+no bridgectl server running
 ```
 
 Start the server in another terminal:
@@ -37,9 +37,9 @@ If you already have a client certificate:
 ```bash
 bin/bridgectl client enroll \
   --target bridge-host.tailnet-name.ts.net:9445 \
-  --ca ~/.ai-agent-bridge/certs/step-ca-root.crt \
-  --cert ~/.ai-agent-bridge/certs/<name>.crt \
-  --key ~/.ai-agent-bridge/certs/<name>.key
+  --ca ~/.config/bridgectl/certs/step-ca-root.crt \
+  --cert ~/.config/bridgectl/certs/<name>.crt \
+  --key ~/.config/bridgectl/certs/<name>.key
 ```
 
 ## TLS Server Name Fails

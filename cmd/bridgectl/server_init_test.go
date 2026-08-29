@@ -20,8 +20,8 @@ import (
 
 	"log/slog"
 
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
+	"github.com/orchael/bridgectl/internal/localserver"
+	"github.com/orchael/bridgectl/internal/pki"
 )
 
 // selfSignedCA generates a self-signed CA cert and returns (certPEM, key).
@@ -175,7 +175,7 @@ func TestDefaultServerConfigPathFallsBackToXDGConfig(t *testing.T) {
 
 func TestServerRenewCertRejectsPartialExplicitTLSConfig(t *testing.T) {
 	stateDir := t.TempDir()
-	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", stateDir)
+	t.Setenv("BRIDGECTL_STATE_DIR", stateDir)
 
 	configPath := filepath.Join(t.TempDir(), "bridge.yaml")
 	if err := os.WriteFile(configPath, []byte(`
@@ -201,7 +201,7 @@ tls:
 
 func TestServerRenewCertMergesConfigSANsWithListenAddr(t *testing.T) {
 	stateDir := t.TempDir()
-	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", stateDir)
+	t.Setenv("BRIDGECTL_STATE_DIR", stateDir)
 
 	// Bootstrap auto-PKI so renew-cert has a CA and server cert to work with.
 	logger := slog.Default()

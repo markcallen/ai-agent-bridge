@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
+	"github.com/orchael/bridgectl/internal/pki"
 )
 
 var version = "dev"
@@ -36,7 +36,7 @@ func main() {
 	case "help", "--help", "-h":
 		usage()
 	case "--version", "-version":
-		fmt.Printf("ai-agent-bridge-ca %s\n", version)
+		fmt.Printf("bridge-ca %s\n", version)
 		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
@@ -46,7 +46,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `ai-agent-bridge-ca - Certificate Authority management for ai-agent-bridge
+	fmt.Fprintf(os.Stderr, `bridge-ca - Certificate Authority management for bridgectl
 
 Commands:
   init         Initialize a new CA
@@ -59,7 +59,7 @@ Commands:
 Flags:
   --version    Print version and exit
 
-Run 'ai-agent-bridge-ca <command> --help' for details.
+Run 'bridge-ca <command> --help' for details.
 `)
 }
 
@@ -181,7 +181,7 @@ func cmdBundle() {
 	args := fs.Args()
 	if *out == "" || len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "error: --out and at least one cert path are required")
-		fmt.Fprintln(os.Stderr, "usage: ai-agent-bridge-ca bundle --out bundle.crt cert1.crt cert2.crt ...")
+		fmt.Fprintln(os.Stderr, "usage: bridge-ca bundle --out bundle.crt cert1.crt cert2.crt ...")
 		os.Exit(1)
 	}
 

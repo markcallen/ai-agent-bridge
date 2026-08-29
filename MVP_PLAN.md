@@ -8,7 +8,7 @@ For remaining and future work, see [PLAN.md](PLAN.md).
 ## Project Structure (as built)
 
 ```
-ai-agent-bridge/
+bridgectl/
 ├── cmd/
 │   ├── bridge/                  # Bridge daemon binary
 │   │   └── main.go
@@ -110,7 +110,7 @@ ai-agent-bridge/
 **Goal**: Buildable bridge daemon with a single provider, gRPC API, and basic auth.
 
 ### 1.1 Project Scaffolding
-- [x] Initialize Go module (`github.com/markcallen/ai-agent-bridge`)
+- [x] Initialize Go module (`github.com/orchael/bridgectl`)
 - [x] Set up `.gitignore` (certs/, gen/, vendor/)
 - [x] Create directory structure
 - [x] Add Makefile with targets: `build`, `proto`, `test`, `lint`, `certs`, `dev-setup`, `test-e2e`
@@ -141,7 +141,7 @@ ai-agent-bridge/
   - Minimum TLS 1.3
 - [x] `internal/auth/jwt.go` - Ed25519 JWT signing and verification
   - `JWTVerifier` - verifies tokens with multiple public keys (one per issuer)
-  - `JWTIssuer` - mints tokens (used by SDK and ai-agent-bridge-ca)
+  - `JWTIssuer` - mints tokens (used by SDK and bridge-ca)
   - Claims: `sub`, `project_id`, `aud`, `iat`, `exp`
   - Max TTL enforcement (reject tokens with TTL > configured max)
 - [x] `internal/auth/interceptors.go` - gRPC interceptors for JWT extraction and verification
@@ -245,7 +245,7 @@ ai-agent-bridge/
   - Start gRPC server with mTLS + JWT interceptors
   - Graceful shutdown on SIGINT/SIGTERM
   - Health/ready logging on startup
-- [x] `scripts/dev_certs.sh` - Generate dev certs using `ai-agent-bridge-ca`
+- [x] `scripts/dev_certs.sh` - Generate dev certs using `bridge-ca`
 
 ---
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 // buildRemoteClient connects to a remote bridge server using mTLS + JWT

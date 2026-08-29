@@ -22,8 +22,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/internal/localserver"
 )
 
 // detachKey is ctrl-] (0x1d), used to detach from a session without stopping it.
@@ -210,7 +210,7 @@ func runSession(dir, providerName, project string, timeout time.Duration) error 
 			_, writeErr := os.Stdout.Write(ev.Payload)
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_REPLAY_GAP:
-			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[ai-agent-bridge] replay gap: oldest=%d last=%d\r\n", ev.OldestSeq, ev.LastSeq)
+			_, writeErr := fmt.Fprintf(os.Stderr, "\r\n[bridgectl] replay gap: oldest=%d last=%d\r\n", ev.OldestSeq, ev.LastSeq)
 			return writeErr
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ERROR:
 			if err := codexAuthExpiredError(providerName, ev.Error); err != nil {
@@ -287,7 +287,7 @@ func secureServerDiscoveryError() error {
 	if addr == "" {
 		return nil
 	}
-	return fmt.Errorf("secure ai-agent-bridge server is recorded at %s, but the health probe failed; check the user service and credentials under %s/certs", addr, stateDir)
+	return fmt.Errorf("secure bridgectl server is recorded at %s, but the health probe failed; check the user service and credentials under %s/certs", addr, stateDir)
 }
 
 // runSessionNoTTY runs a session without a terminal, forwarding raw stdin to

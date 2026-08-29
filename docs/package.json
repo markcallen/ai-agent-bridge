@@ -1,5 +1,5 @@
 {
-  "name": "ai-agent-bridge-docs",
+  "name": "bridgectl-docs",
   "private": true,
   "version": "0.0.0",
   "packageManager": "pnpm@11.22.0",

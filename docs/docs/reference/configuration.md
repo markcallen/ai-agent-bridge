@@ -5,7 +5,7 @@ title: Configuration Reference
 `bridgectl server start` can load YAML from:
 
 1. `--config <path>`
-2. `~/.ai-agent-bridge/bridge.yaml`
+2. `~/.config/bridgectl/bridge.yaml`
 3. `$XDG_CONFIG_HOME/bridgectl/config.yaml`
 4. The platform user config directory
 
@@ -38,9 +38,9 @@ server:
 
 step_ca:
   url: "https://ca-host.tailnet-name.ts.net:9443"
-  root: "/home/me/.ai-agent-bridge/certs/step-ca-root.crt"
+  root: "/home/me/.config/bridgectl/certs/step-ca-root.crt"
   provisioner: "bridge-jwk"
-  provisioner_password_file: "/home/me/.ai-agent-bridge/step-ca-password"
+  provisioner_password_file: "/home/me/.config/bridgectl/step-ca-password"
 
 allowed_paths:
   - "/home/me/repos"
@@ -83,7 +83,7 @@ If `claude` is unavailable, the server can select `codex` for the session.
 Use `--db-path` to persist session metadata and PTY chunks:
 
 ```bash
-bin/bridgectl server start --db-path ~/.ai-agent-bridge/sessions.db
+bin/bridgectl server start --db-path ~/.config/bridgectl/sessions.db
 ```
 
 On restart, terminal session history can be replayed as terminal history.

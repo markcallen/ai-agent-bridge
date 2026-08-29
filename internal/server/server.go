@@ -9,9 +9,9 @@ import (
 	"os"
 	"time"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/internal/auth"
-	"github.com/markcallen/ai-agent-bridge/internal/bridge"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/internal/auth"
+	"github.com/orchael/bridgectl/internal/bridge"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"

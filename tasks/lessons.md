@@ -26,11 +26,11 @@
 - Root cause pattern: Docker entrypoint-generated filenames are part of the config contract; changing the default config without checking generated certificate names creates a startup-only failure.
 - Early signal missed: Compose overrides had been setting `BRIDGE_CN=bridge.local`, masking the mismatch in normal compose-based development.
 - Preventative rule: When changing default container config or certificate CN defaults, run a no-args detached image startup smoke and verify the container stays running.
-- Validation added (test/check/alert): `docker run -d --name issue180-default ai-agent-bridge:issue-180` stayed running after aligning `BRIDGE_CN`, `BRIDGE_CLIENT_CN`, and SAN defaults with `bridge-docker.yaml`.
+- Validation added (test/check/alert): `docker run -d --name issue180-default bridgectl:issue-180` stayed running after aligning `BRIDGE_CN`, `BRIDGE_CLIENT_CN`, and SAN defaults with `bridge-docker.yaml`.
 
 ## 2026-08-16 Live Provider TUI E2E Input
 - Incident/bug: The first unprotected-mode e2e harness treated echoed prompt text as completion and sent Claude's prompt plus Enter in one PTY write, leaving Claude's TUI composer unsubmitted.
 - Root cause pattern: Interactive provider CLIs echo prompts and can treat pasted text differently from a separate submit key, so transcript literals alone are not a reliable proof of action.
 - Early signal missed: Codex and Claude transcripts showed the prompt in the composer with zero tokens, but the test advanced because the completion marker was present in the echoed prompt.
 - Preventative rule: For live provider e2e tests, prove behavior through external state first, then use transcript markers only as secondary evidence; send provider-specific submit keys as separate PTY writes when needed.
-- Validation added (test/check/alert): `env-secrets aws -s /ai-agent-bridge/e2e -- make test-e2e-unprotected` passed with protected and unprotected Codex/Claude `.git` marker checks.
+- Validation added (test/check/alert): `env-secrets aws -s /bridgectl/e2e -- make test-e2e-unprotected` passed with protected and unprotected Codex/Claude `.git` marker checks.

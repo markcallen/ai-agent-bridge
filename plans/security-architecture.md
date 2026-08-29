@@ -151,7 +151,7 @@ Tier 1: Auto-Generated PKI (default)
 
 On first `bridgectl server start --listen`, the server generates:
 
-    ~/.ai-agent-bridge/certs/
+    ~/.config/bridgectl/certs/
     ├── ca.crt              ECDSA P-384 root CA (10-year validity)
     ├── ca.key              CA private key (mode 0600)
     ├── server.crt          Server certificate (90-day validity)
@@ -203,7 +203,7 @@ Mode 1: Local (unix socket, no auth)
 
 Default when `--listen` is not set.
 
-The server listens on `~/.ai-agent-bridge/server.sock`. Only processes running
+The server listens on `~/.config/bridgectl/server.sock`. Only processes running
 as the same user on the same machine can reach it (filesystem permissions).
 No TLS, no JWT. The gRPC passthrough interceptor injects anonymous claims so
 RPCs function.
@@ -304,7 +304,7 @@ The human copies the four files to their machine and runs:
     bridgectl session attach --take-over <session-id>
 
 bridgectl uses the pre-issued cert and JWT key automatically when connecting
-to a secure-mode server (it reads `~/.ai-agent-bridge/certs/` on the local
+to a secure-mode server (it reads `~/.config/bridgectl/certs/` on the local
 machine, which the human populated with the issued files).
 
 Flow (Tier 2 — Step CA + OIDC)
@@ -447,7 +447,7 @@ If Step CA is temporarily unavailable:
 Revocation
 
 Tier 1: revoke a client by deleting its JWT public key from
-`~/.ai-agent-bridge/certs/jwt-clients/<name>.pub` and restarting the server.
+`~/.config/bridgectl/certs/jwt-clients/<name>.pub` and restarting the server.
 The removed key is no longer loaded; subsequent tokens from that client are
 rejected.
 
@@ -470,7 +470,7 @@ Private keys MUST NEVER be:
 * Stored in source code
 * Shared between machines
 
-All keys are generated in ~/.ai-agent-bridge/certs/ with mode 0600.
+All keys are generated in ~/.config/bridgectl/certs/ with mode 0600.
 
 The server checks key permissions at startup and logs a warning if permissions
 are too permissive. (Enforcement of chmod is the operator's responsibility.)

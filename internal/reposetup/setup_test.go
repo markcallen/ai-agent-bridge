@@ -262,7 +262,7 @@ setup:
 
 func writeSetup(t *testing.T, repo, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(repo, ".ai-agent-bridge.yaml"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".bridgectl.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 }
