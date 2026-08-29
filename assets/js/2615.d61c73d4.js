@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkbridgectl_docs=self.webpackChunkbridgectl_docs||[]).push([[2615],{2615(e,c,s){s.d(c,{createWardleyServices:()=>r.J});var r=s(1072);s(9697)}}]);

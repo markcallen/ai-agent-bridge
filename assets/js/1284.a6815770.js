@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkbridgectl_docs=self.webpackChunkbridgectl_docs||[]).push([[1284],{1284(e,c,s){s.d(c,{createInfoServices:()=>r.v});var r=s(7565);s(9697)}}]);
