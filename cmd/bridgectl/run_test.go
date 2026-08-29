@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
+	"github.com/orchael/bridgectl/internal/localserver"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -93,7 +93,7 @@ func TestCodexAuthExpiredErrorNonCodex(t *testing.T) {
 
 func TestSecureServerDiscoveryError(t *testing.T) {
 	stateDir := t.TempDir()
-	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", stateDir)
+	t.Setenv("BRIDGECTL_STATE_DIR", stateDir)
 	if err := os.WriteFile(filepath.Join(stateDir, "server.mode"), []byte(string(localserver.ModeSecure)+"\n"), 0o644); err != nil {
 		t.Fatalf("write server.mode: %v", err)
 	}

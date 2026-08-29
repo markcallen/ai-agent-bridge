@@ -7,8 +7,8 @@ set -euo pipefail
 # container using the auto-generated certs.
 #
 # Example:
-#   ./scripts/smoke-container.sh ghcr.io/markcallen/ai-agent-bridge:v1.2.3
-#   ./scripts/smoke-container.sh ghcr.io/markcallen/ai-agent-bridge@sha256:abc123
+#   ./scripts/smoke-container.sh ghcr.io/orchael/bridgectl:v1.2.3
+#   ./scripts/smoke-container.sh ghcr.io/orchael/bridgectl@sha256:abc123
 
 IMAGE="${1:-}"
 
@@ -22,7 +22,7 @@ TMP_DIR="$(mktemp -d)"
 HEALTHCHECK_BIN="$TMP_DIR/plain-healthcheck"
 CONTAINER="container-smoke-$$"
 
-: "${GOCACHE:=/tmp/ai-agent-bridge-go-build}"
+: "${GOCACHE:=/tmp/bridgectl-go-build}"
 : "${GOFLAGS:=-buildvcs=false}"
 export GOCACHE GOFLAGS
 

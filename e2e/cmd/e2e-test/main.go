@@ -14,8 +14,8 @@ import (
 
 	"github.com/google/uuid"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 type providerScenario struct {
@@ -78,7 +78,7 @@ func main() {
 	key := flag.String("key", "", "client key path")
 	jwtKey := flag.String("jwt-key", "", "JWT signing key path")
 	jwtIssuer := flag.String("jwt-issuer", "e2e", "JWT issuer")
-	repo := flag.String("repo", "/tmp/ai-agent-bridge", "repo path")
+	repo := flag.String("repo", "/tmp/bridgectl", "repo path")
 	timeout := flag.Duration("timeout", 15*time.Minute, "overall timeout")
 	only := flag.String("only", "all", "test subset: all, claude, opencode, codex")
 	flag.Parse()

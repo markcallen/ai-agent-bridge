@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # In Step CA mode, EnsurePKI generates the ca-bundle.crt, server cert, and
-# local-client cert in the bridge's state dir (~/.ai-agent-bridge/certs/).
+# local-client cert in the bridge's state dir (~/.config/bridgectl/certs/).
 # The bridge-state Docker volume is shared at /bridge-state in this container.
 BRIDGE_CERTS_DIR=/bridge-state/certs
 

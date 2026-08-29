@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

@@ -43,7 +43,7 @@ The bridge replaces direct in-process agent management with a networked, provide
 - Support both local and remote agent communication from day one.
 - Ship a Go SDK (`bridgeclient`) for integration by consumer projects.
 - Provide durable per-session pub/sub replay so SDK clients can reconnect and receive events they missed while disconnected (while bridge process is alive).
-- Provide a CLI tool for CA/cert management (`ai-agent-bridge-ca`).
+- Provide a CLI tool for CA/cert management (`bridge-ca`).
 - Enable AI agents to build web and mobile applications by running sessions inside the user's login environment with access to display servers, emulators, and user credentials.
 - Support concurrent human observation of and interjection into active agent sessions without stopping the agent.
 
@@ -126,7 +126,7 @@ The bridge runs as the login user inside an interactive or graphical session. Th
 | Process context | Login session of the operating user |
 | Windowing access | Full — inherits `$DISPLAY`, `$WAYLAND_DISPLAY`, `$XDG_RUNTIME_DIR` |
 | Credential source | Inherits the user's shell environment and native CLI auth |
-| Local access | Unix socket at `~/.ai-agent-bridge/server.sock`, no auth |
+| Local access | Unix socket at `~/.config/bridgectl/server.sock`, no auth |
 | Remote access | TCP with auto-generated mTLS + JWT (`--listen <addr>`) |
 | Startup | Systemd user service (Linux) or LaunchAgent (macOS) |
 | Persistence | Optional BoltDB session store (`--db-path`) |
@@ -134,12 +134,12 @@ The bridge runs as the login user inside an interactive or graphical session. Th
 
 **Why the login session is required**: AI agent CLIs (claude, codex, opencode, gemini) are user-space programs that need access to home directories, auth tokens, and on graphically-capable machines, running display servers and device emulators. A system daemon running as a service account cannot provide this without recreating the user's environment, which reintroduces all the trust problems mTLS is designed to eliminate.
 
-**Remote access model**: when `--listen` is set, the server binds to the specified TCP address and generates PKI material in `~/.ai-agent-bridge/certs/` on first start. SDK clients authenticate with mTLS + JWT. Human operators authenticate using OIDC via `bridgectl server issue-client --oidc` (see Security Architecture). The server must be reachable via WireGuard or Tailscale; it must not be exposed to the public internet.
+**Remote access model**: when `--listen` is set, the server binds to the specified TCP address and generates PKI material in `~/.config/bridgectl/certs/` on first start. SDK clients authenticate with mTLS + JWT. Human operators authenticate using OIDC via `bridgectl server issue-client --oidc` (see Security Architecture). The server must be reachable via WireGuard or Tailscale; it must not be exposed to the public internet.
 
 Remote operator CLI acceptance criteria:
 - `bridgectl session` remote subcommands allow operators to override the TLS server name when a bridge server certificate is issued for a DNS name that differs from the dial address.
 - Remote credential discovery prefers the current host's client certificate before falling back to other client certificates in the cert directory.
-- `bridgectl server start` auto-loads the first available per-user config from `~/.ai-agent-bridge/bridge.yaml` or `$XDG_CONFIG_HOME/bridgectl/config.yaml` when `--config` is omitted, so local and remote operator commands target the same configured daemon.
+- `bridgectl server start` auto-loads the first available per-user config from `~/.config/bridgectl/bridge.yaml` or `$XDG_CONFIG_HOME/bridgectl/config.yaml` when `--config` is omitted, so local and remote operator commands target the same configured daemon.
 - Same-machine `bridgectl` commands discover an already-running secure TCP server from local state without requiring remote host, certificate, key, or JWT flags; wildcard bind addresses are recorded as loopback dial targets for local clients.
 - `bridgectl session list --remote` surfaces an actionable retry hint when JWT authentication fails and a `jwt-signing.key` in the current directory may be the intended credential.
 - `bridgectl client renew` handles Step CA deployments where the HTTPS serving certificate chain differs from the Step CA root used for bridge certificate issuance, while rejecting expired client certificates before attempting renewal.
@@ -189,7 +189,7 @@ Writer transition protocol:
 
 ### 7.1 Trust Architecture
 
-Each project (prd-manager, ndara-orchestrator, ai-agent-bridge) operates its own Certificate Authority. Trust between projects is established through cross-signing.
+Each project (prd-manager, ndara-orchestrator, bridgectl) operates its own Certificate Authority. Trust between projects is established through cross-signing.
 
 ```
 Project A CA                    Project B CA
@@ -204,7 +204,7 @@ Project A CA                    Project B CA
 ### 7.2 Certificate Hierarchy
 
 ```
-ai-agent-bridge-ca (root)
+bridge-ca (root)
 ├── Bridge Server Certificate
 │   └── SAN: bridge host FQDN/IP
 ├── Bridge Client Certificates (one per consumer)
@@ -243,7 +243,7 @@ ai-agent-bridge-ca (root)
 - Ed25519 keypairs for JWT signing (one per consumer project).
 - RSA 4096 or ECDSA P-384 for TLS certificates.
 - CA keys stored encrypted at rest (passphrase-protected PEM).
-- Certificate rotation: certs expire after 90 days; automated renewal via `ai-agent-bridge-ca renew`.
+- Certificate rotation: certs expire after 90 days; automated renewal via `bridge-ca renew`.
 - Revocation: CRL distribution point served by bridge daemon.
 
 #### Startup Client Registry
@@ -276,20 +276,20 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
 
 ### Packaging Scope
 
-- Ship a Debian package named `ai-agent-bridge`.
+- Ship a Debian package named `bridgectl`.
 - Initial supported targets:
   - Ubuntu `24.04` (`noble`) on `amd64`
   - Ubuntu `25.04` (`plucky`) on `amd64`
 - Install package contents to conventional system locations:
-  - `bridgectl` and `ai-agent-bridge-ca` binaries in `/usr/bin`
-  - default config in `/etc/ai-agent-bridge/bridge.yaml`
+  - `bridgectl` and `bridge-ca` binaries in `/usr/bin`
+  - default config in `/etc/bridgectl/bridge.yaml`
   - systemd user unit in `/usr/lib/systemd/user/bridge.service`
 - Post-install script prints instructions for `systemctl --user enable --now bridge`.
 - No system user or group is created; the bridge runs as the login user.
 - Provide a default packaged config that allows the server to start on a fresh host without bundled provider CLIs or API keys.
 - Provider CLIs and their API credentials remain operator-managed prerequisites and must be documented separately from the package install flow.
-- Provider CLIs that are expected to use native self-updaters must be installed into a user-owned runtime directory. The packaged helper defaults to `$XDG_DATA_HOME/ai-agent-bridge/providers`, or `$HOME/.local/share/ai-agent-bridge/providers` when `XDG_DATA_HOME` is unset.
-- `/opt/ai-agent-bridge` is reserved for explicit root-controlled provider runtimes. Native provider self-updaters must not target this directory unless they run through a controlled privileged updater.
+- Provider CLIs that are expected to use native self-updaters must be installed into a user-owned runtime directory. The packaged helper defaults to `$XDG_DATA_HOME/bridgectl/providers`, or `$HOME/.local/share/bridgectl/providers` when `XDG_DATA_HOME` is unset.
+- `/opt/bridgectl` is reserved for explicit root-controlled provider runtimes. Native provider self-updaters must not target this directory unless they run through a controlled privileged updater.
 - `runtime.provider_root` accepts absolute paths after environment expansion for `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, and `${XDG_DATA_HOME}` so per-user provider roots can be documented without hard-coding a login name.
 
 ### Publishing and Hosting
@@ -305,15 +305,15 @@ The bridge must be installable on supported Ubuntu hosts through a signed apt re
   - installs the repository signing key into `/etc/apt/keyrings`
   - writes the apt source list entry
   - runs `apt-get update`
-  - installs `ai-agent-bridge`
+  - installs `bridgectl`
 - Installation documentation must include both the helper-script path and the equivalent manual apt commands.
 
 ### Acceptance Criteria
 
 - A release tag builds a signed `.deb` for each supported Ubuntu target.
 - The published apt repository is consumable with standard `apt` commands on supported Ubuntu releases.
-- A clean Ubuntu host can install `ai-agent-bridge`, start the systemd service, and pass a basic daemon health check.
-- A clean Ubuntu container can run the packaged provider runtime installer as a non-root login user and install provider CLIs into the user-owned runtime directory without mutating `/opt/ai-agent-bridge`.
+- A clean Ubuntu host can install `bridgectl`, start the systemd service, and pass a basic daemon health check.
+- A clean Ubuntu container can run the packaged provider runtime installer as a non-root login user and install provider CLIs into the user-owned runtime directory without mutating `/opt/bridgectl`.
 - The release workflow includes smoke coverage that validates apt installation in containers and on an EC2 host.
 - `README.md` and `docs/` describe package installation, runtime prerequisites, and service behavior accurately.
 
@@ -683,46 +683,46 @@ for {
 
 ---
 
-## 12. CLI Tool: `ai-agent-bridge-ca`
+## 12. CLI Tool: `bridge-ca`
 
 ### 12.1 Commands
 
 ```bash
 # Initialize a new CA for this project
-ai-agent-bridge-ca init --name "ai-agent-bridge" --out certs/
+bridge-ca init --name "bridgectl" --out certs/
 
 # Generate server certificate for the bridge daemon
-ai-agent-bridge-ca issue --type server --cn "bridge.example.com" \
+bridge-ca issue --type server --cn "bridge.example.com" \
     --san "bridge.example.com,192.168.1.10" \
     --ca certs/ca.crt --ca-key certs/ca.key \
     --out certs/bridge
 
 # Generate client certificate for a consumer project
-ai-agent-bridge-ca issue --type client --cn "prd-manager" \
+bridge-ca issue --type client --cn "prd-manager" \
     --ca certs/ca.crt --ca-key certs/ca.key \
     --out certs/prd-manager-client
 
 # Cross-sign another project's CA
-ai-agent-bridge-ca cross-sign \
+bridge-ca cross-sign \
     --signer-ca certs/ca.crt --signer-key certs/ca.key \
     --target-ca ../prd-manager-control-plane/certs/ca.crt \
     --out certs/prd-manager-ca-cross-signed.crt
 
 # Build a trust bundle (own CA + all cross-signed CAs)
-ai-agent-bridge-ca bundle \
+bridge-ca bundle \
     --ca certs/ca.crt \
     --cross-signed certs/prd-manager-ca-cross-signed.crt \
     --cross-signed certs/ndara-ca-cross-signed.crt \
     --out certs/ca-bundle.crt
 
 # Generate Ed25519 keypair for JWT signing
-ai-agent-bridge-ca jwt-keygen --out certs/jwt-signing
+bridge-ca jwt-keygen --out certs/jwt-signing
 
 # Renew expiring certificates
-ai-agent-bridge-ca renew --cert certs/bridge.crt --ca certs/ca.crt --ca-key certs/ca.key
+bridge-ca renew --cert certs/bridge.crt --ca certs/ca.crt --ca-key certs/ca.key
 
 # Verify a certificate chain
-ai-agent-bridge-ca verify --cert certs/bridge.crt --bundle certs/ca-bundle.crt
+bridge-ca verify --cert certs/bridge.crt --bundle certs/ca-bundle.crt
 ```
 
 ---

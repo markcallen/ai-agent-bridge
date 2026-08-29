@@ -35,7 +35,7 @@ func TestRequiresNodeRuntime(t *testing.T) {
 			name: "absolute node path with js arg",
 			cfg: &Config{
 				Providers: map[string]ProviderConfig{
-					"gemini": {Binary: "/usr/bin/node", Args: []string{"/opt/ai-agent-bridge/node_modules/@google/gemini-cli/dist/index.js"}},
+					"gemini": {Binary: "/usr/bin/node", Args: []string{"/opt/bridgectl/node_modules/@google/gemini-cli/dist/index.js"}},
 				},
 			},
 			want: true,
@@ -53,7 +53,7 @@ func TestRequiresNodeRuntime(t *testing.T) {
 			name: "native cli via bin shim",
 			cfg: &Config{
 				Providers: map[string]ProviderConfig{
-					"opencode": {Binary: "/opt/ai-agent-bridge/node_modules/.bin/opencode"},
+					"opencode": {Binary: "/opt/bridgectl/node_modules/.bin/opencode"},
 				},
 			},
 			want: false,

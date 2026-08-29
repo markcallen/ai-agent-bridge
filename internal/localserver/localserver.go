@@ -20,32 +20,32 @@ import (
 	"sync"
 	"time"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/internal/auth"
-	"github.com/markcallen/ai-agent-bridge/internal/bridge"
-	"github.com/markcallen/ai-agent-bridge/internal/config"
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
-	"github.com/markcallen/ai-agent-bridge/internal/provider"
-	"github.com/markcallen/ai-agent-bridge/internal/redact"
-	"github.com/markcallen/ai-agent-bridge/internal/reposetup"
-	"github.com/markcallen/ai-agent-bridge/internal/server"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/internal/auth"
+	"github.com/orchael/bridgectl/internal/bridge"
+	"github.com/orchael/bridgectl/internal/config"
+	"github.com/orchael/bridgectl/internal/pki"
+	"github.com/orchael/bridgectl/internal/provider"
+	"github.com/orchael/bridgectl/internal/redact"
+	"github.com/orchael/bridgectl/internal/reposetup"
+	"github.com/orchael/bridgectl/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// StateDir returns the ai-agent-bridge state directory. It respects the
-// AI_AGENT_BRIDGE_STATE_DIR environment variable for testing; otherwise
-// defaults to ~/.ai-agent-bridge.
+// StateDir returns the bridgectl state directory. It respects the
+// BRIDGECTL_STATE_DIR environment variable for testing; otherwise
+// defaults to ~/.config/bridgectl.
 func StateDir() string {
-	if dir := os.Getenv("AI_AGENT_BRIDGE_STATE_DIR"); dir != "" {
+	if dir := os.Getenv("BRIDGECTL_STATE_DIR"); dir != "" {
 		return dir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = os.TempDir()
 	}
-	return filepath.Join(home, ".ai-agent-bridge")
+	return filepath.Join(home, ".config/bridgectl")
 }
 
 // SocketPath returns the default unix socket path.
@@ -162,7 +162,7 @@ func serverNameFromCert(certPath string) string {
 
 // Config controls local server behaviour.
 type Config struct {
-	// StateDir overrides the default ~/.ai-agent-bridge directory.
+	// StateDir overrides the default ~/.config/bridgectl directory.
 	StateDir string
 	// Logger overrides the default logger. Nil uses a default logger at
 	// Warn level; set Verbose to lower it to Info.
@@ -273,7 +273,7 @@ func Start(cfg Config) (*Server, error) {
 	var configProviderDefs map[string]config.ProviderConfig
 	var providerRoot string
 	repoSetupEnabled := true
-	repoSetupConfigPath := ".ai-agent-bridge.yaml"
+	repoSetupConfigPath := ".bridgectl.yaml"
 	repoSetupDefaultTimeout := 2 * time.Minute
 	repoSetupMaxTimeout := 15 * time.Minute
 	configHasServerListen := false

@@ -18,10 +18,10 @@ import (
 
 	"github.com/google/uuid"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/internal/localserver"
+	"github.com/orchael/bridgectl/internal/pki"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,11 +55,11 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// testStateDir returns a per-test temp state dir (isolated from ~/.ai-agent-bridge).
+// testStateDir returns a per-test temp state dir (isolated from ~/.config/bridgectl).
 func testStateDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("AI_AGENT_BRIDGE_STATE_DIR", dir)
+	t.Setenv("BRIDGECTL_STATE_DIR", dir)
 	return dir
 }
 
@@ -218,7 +218,7 @@ repo_setup:
   default_timeout: 5s
   max_timeout: 30s
 `), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, ".ai-agent-bridge.yaml"), []byte(`
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, ".bridgectl.yaml"), []byte(`
 version: 1
 shell: bash
 setup:
@@ -416,14 +416,14 @@ func TestCLISessionListNoServer(t *testing.T) {
 	stateDir := testStateDir(t)
 
 	cmd := exec.Command(cliBinary, "session", "list")
-	cmd.Env = append(os.Environ(), "AI_AGENT_BRIDGE_STATE_DIR="+stateDir)
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	err := cmd.Run()
-	// Should succeed but print "No ai-agent-bridge server running."
+	// Should succeed but print "No bridgectl server running."
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), "No ai-agent-bridge server running")
+	assert.Contains(t, out.String(), "No bridgectl server running")
 }
 
 // TestCLIServerStatus tests `server status` output.
@@ -436,7 +436,7 @@ func TestCLIServerStatus(t *testing.T) {
 
 	// No server running.
 	cmd := exec.Command(cliBinary, "server", "status")
-	cmd.Env = append(os.Environ(), "AI_AGENT_BRIDGE_STATE_DIR="+stateDir)
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -453,7 +453,7 @@ func TestCLIServerStatus(t *testing.T) {
 
 	// Now status should show running.
 	cmd = exec.Command(cliBinary, "server", "status")
-	cmd.Env = append(os.Environ(), "AI_AGENT_BRIDGE_STATE_DIR="+stateDir)
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
 	out.Reset()
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -1086,7 +1086,7 @@ func TestOIDCMissingNameFlag(t *testing.T) {
 		"--step-ca-url", "https://ca.example.com",
 		"--step-ca-root", "/tmp/root.crt",
 	)
-	cmd.Env = append(os.Environ(), "AI_AGENT_BRIDGE_STATE_DIR="+stateDir)
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()

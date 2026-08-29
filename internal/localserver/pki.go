@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
+	"github.com/orchael/bridgectl/internal/pki"
 )
 
 // safeNameRe matches a simple filename component: alphanumeric, hyphens, underscores, dots.
@@ -168,7 +168,7 @@ func EnsureLocalManagementPKI(stateDir, externalCABundle string, logger *slog.Lo
 
 	if !filesExist(mat.CACertPath, mat.CAKeyPath, mat.LocalClientCert, mat.LocalClientKey) {
 		logger.Info("generating local management PKI material", "dir", certsDir)
-		localCACert, localCAKey, err := pki.InitCA("ai-agent-bridge-local", certsDir)
+		localCACert, localCAKey, err := pki.InitCA("bridgectl-local", certsDir)
 		if err != nil {
 			return nil, fmt.Errorf("init local management CA: %w", err)
 		}
@@ -247,7 +247,7 @@ func ensurePKIAutoGen(stateDir string, serverSANs []string, logger *slog.Logger,
 	logger.Info("generating PKI material", "dir", certsDir)
 
 	// 1. Generate CA.
-	caCertPath, caKeyPath, err := pki.InitCA("ai-agent-bridge", certsDir)
+	caCertPath, caKeyPath, err := pki.InitCA("bridgectl", certsDir)
 	if err != nil {
 		return nil, fmt.Errorf("init CA: %w", err)
 	}
@@ -346,7 +346,7 @@ func ensurePKIStepCA(stateDir string, serverSANs []string, logger *slog.Logger, 
 	// 3. Generate a local CA for CLI/local-client credentials.
 	// The server cert comes from Step CA; this small CA signs only the local
 	// management cert so operators can use bridgectl locally against a secure server.
-	localCACert, localCAKey, err := pki.InitCA("ai-agent-bridge-local", certsDir)
+	localCACert, localCAKey, err := pki.InitCA("bridgectl-local", certsDir)
 	if err != nil {
 		return nil, fmt.Errorf("init local CA for Step CA mode: %w", err)
 	}

@@ -12,7 +12,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     volumes:
       - certs:/app/certs
-      - repos:/tmp/ai-agent-bridge
+      - repos:/tmp/bridgectl
       - ./bridge-e2e.yaml:/app/config/bridge-e2e.yaml:ro
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
@@ -37,7 +37,7 @@ services:
         condition: service_healthy
     volumes:
       - certs:/certs:ro
-      - repos:/tmp/ai-agent-bridge
+      - repos:/tmp/bridgectl
 
 volumes:
   certs:

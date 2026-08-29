@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markcallen/ai-agent-bridge/internal/bridge"
+	"github.com/orchael/bridgectl/internal/bridge"
 )
 
 func TestBuildCommandIncludesProviderArgs(t *testing.T) {

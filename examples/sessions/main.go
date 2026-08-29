@@ -20,15 +20,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/internal/localserver"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 func main() {
 	root := &cobra.Command{
 		Use:   "sessions",
-		Short: "Manage ai-agent-bridge sessions",
+		Short: "Manage bridgectl sessions",
 	}
 
 	root.AddCommand(newListCmd())
@@ -59,7 +59,7 @@ func buildClient(remote, stateDir string, timeout time.Duration) (*bridgeclient.
 func buildLocalClient(sd string, timeout time.Duration) (*bridgeclient.Client, error) {
 	target, mode := localserver.DiscoverTarget(sd)
 	if target == "" {
-		return nil, fmt.Errorf("no ai-agent-bridge server running (start one with: bridgectl server start)")
+		return nil, fmt.Errorf("no bridgectl server running (start one with: bridgectl server start)")
 	}
 
 	opts := []bridgeclient.Option{
@@ -232,7 +232,7 @@ func newListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&remote, "remote", "", "remote hostname or host:port (omit for local server)")
-	cmd.Flags().StringVar(&stateDir, "state-dir", "", "bridge state directory (default: ~/.ai-agent-bridge)")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "bridge state directory (default: ~/.config/bridgectl)")
 	cmd.Flags().StringVar(&project, "project", "", "filter by project ID (empty = all)")
 	return cmd
 }
@@ -300,7 +300,7 @@ func newWatchCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&remote, "remote", "", "remote hostname or host:port (omit for local server)")
-	cmd.Flags().StringVar(&stateDir, "state-dir", "", "bridge state directory (default: ~/.ai-agent-bridge)")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "bridge state directory (default: ~/.config/bridgectl)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "watch timeout")
 	return cmd
 }
@@ -455,7 +455,7 @@ func newAttachCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&remote, "remote", "", "remote hostname or host:port (omit for local server)")
-	cmd.Flags().StringVar(&stateDir, "state-dir", "", "bridge state directory (default: ~/.ai-agent-bridge)")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "", "bridge state directory (default: ~/.config/bridgectl)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "attach timeout")
 	cmd.Flags().BoolVar(&takeOver, "take-over", false, "forcibly claim the writer slot from an existing writer")
 	return cmd

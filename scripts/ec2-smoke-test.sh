@@ -6,13 +6,13 @@ RUNTIME_DIR="$ROOT_DIR/.tmp/ec2-smoke"
 KEY_PATH="$RUNTIME_DIR/id_ed25519"
 METADATA_PATH="$RUNTIME_DIR/metadata.env"
 SSH_USER="${SMOKE_SSH_USER:-ubuntu}"
-: "${GOCACHE:=/tmp/ai-agent-bridge-go-build}"
+: "${GOCACHE:=/tmp/bridgectl-go-build}"
 : "${GOFLAGS:=-buildvcs=false}"
 
 AWS_REGION="${SMOKE_AWS_REGION:-${AWS_REGION:-}}"
 INSTANCE_TYPE="${SMOKE_INSTANCE_TYPE:-t3.small}"
 APT_SUITE="${SMOKE_APT_SUITE:-noble}"
-REPO_BASE_URL="${SMOKE_REPO_BASE_URL:-https://markcallen.github.io/ai-agent-bridge/apt}"
+REPO_BASE_URL="${SMOKE_REPO_BASE_URL:-https://orchael.github.io/bridgectl/apt}"
 NAME_PREFIX="${SMOKE_NAME_PREFIX:-aab-apt-smoke}"
 ACTION="run"
 
@@ -172,7 +172,7 @@ run_remote_install() {
     "$ROOT_DIR/scripts/install.sh" "$SSH_USER@$PUBLIC_IP:/tmp/install.sh" >/dev/null
 
   ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$KEY_PATH" "$SSH_USER@$PUBLIC_IP" \
-    "chmod +x /tmp/install.sh && sudo APT_SUITE='$APT_SUITE' REPO_BASE_URL='$REPO_BASE_URL' /tmp/install.sh && sudo systemctl enable --now ai-agent-bridge && sudo systemctl is-active --quiet ai-agent-bridge"
+    "chmod +x /tmp/install.sh && sudo APT_SUITE='$APT_SUITE' REPO_BASE_URL='$REPO_BASE_URL' /tmp/install.sh && sudo systemctl enable --now bridgectl && sudo systemctl is-active --quiet bridgectl"
 }
 
 run_healthcheck() {
@@ -201,7 +201,7 @@ run_healthcheck() {
   done
 
   ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "$KEY_PATH" "$SSH_USER@$PUBLIC_IP" \
-    'sudo journalctl -u ai-agent-bridge --no-pager -n 100' >&2 || true
+    'sudo journalctl -u bridgectl --no-pager -n 100' >&2 || true
   [[ -n "$tunnel_pid" ]] && kill "$tunnel_pid" >/dev/null 2>&1 || true
   echo "ec2-smoke-test: healthcheck failed" >&2
   exit 1
@@ -225,7 +225,7 @@ create_stack() {
   SECURITY_GROUP_ID="$(aws ec2 create-security-group \
     --region "$AWS_REGION" \
     --group-name "${KEY_NAME}-sg" \
-    --description "Temporary ai-agent-bridge apt smoke access" \
+    --description "Temporary bridgectl apt smoke access" \
     --vpc-id "$vpc_id" \
     --query 'GroupId' \
     --output text)"

@@ -5,9 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${VERSION:-}"
 ARCH="${ARCH:-amd64}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist/deb}"
-PACKAGE_NAME="ai-agent-bridge"
+PACKAGE_NAME="bridgectl"
 PKG_ROOT="$(mktemp -d)"
-: "${GOCACHE:=/tmp/ai-agent-bridge-go-build}"
+: "${GOCACHE:=/tmp/bridgectl-go-build}"
 : "${GOFLAGS:=-buildvcs=false}"
 
 export GOCACHE
@@ -33,41 +33,41 @@ mkdir -p "$OUTPUT_DIR"
 
 mkdir -p "$ROOT_DIR/bin"
 LDFLAGS="-X main.version=${VERSION}"
-GOARCH="$ARCH" go build -ldflags "$LDFLAGS" -o "$ROOT_DIR/bin/ai-agent-bridge-ca" ./cmd/bridge-ca
+GOARCH="$ARCH" go build -ldflags "$LDFLAGS" -o "$ROOT_DIR/bin/bridge-ca" ./cmd/bridge-ca
 GOARCH="$ARCH" go build -ldflags "$LDFLAGS" -o "$ROOT_DIR/bin/bridgectl" ./cmd/bridgectl
 
 mkdir -p \
   "$PKG_ROOT/DEBIAN" \
   "$PKG_ROOT/usr/bin" \
-  "$PKG_ROOT/usr/lib/ai-agent-bridge" \
-  "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime" \
-  "$PKG_ROOT/usr/share/doc/ai-agent-bridge/examples" \
-  "$PKG_ROOT/etc/ai-agent-bridge" \
+  "$PKG_ROOT/usr/lib/bridgectl" \
+  "$PKG_ROOT/usr/share/bridgectl/provider-runtime" \
+  "$PKG_ROOT/usr/share/doc/bridgectl/examples" \
+  "$PKG_ROOT/etc/bridgectl" \
   "$PKG_ROOT/usr/lib/systemd/user"
 
 # Binaries
-install -m 0755 "$ROOT_DIR/bin/ai-agent-bridge-ca" "$PKG_ROOT/usr/bin/ai-agent-bridge-ca"
+install -m 0755 "$ROOT_DIR/bin/bridge-ca" "$PKG_ROOT/usr/bin/bridge-ca"
 install -m 0755 "$ROOT_DIR/bin/bridgectl" "$PKG_ROOT/usr/bin/bridgectl"
 
 # Default config and systemd user unit
 install -m 0644 "$ROOT_DIR/packaging/bridge.yaml" \
-  "$PKG_ROOT/etc/ai-agent-bridge/bridge.yaml"
+  "$PKG_ROOT/etc/bridgectl/bridge.yaml"
 install -m 0644 "$ROOT_DIR/packaging/bridge.user.service" \
   "$PKG_ROOT/usr/lib/systemd/user/bridge.service"
 
 # Provider runtime install helper
 install -m 0755 "$ROOT_DIR/packaging/install-provider-runtime" \
-  "$PKG_ROOT/usr/lib/ai-agent-bridge/install-provider-runtime"
+  "$PKG_ROOT/usr/lib/bridgectl/install-provider-runtime"
 
 # Provider runtime manifest (used by install-provider-runtime)
-install -m 0644 "$ROOT_DIR/.nvmrc"              "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/.nvmrc"
-install -m 0644 "$ROOT_DIR/package.json"        "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/package.json"
-install -m 0644 "$ROOT_DIR/pnpm-lock.yaml"      "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/pnpm-lock.yaml"
-install -m 0644 "$ROOT_DIR/pnpm-workspace.yaml" "$PKG_ROOT/usr/share/ai-agent-bridge/provider-runtime/pnpm-workspace.yaml"
+install -m 0644 "$ROOT_DIR/.nvmrc"              "$PKG_ROOT/usr/share/bridgectl/provider-runtime/.nvmrc"
+install -m 0644 "$ROOT_DIR/package.json"        "$PKG_ROOT/usr/share/bridgectl/provider-runtime/package.json"
+install -m 0644 "$ROOT_DIR/pnpm-lock.yaml"      "$PKG_ROOT/usr/share/bridgectl/provider-runtime/pnpm-lock.yaml"
+install -m 0644 "$ROOT_DIR/pnpm-workspace.yaml" "$PKG_ROOT/usr/share/bridgectl/provider-runtime/pnpm-workspace.yaml"
 
 # Example configs
 install -m 0644 "$ROOT_DIR/packaging/examples/bridge-example.yaml" \
-  "$PKG_ROOT/usr/share/doc/ai-agent-bridge/examples/bridge-example.yaml"
+  "$PKG_ROOT/usr/share/doc/bridgectl/examples/bridge-example.yaml"
 
 # Debian maintainer scripts
 install -m 0755 "$ROOT_DIR/packaging/debian/postinst" "$PKG_ROOT/DEBIAN/postinst"

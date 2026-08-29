@@ -3,7 +3,7 @@ package bridgeclient_test
 import (
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 func ExampleNew() {

@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.markcallen.ai-agent-bridge</string>
+  <string>com.orchael.bridgectl</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/local/bin/bridgectl</string>
@@ -16,8 +16,8 @@
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/tmp/ai-agent-bridge.log</string>
+  <string>/tmp/bridgectl.log</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/ai-agent-bridge.err</string>
+  <string>/tmp/bridgectl.err</string>
 </dict>
 </plist>

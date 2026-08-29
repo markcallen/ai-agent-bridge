@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"path/filepath"
 
-	"github.com/markcallen/ai-agent-bridge/internal/auth"
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
+	"github.com/orchael/bridgectl/internal/auth"
+	"github.com/orchael/bridgectl/internal/pki"
 )
 
 // ConfiguredJWTClient declares a client JWT public key that should be loaded

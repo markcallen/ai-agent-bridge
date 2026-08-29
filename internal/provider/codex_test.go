@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/markcallen/ai-agent-bridge/internal/bridge"
+	"github.com/orchael/bridgectl/internal/bridge"
 )
 
 func newTestCodexProvider() *CodexProvider {
@@ -158,7 +158,7 @@ func TestCodexBuildCommand_WithCodexAuth(t *testing.T) {
 	if codexHome == "" {
 		t.Fatal("CODEX_HOME not set in subprocess env")
 	}
-	wantCodexHome := filepath.Join(os.Getenv("HOME"), ".ai-agent-bridge", "codex-home")
+	wantCodexHome := filepath.Join(os.Getenv("HOME"), ".config/bridgectl", "codex-home")
 	if codexHome != wantCodexHome {
 		t.Fatalf("CODEX_HOME=%q want %q", codexHome, wantCodexHome)
 	}

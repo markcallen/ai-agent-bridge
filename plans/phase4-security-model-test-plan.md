@@ -62,8 +62,8 @@ make test-cover
 
 ### Environment isolation
 
-All CLI e2e tests use `AI_AGENT_BRIDGE_STATE_DIR` pointed at a temp directory
-(`testStateDir(t)`) so they never touch `~/.ai-agent-bridge/`. This works
+All CLI e2e tests use `BRIDGECTL_STATE_DIR` pointed at a temp directory
+(`testStateDir(t)`) so they never touch `~/.config/bridgectl/`. This works
 identically in Docker and on the desktop.
 
 ---
@@ -102,9 +102,9 @@ These tests verify that the default (no Step CA) path is unchanged.
 
 - [x] **2.1 — Auto-PKI generation on first start** *(completed — macOS desktop, e2e test added)*
   - Steps:
-    1. `export AI_AGENT_BRIDGE_STATE_DIR=$(mktemp -d)`
+    1. `export BRIDGECTL_STATE_DIR=$(mktemp -d)`
     2. `bridgectl server start --listen 127.0.0.1:0`
-    3. Check `$AI_AGENT_BRIDGE_STATE_DIR/certs/` contains:
+    3. Check `$BRIDGECTL_STATE_DIR/certs/` contains:
        `ca.crt`, `ca.key`, `server.crt`, `server.key`, `local-client.crt`,
        `local-client.key`, `jwt-signing.key`, `jwt-signing.pub`, `ca-bundle.crt`
     4. Health check: `bridgectl server status` shows running
@@ -466,7 +466,7 @@ if testing.Short() {
     t.Skip("skipping in short mode")
 }
 
-// Isolated state dir (never touches ~/.ai-agent-bridge/)
+// Isolated state dir (never touches ~/.config/bridgectl/)
 stateDir := testStateDir(t)
 
 // Server lifecycle

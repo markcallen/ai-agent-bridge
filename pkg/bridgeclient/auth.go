@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/internal/auth"
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
+	"github.com/orchael/bridgectl/internal/auth"
+	"github.com/orchael/bridgectl/internal/pki"
 	"google.golang.org/grpc/credentials"
 )
 

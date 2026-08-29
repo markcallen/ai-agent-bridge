@@ -20,14 +20,14 @@ import (
 	"github.com/creack/pty"
 	"github.com/google/uuid"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
-	"github.com/markcallen/ai-agent-bridge/internal/localserver"
-	"github.com/markcallen/ai-agent-bridge/pkg/bridgeclient"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
+	"github.com/orchael/bridgectl/internal/localserver"
+	"github.com/orchael/bridgectl/pkg/bridgeclient"
 )
 
 func main() {
 	remote := flag.String("remote", "", "remote hostname or host:port (required; port defaults to 9445)")
-	stateDir := flag.String("state-dir", "", "state dir for credential discovery (default: ~/.ai-agent-bridge)")
+	stateDir := flag.String("state-dir", "", "state dir for credential discovery (default: ~/.config/bridgectl)")
 	certFlag := flag.String("cert", "", "override client cert path")
 	keyFlag := flag.String("key", "", "override client key path (derived from --cert if omitted)")
 	jwtKeyFlag := flag.String("jwt-key", "", "override JWT signing key path")

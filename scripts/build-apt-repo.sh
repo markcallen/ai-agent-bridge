@@ -7,7 +7,7 @@ PACKAGES_DIR="${PACKAGES_DIR:-$ROOT_DIR/dist/deb}"
 ARCHES="${ARCHES:-amd64}"
 SUITES="${SUITES:-noble plucky}"
 COMPONENT="${COMPONENT:-main}"
-KEYRING_NAME="${KEYRING_NAME:-ai-agent-bridge-archive-keyring.asc}"
+KEYRING_NAME="${KEYRING_NAME:-bridgectl-archive-keyring.asc}"
 gpg_cmd=(gpg --batch --yes)
 
 if ! command -v dpkg-scanpackages >/dev/null 2>&1; then
@@ -60,7 +60,7 @@ Suite: $suite
 Codename: $suite
 Architectures: $ARCHES
 Components: $COMPONENT
-Description: Apt repository for ai-agent-bridge
+Description: Apt repository for bridgectl
 EOF
   apt-ftparchive release "dists/$suite" >>"dists/$suite/Release"
 

@@ -1,8 +1,8 @@
 {
-  "name": "ai-agent-bridge",
+  "name": "bridgectl",
   "private": true,
   "packageManager": "pnpm@11.22.0",
-  "description": "Pinned local AI agent CLIs for ai-agent-bridge",
+  "description": "Pinned local AI agent CLIs for bridgectl",
   "engines": {
     "node": ">=24"
   },

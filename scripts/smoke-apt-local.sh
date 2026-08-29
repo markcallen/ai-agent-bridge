@@ -8,7 +8,7 @@ REPO_DIR="$TMP_DIR/repo"
 PACKAGES_DIR="$TMP_DIR/packages"
 HEALTHCHECK_BIN="$TMP_DIR/plain-healthcheck"
 SUITES="${SUITES:-noble plucky}"
-: "${GOCACHE:=/tmp/ai-agent-bridge-go-build}"
+: "${GOCACHE:=/tmp/bridgectl-go-build}"
 : "${GOFLAGS:=-buildvcs=false}"
 
 export GOCACHE
@@ -33,7 +33,7 @@ gpg --batch \
   --pinentry-mode loopback \
   --passphrase '' \
   --quick-generate-key \
-  "AI Agent Bridge Smoke <smoke@ai-agent-bridge.local>" \
+  "AI Agent Bridge Smoke <smoke@bridgectl.local>" \
   rsa3072 sign 0
 
 export GNUPGHOME
@@ -72,11 +72,11 @@ run_suite() {
       apt-get update
       apt-get install -y ca-certificates gnupg
       install -d /etc/apt/keyrings
-      gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg /opt/aptrepo/ai-agent-bridge-archive-keyring.asc
-      echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] file:/opt/aptrepo '"$suite"' main" > /etc/apt/sources.list.d/ai-agent-bridge.list
+      gpg --dearmor -o /etc/apt/keyrings/bridgectl.gpg /opt/aptrepo/bridgectl-archive-keyring.asc
+      echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/bridgectl.gpg] file:/opt/aptrepo '"$suite"' main" > /etc/apt/sources.list.d/bridgectl.list
       apt-get update
-      apt-get install -y ai-agent-bridge
-      /usr/bin/bridgectl server start --config /etc/ai-agent-bridge/bridge.yaml >/tmp/bridge.log 2>&1 &
+      apt-get install -y bridgectl
+      /usr/bin/bridgectl server start --config /etc/bridgectl/bridge.yaml >/tmp/bridge.log 2>&1 &
       bridge_pid=$!
       for i in $(seq 1 15); do
         if ! kill -0 "$bridge_pid" 2>/dev/null; then

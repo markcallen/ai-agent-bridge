@@ -1,4 +1,4 @@
-module github.com/markcallen/ai-agent-bridge
+module github.com/orchael/bridgectl
 
 go 1.25.7
 

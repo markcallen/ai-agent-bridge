@@ -270,7 +270,7 @@ func applyDefaults(cfg *Config) {
 		cfg.Logging.Format = "json"
 	}
 	if cfg.RepoSetup.ConfigPath == "" {
-		cfg.RepoSetup.ConfigPath = ".ai-agent-bridge.yaml"
+		cfg.RepoSetup.ConfigPath = ".bridgectl.yaml"
 	}
 	if cfg.RepoSetup.DefaultTimeout == "" {
 		cfg.RepoSetup.DefaultTimeout = "2m"

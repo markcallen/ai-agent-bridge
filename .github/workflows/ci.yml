@@ -54,7 +54,7 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: markcallen/ai-agent-bridge
+          slug: orchael/bridgectl
           files: ./coverage.out
           flags: go
           name: go-coverage

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/markcallen/ai-agent-bridge/internal/bridge"
-	"github.com/markcallen/ai-agent-bridge/internal/provider"
+	"github.com/orchael/bridgectl/internal/bridge"
+	"github.com/orchael/bridgectl/internal/provider"
 )
 
 type ProviderConfig struct {

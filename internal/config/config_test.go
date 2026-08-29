@@ -273,7 +273,7 @@ server:
   listen: "127.0.0.1:9445"
 repo_setup:
   enabled: false
-  config_path: ".ai-agent-bridge.yaml"
+  config_path: ".bridgectl.yaml"
   default_timeout: "1m"
   max_timeout: "10m"
 providers:
@@ -340,8 +340,8 @@ providers:
 			if err != nil {
 				t.Fatalf("Load: %v", err)
 			}
-			if cfg.RepoSetup.ConfigPath != ".ai-agent-bridge.yaml" {
-				t.Fatalf("ConfigPath=%q want .ai-agent-bridge.yaml", cfg.RepoSetup.ConfigPath)
+			if cfg.RepoSetup.ConfigPath != ".bridgectl.yaml" {
+				t.Fatalf("ConfigPath=%q want .bridgectl.yaml", cfg.RepoSetup.ConfigPath)
 			}
 			if cfg.RepoSetup.DefaultTimeout == "" || cfg.RepoSetup.MaxTimeout == "" {
 				t.Fatalf("repo setup timeouts not defaulted: %+v", cfg.RepoSetup)
@@ -503,13 +503,13 @@ server:
 auth:
   jwt_max_ttl: "5m"
 runtime:
-  provider_root: "/opt/ai-agent-bridge"
+  provider_root: "/opt/bridgectl"
 sessions:
   idle_timeout: "30m"
   stop_grace_period: "10s"
   subscriber_ttl: "30m"
 `,
-			wantRoot: "/opt/ai-agent-bridge",
+			wantRoot: "/opt/bridgectl",
 		},
 		{
 			name: "provider_root expands braced home variable",
@@ -519,13 +519,13 @@ server:
 auth:
   jwt_max_ttl: "5m"
 runtime:
-  provider_root: "${HOME}/.local/share/ai-agent-bridge/providers"
+  provider_root: "${HOME}/.local/share/bridgectl/providers"
 sessions:
   idle_timeout: "30m"
   stop_grace_period: "10s"
   subscriber_ttl: "30m"
 `,
-			wantRoot: filepath.Join(homeDir, ".local/share/ai-agent-bridge/providers"),
+			wantRoot: filepath.Join(homeDir, ".local/share/bridgectl/providers"),
 		},
 		{
 			name: "provider_root expands home variable",
@@ -535,13 +535,13 @@ server:
 auth:
   jwt_max_ttl: "5m"
 runtime:
-  provider_root: "$HOME/.local/share/ai-agent-bridge/providers"
+  provider_root: "$HOME/.local/share/bridgectl/providers"
 sessions:
   idle_timeout: "30m"
   stop_grace_period: "10s"
   subscriber_ttl: "30m"
 `,
-			wantRoot: filepath.Join(homeDir, ".local/share/ai-agent-bridge/providers"),
+			wantRoot: filepath.Join(homeDir, ".local/share/bridgectl/providers"),
 		},
 		{
 			name: "provider_root expands xdg data variable",
@@ -551,13 +551,13 @@ server:
 auth:
   jwt_max_ttl: "5m"
 runtime:
-  provider_root: "$XDG_DATA_HOME/ai-agent-bridge/providers"
+  provider_root: "$XDG_DATA_HOME/bridgectl/providers"
 sessions:
   idle_timeout: "30m"
   stop_grace_period: "10s"
   subscriber_ttl: "30m"
 `,
-			wantRoot: filepath.Join(xdgDir, "ai-agent-bridge/providers"),
+			wantRoot: filepath.Join(xdgDir, "bridgectl/providers"),
 		},
 		{
 			name: "provider_root expands braced xdg data variable",
@@ -567,13 +567,13 @@ server:
 auth:
   jwt_max_ttl: "5m"
 runtime:
-  provider_root: "${XDG_DATA_HOME}/ai-agent-bridge/providers"
+  provider_root: "${XDG_DATA_HOME}/bridgectl/providers"
 sessions:
   idle_timeout: "30m"
   stop_grace_period: "10s"
   subscriber_ttl: "30m"
 `,
-			wantRoot: filepath.Join(xdgDir, "ai-agent-bridge/providers"),
+			wantRoot: filepath.Join(xdgDir, "bridgectl/providers"),
 		},
 		{
 			name: "provider_root absent",

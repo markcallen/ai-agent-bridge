@@ -2,15 +2,15 @@
 set -euo pipefail
 
 # Generate development certificates for local testing.
-# Requires: bin/ai-agent-bridge-ca (run 'make build' first)
+# Requires: bin/bridge-ca (run 'make build' first)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-CA_BIN="$PROJECT_DIR/bin/ai-agent-bridge-ca"
+CA_BIN="$PROJECT_DIR/bin/bridge-ca"
 CERTS_DIR="$PROJECT_DIR/certs"
 
 if [ ! -x "$CA_BIN" ]; then
-    echo "ai-agent-bridge-ca not found. Run 'make build' first."
+    echo "bridge-ca not found. Run 'make build' first."
     exit 1
 fi
 
@@ -18,7 +18,7 @@ echo "==> Generating dev certificates in $CERTS_DIR"
 
 # 1. Initialize bridge CA
 echo "--- Initializing bridge CA"
-$CA_BIN init --name "ai-agent-bridge-dev" --out "$CERTS_DIR"
+$CA_BIN init --name "bridgectl-dev" --out "$CERTS_DIR"
 
 # 2. Issue bridge server cert
 echo "--- Issuing bridge server certificate"

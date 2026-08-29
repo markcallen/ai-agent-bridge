@@ -17,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const envMarker = "__AI_AGENT_BRIDGE_ENV__"
+const envMarker = "__BRIDGECTL_ENV__"
 
 var ErrSetupFailed = errors.New("repo setup failed")
 
@@ -46,7 +46,7 @@ type fileConfig struct {
 
 func NewCoordinator(opts Options) *Coordinator {
 	if opts.ConfigPath == "" {
-		opts.ConfigPath = ".ai-agent-bridge.yaml"
+		opts.ConfigPath = ".bridgectl.yaml"
 	}
 	if opts.DefaultTimeout <= 0 {
 		opts.DefaultTimeout = 2 * time.Minute

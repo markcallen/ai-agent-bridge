@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
 )
 
 // inputWriterClient is the subset of the gRPC client needed by inputWriter.

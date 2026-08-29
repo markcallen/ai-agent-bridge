@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/markcallen/ai-agent-bridge/internal/pki"
+	"github.com/orchael/bridgectl/internal/pki"
 )
 
 // fakeStepDir writes a stub `step` binary into a temp directory and returns

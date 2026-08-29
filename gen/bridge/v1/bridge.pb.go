@@ -2028,7 +2028,7 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\rReleaseWriter\x12\x1f.bridge.v1.ReleaseWriterRequest\x1a .bridge.v1.ReleaseWriterResponse\x12=\n" +
 	"\x06Health\x12\x18.bridge.v1.HealthRequest\x1a\x19.bridge.v1.HealthResponse\x12R\n" +
 	"\rListProviders\x12\x1f.bridge.v1.ListProvidersRequest\x1a .bridge.v1.ListProvidersResponse\x12U\n" +
-	"\x0eRegisterJWTKey\x12 .bridge.v1.RegisterJWTKeyRequest\x1a!.bridge.v1.RegisterJWTKeyResponseB>Z<github.com/markcallen/ai-agent-bridge/gen/bridge/v1;bridgev1b\x06proto3"
+	"\x0eRegisterJWTKey\x12 .bridge.v1.RegisterJWTKeyRequest\x1a!.bridge.v1.RegisterJWTKeyResponseB5Z3github.com/orchael/bridgectl/gen/bridge/v1;bridgev1b\x06proto3"
 
 var (
 	file_bridge_v1_bridge_proto_rawDescOnce sync.Once

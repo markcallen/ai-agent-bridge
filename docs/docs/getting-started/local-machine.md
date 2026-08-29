@@ -22,13 +22,13 @@ On Ubuntu, you can install `bridgectl` from the apt repository instead of buildi
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://markcallen.github.io/ai-agent-bridge/apt/ai-agent-bridge-archive-keyring.asc \
-  | sudo gpg --dearmor -o /etc/apt/keyrings/ai-agent-bridge.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/ai-agent-bridge.gpg] \
-  https://markcallen.github.io/ai-agent-bridge/apt noble main" \
-  | sudo tee /etc/apt/sources.list.d/ai-agent-bridge.list >/dev/null
+curl -fsSL https://orchael.github.io/bridgectl/apt/bridgectl-archive-keyring.asc \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/bridgectl.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/bridgectl.gpg] \
+  https://orchael.github.io/bridgectl/apt noble main" \
+  | sudo tee /etc/apt/sources.list.d/bridgectl.list >/dev/null
 sudo apt-get update
-sudo apt-get install -y ai-agent-bridge
+sudo apt-get install -y bridgectl
 ```
 
 **Supported suites:** `noble` (24.04 LTS) and `plucky` (25.04). Replace `noble` with `plucky` if you are on Ubuntu 25.04.
@@ -38,8 +38,8 @@ If you install via apt, you still need to clone the repository to install the pr
 ## Clone and Build
 
 ```bash
-git clone https://github.com/markcallen/ai-agent-bridge.git
-cd ai-agent-bridge
+git clone https://github.com/orchael/bridgectl.git
+cd bridgectl
 
 nvm install
 nvm use

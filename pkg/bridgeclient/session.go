@@ -3,7 +3,7 @@ package bridgeclient
 import (
 	"context"
 
-	bridgev1 "github.com/markcallen/ai-agent-bridge/gen/bridge/v1"
+	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
 )
 
 func (c *Client) StartSession(ctx context.Context, req *bridgev1.StartSessionRequest) (*bridgev1.StartSessionResponse, error) {

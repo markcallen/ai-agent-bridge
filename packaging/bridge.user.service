@@ -1,6 +1,6 @@
 [Unit]
 Description=AI Agent Bridge (user session)
-Documentation=https://github.com/markcallen/ai-agent-bridge
+Documentation=https://github.com/orchael/bridgectl
 After=default.target
 
 [Service]

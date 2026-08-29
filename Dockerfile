@@ -12,11 +12,11 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/bridgectl ./cmd/bridgectl && \
-    CGO_ENABLED=0 go build -o /out/ai-agent-bridge-ca ./cmd/bridge-ca
+    CGO_ENABLED=0 go build -o /out/bridge-ca ./cmd/bridge-ca
 
 # Pre-built binaries stage (GoReleaser provides these in the build context)
 FROM scratch AS prebuilt
-COPY bridgectl ai-agent-bridge-ca /out/
+COPY bridgectl bridge-ca /out/
 
 # Select binary source — BuildKit skips whichever stage is not referenced
 FROM ${BUILD_FROM} AS build
@@ -45,7 +45,7 @@ RUN useradd -m -s /bin/bash bridge && \
     chown -R bridge:bridge /home/bridge/.gemini
 
 COPY --from=build /out/bridgectl /usr/local/bin/bridgectl
-COPY --from=build /out/ai-agent-bridge-ca /usr/local/bin/ai-agent-bridge-ca
+COPY --from=build /out/bridge-ca /usr/local/bin/bridge-ca
 COPY .nvmrc /app/.nvmrc
 RUN corepack enable && corepack prepare pnpm@11.22.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml /app/

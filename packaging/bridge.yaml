@@ -35,11 +35,11 @@ rate_limits:
   send_input_per_session_burst: 20
 
 persistence:
-  # db_path: "~/.ai-agent-bridge/sessions.db"
+  # db_path: "~/.bridgectl/sessions.db"
 
 repo_setup:
   enabled: true
-  config_path: ".ai-agent-bridge.yaml"
+  config_path: ".bridgectl.yaml"
   default_timeout: "2m"
   max_timeout: "15m"
 
