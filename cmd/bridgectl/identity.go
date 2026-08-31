@@ -34,13 +34,17 @@ including the certificate CN, issuer, expiry, and renewal status.`,
 			stateDir := localserver.StateDir()
 			mat := localserver.LoadPKIMaterial(stateDir)
 
-			// Try client cert first, then server cert.
+			// Try well-known cert paths, then discover any .crt file.
+			certsDir := localserver.CertsDir(stateDir)
 			certPath := mat.LocalClientCert
 			if _, err := os.Stat(certPath); err != nil {
 				certPath = mat.ServerCertPath
 			}
 			if _, err := os.Stat(certPath); err != nil {
-				return fmt.Errorf("no certificate found in %s", localserver.CertsDir(stateDir))
+				certPath = discoverCertFile(certsDir)
+			}
+			if certPath == "" {
+				return fmt.Errorf("no certificate found in %s", certsDir)
 			}
 
 			cert, err := pki.LoadCert(certPath)
@@ -49,7 +53,6 @@ including the certificate CN, issuer, expiry, and renewal status.`,
 			}
 
 			// Determine the provider from the PKI mode file.
-			certsDir := localserver.CertsDir(stateDir)
 			providerName := readPKIModeForIdentity(certsDir)
 
 			// Calculate remaining validity.
