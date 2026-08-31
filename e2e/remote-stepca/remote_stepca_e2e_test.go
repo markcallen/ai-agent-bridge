@@ -226,11 +226,11 @@ func TestRemoteClaudeSession(t *testing.T) {
 	assert.True(t, gotOutput.Load(), "should have received at least one output event from claude")
 }
 
-// TestRemoteCodexSession starts a Codex session if OPENAI_API_KEY is set,
+// TestRemoteCodexSession starts a Codex session if CODEX_AUTH is set,
 // lists it remotely, and attaches as observer to read output.
 func TestRemoteCodexSession(t *testing.T) {
-	if os.Getenv("OPENAI_API_KEY") == "" {
-		t.Skip("OPENAI_API_KEY not set")
+	if os.Getenv("CODEX_AUTH") == "" {
+		t.Skip("CODEX_AUTH not set")
 	}
 
 	client := connectRemote(t)

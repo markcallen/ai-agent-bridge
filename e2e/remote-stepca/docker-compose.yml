@@ -11,7 +11,7 @@
 ## Usage:
 ##   make test-remote-stepca
 ##
-## Requires: CLAUDE_CODE_OAUTH_TOKEN and OPENAI_API_KEY in environment.
+## Requires: CLAUDE_CODE_OAUTH_TOKEN and CODEX_AUTH in environment.
 
 services:
   # Step CA initialization — runs once to bootstrap the CA.
@@ -61,7 +61,7 @@ services:
       STEP_CA_PROVISIONER: "bridge-jwk"
       STEP_CA_PROVISIONER_PASSWORD: "remote-e2e-password"
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CODEX_AUTH: ${CODEX_AUTH:-}
     volumes:
       - server-state:/home/bridge/.config/bridgectl
       - ../../e2e/step-ca/bridge-stepca-e2e.yaml:/app/config/bridge-stepca-e2e.yaml:ro
@@ -91,7 +91,7 @@ services:
       STEP_CA_URL: "https://step-ca.local:9443"
       STEP_CA_PROVISIONER_PASSWORD: "remote-e2e-password"
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CODEX_AUTH: ${CODEX_AUTH:-}
       E2E_TEST_TIMEOUT: ${E2E_TEST_TIMEOUT:-600s}
     depends_on:
       server:

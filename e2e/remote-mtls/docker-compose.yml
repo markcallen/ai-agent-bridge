@@ -1,7 +1,7 @@
 ## Two-service e2e test: server + remote client with auto-PKI mTLS
 ##
 ## Tests the v1.1 credential deployment workflow:
-##   1. Server starts with auto-PKI (--mode mtls)
+##   1. Server starts with auto-PKI (--listen, no explicit TLS paths)
 ##   2. Server issues client credentials and bundles them
 ##   3. Client runs 'bridgectl client setup --bundle' to extract creds
 ##   4. Client runs 'bridgectl client enroll' with auto-discovery
@@ -9,27 +9,26 @@
 ##   6. Client lists and watches sessions
 ##
 ## Usage:
-##   make test-remote-mtls
-##
-## Requires: CLAUDE_CODE_OAUTH_TOKEN and OPENAI_API_KEY in environment.
+##   env-secrets aws -s /ai-agent-bridge/e2e -- make test-remote-mtls
 
 services:
-  # Bridge server with auto-PKI mTLS.
+  # Bridge server with auto-PKI mTLS. Uses bridgectl server start --listen
+  # (no pre-generated TLS paths) so EnsurePKI auto-generates everything.
   server:
     build:
       context: ../..
       dockerfile: Dockerfile
     environment:
-      BRIDGE_CONFIG: /app/config/bridge-e2e.yaml
+      BRIDGE_CONFIG: /app/config/bridge-remote-e2e.yaml
       BRIDGE_CN: bridge-server
+      BRIDGE_SANS: "bridge-server,localhost,127.0.0.1"
       BRIDGE_CLIENT_CN: e2e-local
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CODEX_AUTH: ${CODEX_AUTH:-}
     volumes:
       - server-state:/home/bridge/.config/bridgectl
-      - server-certs:/app/certs
       - repos:/tmp/bridgectl
-      - ../bridge-e2e.yaml:/app/config/bridge-e2e.yaml:ro
+      - ./bridge-remote-e2e.yaml:/app/config/bridge-remote-e2e.yaml:ro
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
       interval: 3s
@@ -49,7 +48,7 @@ services:
     environment:
       BRIDGE_SERVER: bridge-server:9445
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CODEX_AUTH: ${CODEX_AUTH:-}
       E2E_TEST_TIMEOUT: ${E2E_TEST_TIMEOUT:-600s}
     depends_on:
       server:
@@ -60,5 +59,4 @@ services:
 
 volumes:
   server-state:
-  server-certs:
   repos:
