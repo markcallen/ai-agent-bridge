@@ -1,0 +1,107 @@
+## Three-service e2e test: step-ca + server + remote client
+##
+## Tests the full Step CA PKI workflow:
+##   1. Step CA bootstraps and issues server cert
+##   2. Bridge server starts with Step CA-issued PKI
+##   3. Remote client obtains its cert from Step CA (JWK provisioner)
+##   4. Client enrolls JWT key with the server
+##   5. Client starts Claude and Codex sessions remotely
+##   6. Client lists and watches sessions
+##
+## Usage:
+##   make test-remote-stepca
+##
+## Requires: CLAUDE_CODE_OAUTH_TOKEN and OPENAI_API_KEY in environment.
+
+services:
+  # Step CA initialization — runs once to bootstrap the CA.
+  step-ca-init:
+    image: smallstep/step-ca:latest
+    entrypoint: ["/bin/sh", "/scripts/init.sh"]
+    environment:
+      CA_NAME: "Remote E2E Step CA"
+      CA_DNS: "step-ca.local,localhost"
+      CA_ADDRESS: ":9443"
+      PROVISIONER_PASSWORD: "remote-e2e-password"
+    volumes:
+      - step-ca-data:/home/step
+      - ../../step-ca/init.sh:/scripts/init.sh:ro
+
+  # Step CA server.
+  step-ca:
+    image: smallstep/step-ca:latest
+    volumes:
+      - step-ca-data:/home/step
+    depends_on:
+      step-ca-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "step", "ca", "health", "--ca-url", "https://localhost:9443", "--root", "/home/step/certs/root_ca.crt"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      default:
+        aliases:
+          - step-ca.local
+
+  # Bridge server with Step CA PKI.
+  server:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      BRIDGE_CONFIG: /app/config/bridge-stepca-e2e.yaml
+      BRIDGE_CN: bridge-server
+      BRIDGE_SANS: "bridge-server,bridge-server.local,localhost,127.0.0.1"
+      BRIDGE_CLIENT_CN: local-admin
+      STEP_CA_URL: "https://step-ca.local:9443"
+      STEP_CA_ROOT: "/step-ca/shared/root_ca.crt"
+      STEP_CA_PROVISIONER: "bridge-jwk"
+      STEP_CA_PROVISIONER_PASSWORD: "remote-e2e-password"
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - server-state:/home/bridge/.config/bridgectl
+      - ../../e2e/step-ca/bridge-stepca-e2e.yaml:/app/config/bridge-stepca-e2e.yaml:ro
+      - step-ca-data:/step-ca:ro
+      - repos:/tmp/bridgectl
+    depends_on:
+      step-ca:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+      start_period: 30s
+    networks:
+      default:
+        aliases:
+          - bridge-server
+
+  # Remote client — gets cert from Step CA, enrolls with bridge server.
+  remote-client:
+    build:
+      context: ../..
+      dockerfile: e2e/remote-stepca/Dockerfile.remote-client
+    environment:
+      BRIDGE_SERVER: bridge-server:9445
+      STEP_CA_URL: "https://step-ca.local:9443"
+      STEP_CA_PROVISIONER_PASSWORD: "remote-e2e-password"
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      E2E_TEST_TIMEOUT: ${E2E_TEST_TIMEOUT:-600s}
+    depends_on:
+      server:
+        condition: service_healthy
+    volumes:
+      - step-ca-data:/step-ca:ro
+      - server-state:/server-state:ro
+      - repos:/tmp/bridgectl
+
+volumes:
+  step-ca-data:
+  server-state:
+  repos:

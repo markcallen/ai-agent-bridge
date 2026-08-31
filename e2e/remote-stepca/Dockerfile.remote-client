@@ -1,0 +1,33 @@
+# Build stage — compile bridgectl and the e2e test binary.
+FROM golang:1.25 AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/bridgectl ./cmd/bridgectl && \
+    CGO_ENABLED=0 go test -c -tags e2e -o /out/remote-stepca-e2e ./e2e/remote-stepca
+
+# Runtime stage
+FROM ubuntu:24.04
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates git curl && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install step CLI for Step CA certificate operations.
+ARG STEP_VERSION=0.30.6
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL "https://github.com/smallstep/cli/releases/download/v${STEP_VERSION}/step-cli_${ARCH}.deb" -o /tmp/step-cli.deb && \
+    dpkg -i /tmp/step-cli.deb && \
+    rm /tmp/step-cli.deb
+
+WORKDIR /app
+
+COPY --from=build /out/bridgectl /usr/local/bin/bridgectl
+COPY --from=build /out/remote-stepca-e2e /usr/local/bin/remote-stepca-e2e
+COPY e2e/remote-stepca/scripts/client-entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]

@@ -64,6 +64,20 @@ test-step-ca-e2e:
 	docker compose -f e2e/step-ca/docker-compose.yml down -v; \
 	exit $$rc
 
+test-remote-mtls:
+	@set +e; \
+	docker compose -f e2e/remote-mtls/docker-compose.yml up --build --abort-on-container-exit --exit-code-from remote-client; \
+	rc=$$?; \
+	docker compose -f e2e/remote-mtls/docker-compose.yml down -v; \
+	exit $$rc
+
+test-remote-stepca:
+	@set +e; \
+	docker compose -f e2e/remote-stepca/docker-compose.yml up --build --abort-on-container-exit --exit-code-from remote-client; \
+	rc=$$?; \
+	docker compose -f e2e/remote-stepca/docker-compose.yml down -v; \
+	exit $$rc
+
 test-cover:
 	./scripts/test-go-coverage.sh
 	go tool cover -html=coverage.out -o coverage.html
