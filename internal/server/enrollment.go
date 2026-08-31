@@ -41,11 +41,14 @@ func (s *BridgeServer) EnrollClient(ctx context.Context, req *bridgev1.EnrollCli
 		return nil, status.Error(codes.InvalidArgument, "JWT public key is required")
 	}
 
-	// Validate the enrollment token.
-	tok, err := s.enrollStore.Validate(req.Token)
+	// Atomically validate and consume the enrollment token. This prevents
+	// concurrent enrollment with the same token (the token is marked used
+	// before we issue any certificate).
+	tok, err := s.enrollStore.ValidateAndConsume(req.Token)
 	if err != nil {
 		s.logger.Warn("enrollment.failed", "error", err)
-		return nil, status.Errorf(codes.PermissionDenied, "invalid enrollment token: %v", err)
+		// Return a generic error to avoid leaking token state to callers.
+		return nil, status.Error(codes.PermissionDenied, "invalid or expired enrollment token")
 	}
 
 	// Parse the CSR.
@@ -102,12 +105,6 @@ func (s *BridgeServer) EnrollClient(ctx context.Context, req *bridgev1.EnrollCli
 			}
 		}
 		s.jwtVerifier.AddKey(issuer, edKey)
-	}
-
-	// Mark the token as used (single-use).
-	if err := s.enrollStore.MarkUsed(req.Token); err != nil {
-		s.logger.Warn("enrollment.mark_used_failed", "error", err)
-		// Don't fail the enrollment — the cert is already issued.
 	}
 
 	// Parse the issued cert to get expiry.

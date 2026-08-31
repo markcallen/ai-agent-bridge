@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 )
 
@@ -76,8 +77,11 @@ func (p *StepCAProvider) Enroll(_ context.Context, req EnrollmentRequest) (*Iden
 		cn = sans[0]
 	}
 
-	certPath := outDir + "/" + strings.ReplaceAll(cn, " ", "-") + ".crt"
-	keyPath := outDir + "/" + strings.ReplaceAll(cn, " ", "-") + ".key"
+	// Sanitize the CN to prevent path traversal: take only the base name
+	// and replace spaces with hyphens.
+	baseName := filepath.Base(strings.ReplaceAll(cn, " ", "-"))
+	certPath := filepath.Join(outDir, baseName+".crt")
+	keyPath := filepath.Join(outDir, baseName+".key")
 
 	switch strings.ToLower(p.cfg.Provisioner) {
 	case "acme":

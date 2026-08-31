@@ -18,7 +18,7 @@ type Store struct {
 
 // NewStore opens or creates a token store at the given path.
 func NewStore(stateDir string) (*Store, error) {
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("enrollment store: mkdir: %w", err)
 	}
 
@@ -30,6 +30,9 @@ func NewStore(stateDir string) (*Store, error) {
 
 	// Load existing tokens if the file exists.
 	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("enrollment store: read %s: %w", path, err)
+	}
 	if err == nil {
 		var tokens []*Token
 		if err := json.Unmarshal(data, &tokens); err != nil {
@@ -59,8 +62,8 @@ func (s *Store) Get(value string) *Token {
 	return s.tokens[value]
 }
 
-// Validate looks up a token, checks it is valid (not used, not expired),
-// and returns it. Returns an error with a specific reason on failure.
+// Validate looks up a token and checks it is valid (not used, not expired).
+// Returns an error with a specific reason on failure.
 func (s *Store) Validate(value string) (*Token, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -74,6 +77,34 @@ func (s *Store) Validate(value string) (*Token, error) {
 	}
 	if tok.IsExpired() {
 		return nil, fmt.Errorf("enrollment: token expired")
+	}
+	return tok, nil
+}
+
+// ValidateAndConsume atomically validates a token and marks it as used,
+// preventing concurrent enrollment with the same token. The token is
+// persisted as used immediately, so even if the enrollment fails
+// afterward, the token cannot be reused.
+func (s *Store) ValidateAndConsume(value string) (*Token, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tok, ok := s.tokens[value]
+	if !ok {
+		return nil, fmt.Errorf("enrollment: unknown token")
+	}
+	if tok.Used {
+		return nil, fmt.Errorf("enrollment: token already used")
+	}
+	if tok.IsExpired() {
+		return nil, fmt.Errorf("enrollment: token expired")
+	}
+	tok.Used = true
+	if err := s.flush(); err != nil {
+		// Revert in-memory state on flush failure so the token
+		// isn't silently consumed without persistence.
+		tok.Used = false
+		return nil, fmt.Errorf("enrollment: persist token: %w", err)
 	}
 	return tok, nil
 }

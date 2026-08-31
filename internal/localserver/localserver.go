@@ -637,10 +637,23 @@ func Start(cfg Config) (*Server, error) {
 
 	// Determine the effective security mode. SecurityMode takes
 	// precedence; otherwise fall back to the legacy ListenAddr heuristic.
-	if cfg.SecurityMode != "" && cfg.SecurityMode != ModeLocal {
+	switch cfg.SecurityMode {
+	case ModeSecure, ModeMTLS, ModeTLS:
 		mode = cfg.SecurityMode
-	} else if cfg.ListenAddr != "" {
-		mode = ModeSecure
+	case ModeLocal:
+		mode = ModeLocal
+		// Explicit local mode: do not promote to secure even if ListenAddr is set.
+	case "":
+		// Legacy: determine from ListenAddr.
+		if cfg.ListenAddr != "" {
+			mode = ModeSecure
+		}
+	default:
+		sup.Close()
+		if store != nil {
+			_ = store.Close()
+		}
+		return nil, fmt.Errorf("unknown security mode %q (valid: local, tls, mtls)", cfg.SecurityMode)
 	}
 
 	if IsSecureMode(mode) {

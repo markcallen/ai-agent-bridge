@@ -88,9 +88,18 @@ func (t *Token) MarkUsed() error {
 
 // Redacted returns the token value with the random portion masked for
 // safe logging. Only the first 8 hex characters are visible.
+// Safe to call on zero-value tokens or tokens with short values.
 func (t *Token) Redacted() string {
-	if len(t.Value) <= len(TokenPrefix)+8 {
-		return t.Value[:len(TokenPrefix)] + "***"
+	if t == nil || t.Value == "" {
+		return "[no token]"
 	}
-	return t.Value[:len(TokenPrefix)+8] + "***"
+	prefixLen := len(TokenPrefix)
+	if len(t.Value) <= prefixLen {
+		return t.Value + "***"
+	}
+	showLen := prefixLen + 8
+	if showLen > len(t.Value) {
+		showLen = len(t.Value)
+	}
+	return t.Value[:showLen] + "***"
 }

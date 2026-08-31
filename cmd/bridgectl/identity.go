@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -95,16 +97,26 @@ from the local CA. For Step CA, this triggers mTLS-based renewal.`,
 				return fmt.Errorf("no server certificate found; run 'bridgectl server init' first")
 			}
 
-			// Use the existing RenewServerCertMaterial function for now.
-			// In the future, this will use the CertificateProvider interface.
+			// Derive SANs from the existing certificate so renewal preserves them.
+			existingCert, err := pki.LoadCert(mat.ServerCertPath)
+			if err != nil {
+				return fmt.Errorf("load existing certificate: %w", err)
+			}
+			var sans []string
+			sans = append(sans, existingCert.DNSNames...)
+			for _, ip := range existingCert.IPAddresses {
+				sans = append(sans, ip.String())
+			}
+
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
 			fmt.Fprintf(os.Stderr, "Renewing server certificate...\n")
-			if err := localserver.RenewServerCertMaterial(mat, nil, nil, nil, 0); err != nil {
+			if err := localserver.RenewServerCertMaterial(mat, sans, logger, nil, 0); err != nil {
 				return fmt.Errorf("renewal failed: %w", err)
 			}
 
 			fmt.Fprintf(os.Stderr, "Certificate renewed successfully.\n")
 
-			// Show the renewed cert.
 			cert, err := pki.LoadCert(mat.ServerCertPath)
 			if err != nil {
 				return fmt.Errorf("load renewed certificate: %w", err)
@@ -122,7 +134,7 @@ func readPKIModeForIdentity(certsDir string) string {
 	if err != nil {
 		return "auto"
 	}
-	mode := string(data)
+	mode := strings.TrimSpace(string(data))
 	switch mode {
 	case "auto":
 		return "auto"
