@@ -467,7 +467,7 @@ for interactive authentication. The 'step' CLI must be on PATH.`,
 	cmd.Flags().StringVar(&stepCAURL, "step-ca-url", "", "Step CA server URL (required with --oidc-provider)")
 	cmd.Flags().StringVar(&stepCARootPath, "step-ca-root", "", "path to Step CA root certificate (required with --oidc-provider)")
 	cmd.Flags().BoolVar(&bundleCreds, "bundle", false, "create a .tar.gz bundle of client credentials for easy transfer")
-	cmd.Flags().StringVar(&deployTarget, "deploy", "", "scp credential bundle to a remote host (e.g. do-dev2:~/bridge-creds/); implies --bundle")
+	cmd.Flags().StringVar(&deployTarget, "deploy", "", "scp credential bundle to a remote host (e.g. do-dev2:~/); implies --bundle. Run 'bridgectl client setup --bundle <file>' on the remote to extract.")
 
 	return cmd
 }
