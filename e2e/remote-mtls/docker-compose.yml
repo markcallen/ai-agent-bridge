@@ -1,19 +1,9 @@
 ## Two-service e2e test: server + remote client with auto-PKI mTLS
 ##
-## Tests the v1.1 credential deployment workflow:
-##   1. Server starts with auto-PKI (--listen, no explicit TLS paths)
-##   2. Server issues client credentials and bundles them
-##   3. Client runs 'bridgectl client setup --bundle' to extract creds
-##   4. Client runs 'bridgectl client enroll' with auto-discovery
-##   5. Client starts Claude and Codex sessions remotely
-##   6. Client lists and watches sessions
-##
 ## Usage:
 ##   env-secrets aws -s /ai-agent-bridge/e2e -- make test-remote-mtls
 
 services:
-  # Bridge server with auto-PKI mTLS. Uses bridgectl server start --listen
-  # (no pre-generated TLS paths) so EnsurePKI auto-generates everything.
   server:
     build:
       context: ../..
@@ -23,12 +13,17 @@ services:
       BRIDGE_CN: bridge-server
       BRIDGE_SANS: "bridge-server,localhost,127.0.0.1"
       BRIDGE_CLIENT_CN: e2e-local
+      # Issue a client cert bundle on startup for the remote client.
+      ISSUE_CLIENT_NAME: remote-client
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       CODEX_AUTH: ${CODEX_AUTH:-}
     volumes:
       - server-state:/home/bridge/.config/bridgectl
+      - client-creds:/client-creds
       - repos:/tmp/bridgectl
       - ./bridge-remote-e2e.yaml:/app/config/bridge-remote-e2e.yaml:ro
+      - ./scripts/server-entrypoint.sh:/app/server-entrypoint.sh:ro
+    entrypoint: ["/bin/bash", "/app/server-entrypoint.sh"]
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/9445'"]
       interval: 3s
@@ -40,7 +35,6 @@ services:
         aliases:
           - bridge-server
 
-  # Remote client that enrolls via the v1.1 credential deployment flow.
   remote-client:
     build:
       context: ../..
@@ -54,9 +48,12 @@ services:
       server:
         condition: service_healthy
     volumes:
-      - server-state:/server-state:ro
+      - client-creds:/client-creds:ro
       - repos:/tmp/bridgectl
+      - test-results:/results
 
 volumes:
   server-state:
+  client-creds:
   repos:
+  test-results:

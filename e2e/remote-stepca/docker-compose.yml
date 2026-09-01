@@ -1,20 +1,9 @@
 ## Three-service e2e test: step-ca + server + remote client
 ##
-## Tests the full Step CA PKI workflow:
-##   1. Step CA bootstraps and issues server cert
-##   2. Bridge server starts with Step CA-issued PKI
-##   3. Remote client obtains its cert from Step CA (JWK provisioner)
-##   4. Client enrolls JWT key with the server
-##   5. Client starts Claude and Codex sessions remotely
-##   6. Client lists and watches sessions
-##
 ## Usage:
-##   make test-remote-stepca
-##
-## Requires: CLAUDE_CODE_OAUTH_TOKEN and CODEX_AUTH in environment.
+##   env-secrets aws -s /ai-agent-bridge/e2e -- make test-remote-stepca
 
 services:
-  # Step CA initialization — runs once to bootstrap the CA.
   step-ca-init:
     image: smallstep/step-ca:latest
     entrypoint: ["/bin/sh", "/scripts/init.sh"]
@@ -27,7 +16,6 @@ services:
       - step-ca-data:/home/step
       - ../../step-ca/init.sh:/scripts/init.sh:ro
 
-  # Step CA server.
   step-ca:
     image: smallstep/step-ca:latest
     volumes:
@@ -46,7 +34,6 @@ services:
         aliases:
           - step-ca.local
 
-  # Bridge server with Step CA PKI.
   server:
     build:
       context: ../..
@@ -81,7 +68,6 @@ services:
         aliases:
           - bridge-server
 
-  # Remote client — gets cert from Step CA, enrolls with bridge server.
   remote-client:
     build:
       context: ../..
@@ -98,10 +84,11 @@ services:
         condition: service_healthy
     volumes:
       - step-ca-data:/step-ca:ro
-      - server-state:/server-state:ro
       - repos:/tmp/bridgectl
+      - test-results:/results
 
 volumes:
   step-ca-data:
   server-state:
   repos:
+  test-results:

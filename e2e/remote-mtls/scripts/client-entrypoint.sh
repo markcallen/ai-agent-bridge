@@ -1,53 +1,70 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVER_STATE=/server-state
 CLIENT_STATE=/home/testuser/.config/bridgectl
+RESULTS_DIR=/results
+RESULTS_FILE="$RESULTS_DIR/test-results.txt"
+
+mkdir -p "$RESULTS_DIR"
+
+# Write results on exit.
+cleanup() {
+  local rc=$?
+  echo "" >> "$RESULTS_FILE"
+  if [ $rc -eq 0 ]; then
+    echo "=== RESULT: PASS ===" | tee -a "$RESULTS_FILE"
+  else
+    echo "=== RESULT: FAIL (exit code $rc) ===" | tee -a "$RESULTS_FILE"
+  fi
+  echo "Results written to $RESULTS_FILE"
+  cat "$RESULTS_FILE"
+}
+trap cleanup EXIT
+
+echo "=== Remote mTLS E2E Test ===" | tee "$RESULTS_FILE"
+echo "Started: $(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$RESULTS_FILE"
+echo "" | tee -a "$RESULTS_FILE"
 
 echo "==> Setting up client user..."
 useradd -m -s /bin/bash testuser 2>/dev/null || true
 
-echo "==> Waiting for server PKI material..."
-for i in $(seq 1 60); do
-  if [ -f "$SERVER_STATE/certs/ca-bundle.crt" ]; then
-    echo "    Server PKI found."
-    break
-  fi
-  if [ "$i" -eq 60 ]; then
-    echo "ERROR: timed out waiting for server PKI" >&2
+echo "==> Waiting for client credential bundle..."
+BUNDLE_PATH=""
+for i in $(seq 1 90); do
+  for f in /client-creds/*-creds.tar.gz; do
+    if [ -f "$f" ]; then
+      BUNDLE_PATH="$f"
+      break 2
+    fi
+  done
+  if [ "$i" -eq 90 ]; then
+    echo "ERROR: timed out waiting for credential bundle in /client-creds/" | tee -a "$RESULTS_FILE"
+    ls -la /client-creds/ 2>/dev/null || true
     exit 1
   fi
   sleep 1
 done
+echo "    Found bundle: $BUNDLE_PATH" | tee -a "$RESULTS_FILE"
 
-echo "==> Issuing client credentials on server..."
-# Use the server's state to issue a client cert (simulates server admin action).
-BRIDGECTL_STATE_DIR="$SERVER_STATE" bridgectl server issue-client \
-  --name remote-client \
-  --bundle
-
-BUNDLE_PATH="$SERVER_STATE/certs/clients/remote-client/remote-client-creds.tar.gz"
-if [ ! -f "$BUNDLE_PATH" ]; then
-  echo "ERROR: bundle not created at $BUNDLE_PATH" >&2
-  ls -la "$SERVER_STATE/certs/clients/remote-client/" 2>/dev/null || true
-  exit 1
-fi
-
-echo "==> Running 'bridgectl client setup --bundle' (v1.1 deployment flow)..."
+echo "==> Step: bridgectl client setup --bundle" | tee -a "$RESULTS_FILE"
 mkdir -p "$CLIENT_STATE"
-BRIDGECTL_STATE_DIR="$CLIENT_STATE" bridgectl client setup --bundle "$BUNDLE_PATH"
+BRIDGECTL_STATE_DIR="$CLIENT_STATE" bridgectl client setup --bundle "$BUNDLE_PATH" 2>&1 | tee -a "$RESULTS_FILE"
 
-echo "==> Client credentials directory:"
-ls -la "$CLIENT_STATE/certs/"
+echo "" | tee -a "$RESULTS_FILE"
+echo "==> Client credentials:" | tee -a "$RESULTS_FILE"
+ls -la "$CLIENT_STATE/certs/" 2>&1 | tee -a "$RESULTS_FILE"
 
-echo "==> Enrolling with server (auto-discovery)..."
+echo "" | tee -a "$RESULTS_FILE"
+echo "==> Step: bridgectl client enroll (auto-discovery)" | tee -a "$RESULTS_FILE"
 BRIDGECTL_STATE_DIR="$CLIENT_STATE" bridgectl client enroll \
   --target "$BRIDGE_SERVER" \
-  --server-name bridge-server
+  --server-name bridge-server 2>&1 | tee -a "$RESULTS_FILE"
 
-echo "==> Verifying identity..."
-BRIDGECTL_STATE_DIR="$CLIENT_STATE" bridgectl identity show
+echo "" | tee -a "$RESULTS_FILE"
+echo "==> Step: bridgectl identity show" | tee -a "$RESULTS_FILE"
+BRIDGECTL_STATE_DIR="$CLIENT_STATE" bridgectl identity show 2>&1 | tee -a "$RESULTS_FILE"
 
+echo "" | tee -a "$RESULTS_FILE"
 echo "==> Preparing test repository..."
 if [ -d "/tmp/bridgectl/.git" ]; then
   git -C /tmp/bridgectl pull origin main 2>/dev/null || true
@@ -58,7 +75,8 @@ else
 fi
 chmod -R a+rwX /tmp/bridgectl
 
-echo "==> Running remote mTLS e2e test suite..."
+echo "" | tee -a "$RESULTS_FILE"
+echo "==> Running Go e2e test suite..." | tee -a "$RESULTS_FILE"
 E2E_TEST_TIMEOUT="${E2E_TEST_TIMEOUT:-600s}"
 
 remote-mtls-e2e \
@@ -66,14 +84,4 @@ remote-mtls-e2e \
   -test.timeout "$E2E_TEST_TIMEOUT" \
   -server "$BRIDGE_SERVER" \
   -client-state "$CLIENT_STATE" \
-  -repo /tmp/bridgectl
-
-exit_code=$?
-
-if [ $exit_code -eq 0 ]; then
-  echo "==> Remote mTLS e2e test suite PASSED"
-else
-  echo "==> Remote mTLS e2e test suite FAILED (exit code $exit_code)" >&2
-fi
-
-exit $exit_code
+  -repo /tmp/bridgectl 2>&1 | tee -a "$RESULTS_FILE"
