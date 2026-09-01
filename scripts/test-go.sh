@@ -11,4 +11,14 @@ if [ "${#packages[@]}" -eq 0 ]; then
   exit 1
 fi
 
-go test -race -count=1 "${packages[@]}"
+JUNIT_DIR="${JUNIT_DIR:-test-results}"
+mkdir -p "$JUNIT_DIR"
+
+if command -v gotestsum &>/dev/null; then
+  gotestsum \
+    --format short-verbose \
+    --junitfile "$JUNIT_DIR/unit-tests.xml" \
+    -- -race -count=1 "${packages[@]}"
+else
+  go test -race -count=1 "${packages[@]}"
+fi

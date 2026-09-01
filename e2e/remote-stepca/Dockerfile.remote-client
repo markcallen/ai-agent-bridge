@@ -5,6 +5,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
+RUN go install gotest.tools/gotestsum@v1.13.0
+
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/bridgectl ./cmd/bridgectl && \
     CGO_ENABLED=0 go test -c -tags e2e -o /out/remote-stepca-e2e ./e2e/remote-stepca
@@ -25,6 +27,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 
 WORKDIR /app
 
+COPY --from=build /go/bin/gotestsum /usr/local/bin/gotestsum
 COPY --from=build /out/bridgectl /usr/local/bin/bridgectl
 COPY --from=build /out/remote-stepca-e2e /usr/local/bin/remote-stepca-e2e
 COPY e2e/remote-stepca/scripts/client-entrypoint.sh /app/entrypoint.sh

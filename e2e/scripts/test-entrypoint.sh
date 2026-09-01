@@ -40,7 +40,14 @@ if [ -n "${E2E_ONLY:-}" ] && [ "${E2E_ONLY}" != "all" ]; then
   run_filter="-test.run TestBridgeSuite/Test${provider}"
 fi
 
-e2e-suite \
+RESULTS_DIR="/results"
+mkdir -p "$RESULTS_DIR"
+
+# gotestsum --raw-command parses verbose test output from pre-compiled binaries.
+gotestsum \
+  --format short-verbose \
+  --junitfile "$RESULTS_DIR/e2e-tests.xml" \
+  --raw-command -- e2e-suite \
   -test.v \
   -test.timeout "$E2E_TEST_TIMEOUT" \
   ${run_filter} \

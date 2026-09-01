@@ -79,7 +79,10 @@ echo "" | tee -a "$RESULTS_FILE"
 echo "==> Running Go e2e test suite..." | tee -a "$RESULTS_FILE"
 E2E_TEST_TIMEOUT="${E2E_TEST_TIMEOUT:-600s}"
 
-remote-mtls-e2e \
+gotestsum \
+  --format short-verbose \
+  --junitfile "$RESULTS_DIR/remote-mtls-e2e.xml" \
+  --raw-command -- remote-mtls-e2e \
   -test.v \
   -test.timeout "$E2E_TEST_TIMEOUT" \
   -server "$BRIDGE_SERVER" \

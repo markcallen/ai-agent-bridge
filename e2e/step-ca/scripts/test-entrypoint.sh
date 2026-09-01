@@ -26,8 +26,14 @@ done
 echo "==> Bridge PKI files:"
 ls -la "$BRIDGE_CERTS_DIR/"
 
+RESULTS_DIR="/results"
+mkdir -p "$RESULTS_DIR"
+
 echo "==> Running step-ca e2e test suite..."
-stepca-e2e \
+gotestsum \
+  --format short-verbose \
+  --junitfile "$RESULTS_DIR/stepca-e2e.xml" \
+  --raw-command -- stepca-e2e \
   -test.v \
   -test.timeout 180s \
   -bridge.target bridge:9445 \

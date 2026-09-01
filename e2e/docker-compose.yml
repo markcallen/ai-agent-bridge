@@ -38,7 +38,9 @@ services:
     volumes:
       - certs:/certs:ro
       - repos:/tmp/bridgectl
+      - test-results:/results
 
 volumes:
   certs:
   repos:
+  test-results:

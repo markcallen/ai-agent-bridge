@@ -282,7 +282,13 @@ docs-start: docs-install
 	cd docs && pnpm start
 
 test-cli-e2e:
-	go test -v -count=1 -race -timeout 120s ./e2e/bridgectl/
+	@mkdir -p test-results
+	@if command -v gotestsum >/dev/null 2>&1; then \
+		gotestsum --format short-verbose --junitfile test-results/cli-e2e.xml \
+			-- -count=1 -race -timeout 120s ./e2e/bridgectl/; \
+	else \
+		go test -v -count=1 -race -timeout 120s ./e2e/bridgectl/; \
+	fi
 
 test-cli-e2e-docker:
 	./scripts/test-cli-e2e-docker.sh
