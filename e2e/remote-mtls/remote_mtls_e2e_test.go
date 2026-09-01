@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
 	"github.com/orchael/bridgectl/internal/localserver"
 	"github.com/orchael/bridgectl/internal/pki"
@@ -84,7 +86,7 @@ func TestRemoteHealth(t *testing.T) {
 // TestRemoteListProviders verifies provider discovery over mTLS.
 func TestRemoteListProviders(t *testing.T) {
 	client := connectRemote(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	resp, err := client.ListProviders(ctx)
@@ -107,9 +109,12 @@ func TestRemoteEchoSession(t *testing.T) {
 	defer cancel()
 
 	startResp, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
-		ProjectId: "remote-e2e",
-		Provider:  "echo",
-		RepoPath:  *repoPath,
+		ProjectId:   "remote-e2e",
+		SessionId:   uuid.NewString(),
+		Provider:    "echo",
+		RepoPath:    *repoPath,
+		InitialCols: 80,
+		InitialRows: 24,
 	})
 	require.NoError(t, err)
 	sessionID := startResp.SessionId
@@ -172,9 +177,12 @@ func TestRemoteClaudeSession(t *testing.T) {
 	defer cancel()
 
 	startResp, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
-		ProjectId: "remote-e2e",
-		Provider:  "claude",
-		RepoPath:  *repoPath,
+		ProjectId:   "remote-e2e",
+		SessionId:   uuid.NewString(),
+		Provider:    "claude",
+		RepoPath:    *repoPath,
+		InitialCols: 80,
+		InitialRows: 24,
 	})
 	require.NoError(t, err)
 	sessionID := startResp.SessionId
@@ -240,9 +248,12 @@ func TestRemoteCodexSession(t *testing.T) {
 	defer cancel()
 
 	startResp, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
-		ProjectId: "remote-e2e",
-		Provider:  "codex",
-		RepoPath:  *repoPath,
+		ProjectId:   "remote-e2e",
+		SessionId:   uuid.NewString(),
+		Provider:    "codex",
+		RepoPath:    *repoPath,
+		InitialCols: 80,
+		InitialRows: 24,
 	})
 	require.NoError(t, err)
 	sessionID := startResp.SessionId

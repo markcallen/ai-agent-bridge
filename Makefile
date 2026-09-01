@@ -68,6 +68,14 @@ test-remote-mtls:
 	@set +e; \
 	docker compose -f e2e/remote-mtls/docker-compose.yml up --build --abort-on-container-exit --exit-code-from remote-client; \
 	rc=$$?; \
+	echo ""; \
+	echo "========================================"; \
+	if [ $$rc -eq 0 ]; then \
+		echo "  test-remote-mtls: PASSED"; \
+	else \
+		echo "  test-remote-mtls: FAILED (exit $$rc)"; \
+	fi; \
+	echo "========================================"; \
 	docker compose -f e2e/remote-mtls/docker-compose.yml down -v; \
 	exit $$rc
 
@@ -75,6 +83,14 @@ test-remote-stepca:
 	@set +e; \
 	docker compose -f e2e/remote-stepca/docker-compose.yml up --build --abort-on-container-exit --exit-code-from remote-client; \
 	rc=$$?; \
+	echo ""; \
+	echo "========================================"; \
+	if [ $$rc -eq 0 ]; then \
+		echo "  test-remote-stepca: PASSED"; \
+	else \
+		echo "  test-remote-stepca: FAILED (exit $$rc)"; \
+	fi; \
+	echo "========================================"; \
 	docker compose -f e2e/remote-stepca/docker-compose.yml down -v; \
 	exit $$rc
 
