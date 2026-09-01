@@ -81,8 +81,14 @@ test-remote-mtls:
 
 test-remote-stepca:
 	@set +e; \
-	docker compose -f e2e/remote-stepca/docker-compose.yml up --build --abort-on-container-exit --exit-code-from remote-client; \
+	CF=e2e/remote-stepca/docker-compose.yml; \
+	docker compose -f $$CF build; \
+	docker compose -f $$CF up -d; \
+	docker compose -f $$CF logs -f remote-client & \
+	LOG_PID=$$!; \
+	docker wait $$(docker compose -f $$CF ps -q remote-client) 2>/dev/null; \
 	rc=$$?; \
+	kill $$LOG_PID 2>/dev/null; wait $$LOG_PID 2>/dev/null; \
 	echo ""; \
 	echo "========================================"; \
 	if [ $$rc -eq 0 ]; then \
@@ -91,7 +97,7 @@ test-remote-stepca:
 		echo "  test-remote-stepca: FAILED (exit $$rc)"; \
 	fi; \
 	echo "========================================"; \
-	docker compose -f e2e/remote-stepca/docker-compose.yml down -v; \
+	docker compose -f $$CF down -v; \
 	exit $$rc
 
 test-cover:
