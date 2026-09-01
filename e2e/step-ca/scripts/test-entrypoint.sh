@@ -33,7 +33,7 @@ echo "==> Running step-ca e2e test suite..."
 gotestsum \
   --format short-verbose \
   --junitfile "$RESULTS_DIR/stepca-e2e.xml" \
-  --raw-command -- stepca-e2e \
+  --raw-command -- test2json -t -p stepca stepca-e2e \
   -test.v \
   -test.timeout 180s \
   -bridge.target bridge:9445 \

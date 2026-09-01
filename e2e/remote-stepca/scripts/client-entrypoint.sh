@@ -79,7 +79,7 @@ E2E_TEST_TIMEOUT="${E2E_TEST_TIMEOUT:-600s}"
 gotestsum \
   --format short-verbose \
   --junitfile "$RESULTS_DIR/remote-stepca-e2e.xml" \
-  --raw-command -- remote-stepca-e2e \
+  --raw-command -- test2json -t -p remote-stepca remote-stepca-e2e \
   -test.v \
   -test.timeout "$E2E_TEST_TIMEOUT" \
   -server "$BRIDGE_SERVER" \

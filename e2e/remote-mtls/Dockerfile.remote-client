@@ -9,7 +9,8 @@ RUN go install gotest.tools/gotestsum@v1.13.0
 
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/bridgectl ./cmd/bridgectl && \
-    CGO_ENABLED=0 go test -c -tags e2e -o /out/remote-mtls-e2e ./e2e/remote-mtls
+    CGO_ENABLED=0 go test -c -tags e2e -o /out/remote-mtls-e2e ./e2e/remote-mtls && \
+    CGO_ENABLED=0 go build -o /out/test2json cmd/test2json
 
 # Runtime stage
 FROM ubuntu:24.04
@@ -21,6 +22,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY --from=build /go/bin/gotestsum /usr/local/bin/gotestsum
+COPY --from=build /out/test2json /usr/local/bin/test2json
 COPY --from=build /out/bridgectl /usr/local/bin/bridgectl
 COPY --from=build /out/remote-mtls-e2e /usr/local/bin/remote-mtls-e2e
 COPY e2e/remote-mtls/scripts/client-entrypoint.sh /app/entrypoint.sh

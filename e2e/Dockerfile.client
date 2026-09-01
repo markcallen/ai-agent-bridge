@@ -9,7 +9,8 @@ RUN go install gotest.tools/gotestsum@v1.13.0
 
 COPY . .
 RUN CGO_ENABLED=0 go test -c -tags e2e -o /out/e2e-suite ./e2e/cmd/e2e-test && \
-    CGO_ENABLED=0 go build -o /out/chat-example ./examples/chat
+    CGO_ENABLED=0 go build -o /out/chat-example ./examples/chat && \
+    CGO_ENABLED=0 go build -o /out/test2json cmd/test2json
 
 # Runtime stage
 FROM ubuntu:24.04
@@ -21,6 +22,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY --from=build /go/bin/gotestsum /usr/local/bin/gotestsum
+COPY --from=build /out/test2json /usr/local/bin/test2json
 COPY --from=build /out/e2e-suite /usr/local/bin/e2e-suite
 COPY --from=build /out/chat-example /usr/local/bin/chat-example
 COPY e2e/scripts/test-entrypoint.sh /app/entrypoint.sh

@@ -8,7 +8,8 @@ RUN go mod download
 RUN go install gotest.tools/gotestsum@v1.13.0
 
 COPY . .
-RUN CGO_ENABLED=0 go test -c -tags e2e -o /out/stepca-e2e ./e2e/step-ca
+RUN CGO_ENABLED=0 go test -c -tags e2e -o /out/stepca-e2e ./e2e/step-ca && \
+    CGO_ENABLED=0 go build -o /out/test2json cmd/test2json
 
 # Runtime stage — minimal image with the test binary.
 FROM ubuntu:24.04
@@ -20,6 +21,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY --from=build /go/bin/gotestsum /usr/local/bin/gotestsum
+COPY --from=build /out/test2json /usr/local/bin/test2json
 COPY --from=build /out/stepca-e2e /usr/local/bin/stepca-e2e
 COPY e2e/step-ca/scripts/test-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
