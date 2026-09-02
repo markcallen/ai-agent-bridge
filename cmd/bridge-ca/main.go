@@ -18,7 +18,7 @@ func main() {
 	// the deprecation period.
 	fmt.Fprintln(os.Stderr, "WARNING: bridge-ca is deprecated. Use 'bridgectl server start' (auto-PKI) or Step CA integration instead.")
 	fmt.Fprintln(os.Stderr, "The 'cross-sign' and 'verify' subcommands remain available during the deprecation period.")
-	fmt.Fprintln(os.Stderr, "See https://github.com/orchael/ai-agent-bridge/issues/154 for details.")
+	fmt.Fprintln(os.Stderr, "See https://github.com/orchael/bridgectl/issues/154 for details.")
 	fmt.Fprintln(os.Stderr, "")
 
 	if len(os.Args) < 2 {

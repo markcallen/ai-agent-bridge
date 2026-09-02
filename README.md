@@ -356,7 +356,7 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/docs/reference/c
 
 ## bridge-ca: Certificate and Key Management (Deprecated)
 
-> **Deprecated:** `bridge-ca` is deprecated. For new deployments, use `bridgectl server start` which auto-generates PKI, or use the [Step CA integration](docs/docs/security/step-ca.md) for automated certificate lifecycle management. The `cross-sign` and `verify` subcommands remain available during the deprecation period. `bridge-ca` will be removed in the next major release. See [#154](https://github.com/orchael/ai-agent-bridge/issues/154) for details.
+> **Deprecated:** `bridge-ca` is deprecated. For new deployments, use `bridgectl server start` which auto-generates PKI, or use the [Step CA integration](docs/docs/security/step-ca.md) for automated certificate lifecycle management. The `cross-sign` and `verify` subcommands remain available during the deprecation period. `bridge-ca` will be removed in the next major release. See [#154](https://github.com/orchael/bridgectl/issues/154) for details.
 
 ```bash
 bridge-ca init          # Initialize a new ECDSA P-384 CA
