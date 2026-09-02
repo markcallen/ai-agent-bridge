@@ -88,15 +88,15 @@ Remote session commands accept:
 ## bridge-ca (Deprecated)
 
 :::warning Deprecated
-`bridge-ca` is deprecated. Use `bridgectl server start` (auto-PKI) or [Step CA integration](/docs/security/step-ca) for all new deployments. `bridge-ca` will be removed in the next major release. See [#154](https://github.com/orchael/ai-agent-bridge/issues/154).
+`bridge-ca` is deprecated. Use `bridgectl server start` (auto-PKI) or [Step CA integration](../security/step-ca) for all new deployments. `bridge-ca` will be removed in the next major release. See [#154](https://github.com/orchael/ai-agent-bridge/issues/154).
 :::
 
 `bridge-ca` is a standalone certificate management CLI. It was the primary way to set up PKI before `bridgectl server start` gained auto-PKI support and Step CA integration was added.
 
 For new deployments:
 - **Single machine / development**: `bridgectl server start` auto-generates a self-signed CA and server/client certificates.
-- **Multi-machine / production**: Use [Step CA integration](/docs/security/step-ca) for automated enrollment, short-lived certificates, and renewal.
-- **Existing enterprise CA**: Use the [filesystem provider](/docs/security/existing-ca) with certificates from your PKI.
+- **Multi-machine / production**: Use [Step CA integration](../security/step-ca) for automated enrollment, short-lived certificates, and renewal.
+- **Existing enterprise CA**: Use the [filesystem provider](../security/existing-ca) with certificates from your PKI.
 
 The `cross-sign` and `verify` subcommands remain available during the deprecation period as they have no equivalent in the current auto-PKI or Step CA workflows.
 
