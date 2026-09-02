@@ -3,6 +3,7 @@ package provider
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -292,10 +293,22 @@ func (p *OpenCodeServerProvider) CleanupSession(sessionID string) {
 }
 
 // allocatePort finds a free TCP port in the configured range by attempting to
-// listen on each port. If no port in the range is free, it falls back to
-// letting the OS pick a port.
+// listen on each port. Ports already assigned to tracked sessions are skipped
+// to avoid intra-process collisions. If no port in the range is free, it falls
+// back to letting the OS pick a port.
 func (p *OpenCodeServerProvider) allocatePort() (int, error) {
+	// Collect ports already assigned to active sessions.
+	p.mu.RLock()
+	usedPorts := make(map[int]bool, len(p.sessions))
+	for _, meta := range p.sessions {
+		usedPorts[meta.Port] = true
+	}
+	p.mu.RUnlock()
+
 	for port := p.cfg.PortRangeStart; port < p.cfg.PortRangeEnd; port++ {
+		if usedPorts[port] {
+			continue
+		}
 		addr := fmt.Sprintf("%s:%d", p.cfg.Hostname, port)
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
@@ -332,8 +345,14 @@ func (p *OpenCodeServerProvider) SendPrompt(ctx context.Context, sessionID, prom
 	// The exact path depends on the OpenCode server API; using the documented
 	// pattern from the issue.
 	promptURL := meta.BaseURL + "/session/prompt"
-	body := fmt.Sprintf(`{"content":"%s"}`, prompt)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, promptURL, strings.NewReader(body))
+	payload := struct {
+		Content string `json:"content"`
+	}{Content: prompt}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("opencode-server: marshal prompt payload: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, promptURL, strings.NewReader(string(bodyBytes)))
 	if err != nil {
 		return fmt.Errorf("opencode-server: create prompt request: %w", err)
 	}

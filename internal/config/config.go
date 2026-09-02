@@ -668,5 +668,8 @@ func ParsePortRange(s string) (start, end int, err error) {
 	if start <= 0 || endInclusive <= 0 || start > endInclusive {
 		return 0, 0, fmt.Errorf("port_range start must be <= end and both > 0, got %q", s)
 	}
+	if start > 65535 || endInclusive > 65535 {
+		return 0, 0, fmt.Errorf("port_range values must be <= 65535, got %q", s)
+	}
 	return start, end, nil
 }

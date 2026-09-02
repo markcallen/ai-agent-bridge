@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -318,6 +319,119 @@ func TestOpenCodeServerProvider_AllocatePort_RangeFull(t *testing.T) {
 	}
 }
 
+func TestOpenCodeServerProvider_AllocatePort_SkipsTrackedSessions(t *testing.T) {
+	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
+		ProviderID:     "opencode-server",
+		Binary:         "/bin/echo",
+		Hostname:       "127.0.0.1",
+		PortRangeStart: 14600,
+		PortRangeEnd:   14605,
+	})
+
+	// Pre-track a session on port 14600.
+	p.mu.Lock()
+	p.sessions["existing-sess"] = &openCodeSessionMeta{
+		Port:    14600,
+		BaseURL: "http://127.0.0.1:14600",
+	}
+	p.mu.Unlock()
+
+	port, err := p.allocatePort()
+	if err != nil {
+		t.Fatalf("allocatePort: %v", err)
+	}
+	// The allocated port must not be the one already in use by the tracked session.
+	if port == 14600 {
+		t.Fatalf("allocatePort returned tracked port %d", port)
+	}
+	if port < 14601 || port >= 14605 {
+		// It should pick from the remaining range ports.
+		t.Fatalf("expected port in [14601, 14605), got %d", port)
+	}
+}
+
+func TestOpenCodeServerProvider_SubscribeSSE_UnknownSession(t *testing.T) {
+	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
+		ProviderID: "opencode-server",
+		Binary:     "/bin/echo",
+	})
+
+	_, err := p.SubscribeSSE(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for unknown session")
+	}
+}
+
+func TestOpenCodeServerProvider_SubscribeSSE_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
+		ProviderID: "opencode-server",
+		Binary:     "/bin/echo",
+	})
+
+	p.mu.Lock()
+	p.sessions["sess-sse-err"] = &openCodeSessionMeta{
+		Port:    0,
+		BaseURL: srv.URL,
+	}
+	p.mu.Unlock()
+
+	_, err := p.SubscribeSSE(context.Background(), "sess-sse-err")
+	if err == nil {
+		t.Fatal("expected error for non-200 SSE response")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected status code in error, got: %v", err)
+	}
+}
+
+func TestParseSSEStream_ContextCancelled(t *testing.T) {
+	input := "event:msg\ndata:payload\n\nevent:msg2\ndata:payload2\n\n"
+	reader := strings.NewReader(input)
+	ch := make(chan SSEEvent, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	parseSSEStream(ctx, reader, ch)
+	close(ch)
+
+	var events []SSEEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+	// With context cancelled, we may get 0 or some events; the key thing is it
+	// does not hang.
+	if len(events) > 2 {
+		t.Fatalf("expected at most 2 events with cancelled context, got %d", len(events))
+	}
+}
+
+func TestParseSSEStream_EmptyDataLines(t *testing.T) {
+	// Lines that don't match any prefix and empty events should be skipped.
+	input := "unknown:line\n\nevent:msg\ndata:payload\n\n\n\n"
+	reader := strings.NewReader(input)
+	ch := make(chan SSEEvent, 10)
+
+	parseSSEStream(context.Background(), reader, ch)
+	close(ch)
+
+	var events []SSEEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Event != "msg" || events[0].Data != "payload" {
+		t.Fatalf("unexpected event: %+v", events[0])
+	}
+}
+
 func TestOpenCodeServerProvider_SessionBaseURL_Unknown(t *testing.T) {
 	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
 		ProviderID: "opencode-server",
@@ -473,6 +587,135 @@ func TestOpenCodeServerProvider_SendPrompt(t *testing.T) {
 	}
 	if !strings.Contains(receivedBody, "hello world") {
 		t.Fatalf("expected prompt in body, got: %s", receivedBody)
+	}
+}
+
+func TestOpenCodeServerProvider_SendPrompt_UnknownSession(t *testing.T) {
+	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
+		ProviderID: "opencode-server",
+		Binary:     "/bin/echo",
+	})
+
+	err := p.SendPrompt(context.Background(), "nonexistent", "test")
+	if err == nil {
+		t.Fatal("expected error for unknown session")
+	}
+	if !strings.Contains(err.Error(), "no session metadata") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOpenCodeServerProvider_SendPrompt_SpecialChars(t *testing.T) {
+	// Verify JSON-injection-safe prompt encoding: prompts with quotes,
+	// backslashes, and newlines must not corrupt the JSON payload.
+	var receivedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/session/prompt" && r.Method == http.MethodPost {
+			body, _ := io.ReadAll(r.Body)
+			receivedBody = string(body)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
+		ProviderID: "opencode-server",
+		Binary:     "/bin/echo",
+	})
+
+	p.mu.Lock()
+	p.sessions["sess-special"] = &openCodeSessionMeta{
+		Port:    0,
+		BaseURL: srv.URL,
+	}
+	p.mu.Unlock()
+
+	// This prompt contains characters that would break naive fmt.Sprintf JSON.
+	prompt := `say "hello\nworld" and use a backslash \`
+	err := p.SendPrompt(context.Background(), "sess-special", prompt)
+	if err != nil {
+		t.Fatalf("SendPrompt: %v", err)
+	}
+
+	// Verify the body is valid JSON by unmarshalling it.
+	var parsed struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(receivedBody), &parsed); err != nil {
+		t.Fatalf("received body is not valid JSON: %v\nbody: %s", err, receivedBody)
+	}
+	if parsed.Content != prompt {
+		t.Fatalf("round-tripped content = %q, want %q", parsed.Content, prompt)
+	}
+}
+
+func TestOpenCodeServerProvider_SendPrompt_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"internal"}`))
+	}))
+	defer srv.Close()
+
+	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
+		ProviderID: "opencode-server",
+		Binary:     "/bin/echo",
+	})
+
+	p.mu.Lock()
+	p.sessions["sess-err"] = &openCodeSessionMeta{
+		Port:    0,
+		BaseURL: srv.URL,
+	}
+	p.mu.Unlock()
+
+	err := p.SendPrompt(context.Background(), "sess-err", "test")
+	if err == nil {
+		t.Fatal("expected error for server error response")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("expected status 500 in error, got: %v", err)
+	}
+}
+
+func TestOpenCodeServerProvider_AbortTurn_UnknownSession(t *testing.T) {
+	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
+		ProviderID: "opencode-server",
+		Binary:     "/bin/echo",
+	})
+
+	err := p.AbortTurn(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for unknown session")
+	}
+}
+
+func TestOpenCodeServerProvider_AbortTurn_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"bad gateway"}`))
+	}))
+	defer srv.Close()
+
+	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
+		ProviderID: "opencode-server",
+		Binary:     "/bin/echo",
+	})
+
+	p.mu.Lock()
+	p.sessions["sess-abort-err"] = &openCodeSessionMeta{
+		Port:    0,
+		BaseURL: srv.URL,
+	}
+	p.mu.Unlock()
+
+	err := p.AbortTurn(context.Background(), "sess-abort-err")
+	if err == nil {
+		t.Fatal("expected error for server error response")
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Fatalf("expected status 502 in error, got: %v", err)
 	}
 }
 
