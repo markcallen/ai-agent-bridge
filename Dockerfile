@@ -67,12 +67,10 @@ RUN chmod +x /app/entrypoint.sh
 # e2e test helpers — excluded from production images by default.
 # Pass --build-arg INCLUDE_E2E_SCRIPTS=true to include them (e.g. in e2e compose).
 ARG INCLUDE_E2E_SCRIPTS=false
-COPY e2e/scripts/opencode_repl.js /tmp/opencode_repl.js
-RUN mkdir -p /app/scripts && \
+RUN mkdir -p /app/scripts
+RUN --mount=type=bind,source=e2e/scripts/opencode_repl.js,target=/tmp/opencode_repl.js \
     if [ "$INCLUDE_E2E_SCRIPTS" = "true" ]; then \
-      mv /tmp/opencode_repl.js /app/scripts/opencode_repl.js; \
-    else \
-      rm -f /tmp/opencode_repl.js; \
+      cp /tmp/opencode_repl.js /app/scripts/opencode_repl.js; \
     fi
 
 EXPOSE 9445
