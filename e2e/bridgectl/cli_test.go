@@ -22,13 +22,22 @@ import (
 	"github.com/orchael/bridgectl/internal/localserver"
 	"github.com/orchael/bridgectl/internal/pki"
 	"github.com/orchael/bridgectl/pkg/bridgeclient"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
 // cliBinary holds the path to the compiled bridgectl binary.
 // It is built once per test run via TestMain.
 var cliBinary string
+
+// CLISuite groups all CLI e2e tests with shared setup/teardown.
+type CLISuite struct {
+	suite.Suite
+}
+
+// TestCLISuite is the entry point that runs all CLI e2e tests.
+func TestCLISuite(t *testing.T) {
+	suite.Run(t, new(CLISuite))
+}
 
 func TestMain(m *testing.M) {
 	// Build the bridgectl binary into a temp dir.
@@ -56,69 +65,69 @@ func TestMain(m *testing.M) {
 }
 
 // testStateDir returns a per-test temp state dir (isolated from ~/.config/bridgectl).
-func testStateDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("BRIDGECTL_STATE_DIR", dir)
+func (s *CLISuite) testStateDir() string {
+	s.T().Helper()
+	dir := s.T().TempDir()
+	s.T().Setenv("BRIDGECTL_STATE_DIR", dir)
 	return dir
 }
 
 // TestServerStartStop verifies that the server starts and stops cleanly.
-func TestServerStartStop(t *testing.T) {
+func (s *CLISuite) TestServerStartStop() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Start server via the localserver package directly.
 	srv, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err, "server should start")
+	s.Require().NoError(err, "server should start")
 	defer srv.Stop()
 
 	// Verify server is discoverable.
 	target, _ := localserver.DiscoverTarget(stateDir)
-	require.NotEmpty(t, target, "should discover running server")
+	s.Require().NotEmpty(target, "should discover running server")
 
 	// Health check via SDK.
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	resp, err := client.Health(ctx)
-	require.NoError(t, err)
-	assert.NotEmpty(t, resp.ServerInstanceId)
+	s.Require().NoError(err)
+	s.Assert().NotEmpty(resp.ServerInstanceId)
 
 	// Stop server.
 	srv.Stop()
 
 	// Verify server is no longer discoverable.
-	assert.False(t, localserver.IsServerRunning(stateDir))
+	s.Assert().False(localserver.IsServerRunning(stateDir))
 }
 
 // TestEchoSessionLifecycle tests creating, listing, and stopping a session
 // using the echo (cat) provider.
-func TestEchoSessionLifecycle(t *testing.T) {
+func (s *CLISuite) TestEchoSessionLifecycle() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target := srv.Target()
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
@@ -135,8 +144,8 @@ func TestEchoSessionLifecycle(t *testing.T) {
 		InitialCols: 80,
 		InitialRows: 24,
 	})
-	require.NoError(t, err)
-	assert.Equal(t, sessionID, startResp.SessionId)
+	s.Require().NoError(err)
+	s.Assert().Equal(sessionID, startResp.SessionId)
 
 	// Wait for the session to be running.
 	var info *bridgev1.GetSessionResponse
@@ -149,22 +158,22 @@ func TestEchoSessionLifecycle(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	require.NoError(t, err)
-	assert.Equal(t, sessionID, info.SessionId)
+	s.Require().NoError(err)
+	s.Assert().Equal(sessionID, info.SessionId)
 
 	// List sessions.
 	listResp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
 		ProjectId: "test",
 	})
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(listResp.Sessions), 1)
+	s.Require().NoError(err)
+	s.Assert().GreaterOrEqual(len(listResp.Sessions), 1)
 	found := false
 	for _, s := range listResp.Sessions {
 		if s.SessionId == sessionID {
 			found = true
 		}
 	}
-	assert.True(t, found, "session should appear in list")
+	s.Assert().True(found, "session should appear in list")
 
 	// WriteInput may fail if no client is attached — that's OK for this test.
 	// The important thing is the session is running.
@@ -179,35 +188,35 @@ func TestEchoSessionLifecycle(t *testing.T) {
 		SessionId: sessionID,
 		Force:     true,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Verify session is stopped.
 	time.Sleep(200 * time.Millisecond)
 	info, err = client.GetSession(ctx, &bridgev1.GetSessionRequest{
 		SessionId: sessionID,
 	})
-	require.NoError(t, err)
-	assert.True(t,
+	s.Require().NoError(err)
+	s.Assert().True(
 		info.Status == bridgev1.SessionStatus_SESSION_STATUS_STOPPED ||
 			info.Status == bridgev1.SessionStatus_SESSION_STATUS_FAILED,
 		"session should be stopped or failed, got %v", info.Status)
 }
 
-func TestRepoSetupConfigEnvironmentPropagation(t *testing.T) {
+func (s *CLISuite) TestRepoSetupConfigEnvironmentPropagation() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
-	binDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
+	binDir := s.T().TempDir()
 	providerScript := filepath.Join(binDir, "print-setup-env.sh")
-	require.NoError(t, os.WriteFile(providerScript, []byte(`#!/bin/sh
+	s.Require().NoError(os.WriteFile(providerScript, []byte(`#!/bin/sh
 printf 'SETUP_VALUE=%s\n' "$BRIDGE_E2E_SETUP_VALUE"
 sleep 5
 `), 0o755))
-	configPath := filepath.Join(t.TempDir(), "bridge.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(`
+	configPath := filepath.Join(s.T().TempDir(), "bridge.yaml")
+	s.Require().NoError(os.WriteFile(configPath, []byte(`
 providers:
   setupenv:
     binary: `+strconv.Quote(providerScript)+`
@@ -218,7 +227,7 @@ repo_setup:
   default_timeout: 5s
   max_timeout: 30s
 `), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, ".bridgectl.yaml"), []byte(`
+	s.Require().NoError(os.WriteFile(filepath.Join(repoDir, ".bridgectl.yaml"), []byte(`
 version: 1
 shell: bash
 setup:
@@ -229,11 +238,11 @@ setup:
 		StateDir:   stateDir,
 		ConfigPath: configPath,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	client, err := bridgeclient.New(bridgeclient.WithTarget(srv.Target()))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
@@ -249,13 +258,13 @@ setup:
 		InitialCols: 80,
 		InitialRows: 24,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	_, attached, getEvents, stopRecv := attachAndCollectEvents(t, ctx, client, sessionID, uuid.NewString(), bridgev1.AttachRole_ATTACH_ROLE_WRITER)
+	_, attached, getEvents, stopRecv := s.attachAndCollectEvents(ctx, client, sessionID, uuid.NewString(), bridgev1.AttachRole_ATTACH_ROLE_WRITER)
 	defer stopRecv()
-	waitForAttach(t, attached)
+	s.waitForAttach(attached)
 
-	require.Eventually(t, func() bool {
+	s.Require().Eventually(func() bool {
 		for _, ev := range getEvents() {
 			if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT && strings.Contains(string(ev.Payload), "SETUP_VALUE=from-repo-setup") {
 				return true
@@ -265,60 +274,60 @@ setup:
 	}, 5*time.Second, 100*time.Millisecond)
 
 	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{SessionId: sessionID, Force: true})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 }
 
 // TestAutoServerDiscovery tests that a second client discovers the first server.
-func TestAutoServerDiscovery(t *testing.T) {
+func (s *CLISuite) TestAutoServerDiscovery() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Start first server.
 	srv, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	// The second "instance" should discover the existing server.
 	target, _ := localserver.DiscoverTarget(stateDir)
-	require.NotEmpty(t, target, "second instance should discover existing server")
-	assert.Equal(t, srv.Target(), target, "should discover the same server")
+	s.Require().NotEmpty(target, "second instance should discover existing server")
+	s.Assert().Equal(srv.Target(), target, "should discover the same server")
 
 	// Verify health from second connection.
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	resp, err := client.Health(ctx)
-	require.NoError(t, err)
-	assert.NotEmpty(t, resp.ServerInstanceId)
+	s.Require().NoError(err)
+	s.Assert().NotEmpty(resp.ServerInstanceId)
 }
 
 // TestMultipleSessionsSameServer tests that multiple sessions can run on the
 // same server (simulating multiple terminal windows).
-func TestMultipleSessionsSameServer(t *testing.T) {
+func (s *CLISuite) TestMultipleSessionsSameServer() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target := srv.Target()
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
@@ -337,7 +346,7 @@ func TestMultipleSessionsSameServer(t *testing.T) {
 			InitialCols: 80,
 			InitialRows: 24,
 		})
-		require.NoError(t, err, "should start session %s", id)
+		s.Require().NoError(err, "should start session %s", id)
 	}
 
 	// Wait briefly for sessions to start.
@@ -347,13 +356,13 @@ func TestMultipleSessionsSameServer(t *testing.T) {
 	listResp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
 		ProjectId: "test",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	ids := make(map[string]bool)
 	for _, s := range listResp.Sessions {
 		ids[s.SessionId] = true
 	}
-	assert.True(t, ids[sessionA], "session-a should be listed")
-	assert.True(t, ids[sessionB], "session-b should be listed")
+	s.Assert().True(ids[sessionA], "session-a should be listed")
+	s.Assert().True(ids[sessionB], "session-b should be listed")
 
 	// Stop both.
 	for _, id := range []string{sessionA, sessionB} {
@@ -361,59 +370,59 @@ func TestMultipleSessionsSameServer(t *testing.T) {
 			SessionId: id,
 			Force:     true,
 		})
-		require.NoError(t, err)
+		s.Require().NoError(err)
 	}
 }
 
 // TestServerDoesNotDoubleStart verifies that discovery finds the already-running
 // server, so a second caller would connect to it instead of starting a new one.
-func TestServerDoesNotDoubleStart(t *testing.T) {
+func (s *CLISuite) TestServerDoesNotDoubleStart() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	srv1, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv1.Stop()
 
 	// Detect that server is running.
-	assert.True(t, localserver.IsServerRunning(stateDir))
+	s.Assert().True(localserver.IsServerRunning(stateDir))
 
 	// Discovery should find the existing server.
 	target, _ := localserver.DiscoverTarget(stateDir)
-	require.NotEmpty(t, target)
-	assert.Equal(t, srv1.Target(), target)
+	s.Require().NotEmpty(target)
+	s.Assert().Equal(srv1.Target(), target)
 }
 
 // TestCLIVersion tests that `bridgectl --version` works.
-func TestCLIVersion(t *testing.T) {
+func (s *CLISuite) TestCLIVersion() {
 	cmd := exec.Command(cliBinary, "--version")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	err := cmd.Run()
-	require.NoError(t, err, "--version should succeed")
-	assert.Contains(t, out.String(), "bridgectl version")
+	s.Require().NoError(err, "--version should succeed")
+	s.Assert().Contains(out.String(), "bridgectl version")
 }
 
 // TestCLIHelp tests that `bridgectl --help` exits cleanly.
-func TestCLIHelp(t *testing.T) {
+func (s *CLISuite) TestCLIHelp() {
 	cmd := exec.Command(cliBinary, "--help")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	err := cmd.Run()
-	require.NoError(t, err, "--help should succeed")
-	assert.Contains(t, out.String(), "bridgectl starts a local bridge server")
+	s.Require().NoError(err, "--help should succeed")
+	s.Assert().Contains(out.String(), "bridgectl starts a local bridge server")
 }
 
 // TestCLISessionListNoServer tests that `session list` handles no server gracefully.
-func TestCLISessionListNoServer(t *testing.T) {
-	stateDir := testStateDir(t)
+func (s *CLISuite) TestCLISessionListNoServer() {
+	stateDir := s.testStateDir()
 
 	cmd := exec.Command(cliBinary, "session", "list")
 	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
@@ -422,17 +431,17 @@ func TestCLISessionListNoServer(t *testing.T) {
 	cmd.Stderr = &out
 	err := cmd.Run()
 	// Should succeed but print "No bridgectl server running."
-	require.NoError(t, err)
-	assert.Contains(t, out.String(), "No bridgectl server running")
+	s.Require().NoError(err)
+	s.Assert().Contains(out.String(), "No bridgectl server running")
 }
 
 // TestCLIServerStatus tests `server status` output.
-func TestCLIServerStatus(t *testing.T) {
+func (s *CLISuite) TestCLIServerStatus() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// No server running.
 	cmd := exec.Command(cliBinary, "server", "status")
@@ -441,14 +450,14 @@ func TestCLIServerStatus(t *testing.T) {
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	err := cmd.Run()
-	require.NoError(t, err)
-	assert.Contains(t, out.String(), "not running")
+	s.Require().NoError(err)
+	s.Assert().Contains(out.String(), "not running")
 
 	// Start server.
 	srv, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	// Now status should show running.
@@ -458,124 +467,124 @@ func TestCLIServerStatus(t *testing.T) {
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	err = cmd.Run()
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	output := out.String()
-	assert.Contains(t, output, "running")
+	s.Assert().Contains(output, "running")
 }
 
 // TestProviderEchoAvailable verifies the echo provider shows as available.
-func TestProviderEchoAvailable(t *testing.T) {
+func (s *CLISuite) TestProviderEchoAvailable() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 	srv, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	client, err := bridgeclient.New(bridgeclient.WithTarget(srv.Target()))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	resp, err := client.Health(ctx)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	found := false
 	for _, p := range resp.Providers {
 		if p.Provider == "echo" {
 			found = true
-			assert.True(t, p.Available, "echo provider should be available")
+			s.Assert().True(p.Available, "echo provider should be available")
 		}
 	}
-	assert.True(t, found, "echo provider should be listed in health response")
+	s.Assert().True(found, "echo provider should be listed in health response")
 }
 
 // TestCleanShutdownCleansFiles verifies state files are removed on stop.
-func TestCleanShutdownCleansFiles(t *testing.T) {
+func (s *CLISuite) TestCleanShutdownCleansFiles() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 	srv, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Files should exist.
 	_, err = os.Stat(filepath.Join(stateDir, "server.pid"))
-	assert.NoError(t, err, "PID file should exist")
+	s.Assert().NoError(err, "PID file should exist")
 	_, err = os.Stat(filepath.Join(stateDir, "server.addr"))
-	assert.NoError(t, err, "addr file should exist")
+	s.Assert().NoError(err, "addr file should exist")
 
 	if runtime.GOOS != "windows" {
 		_, err = os.Stat(filepath.Join(stateDir, "server.sock"))
-		assert.NoError(t, err, "socket should exist")
+		s.Assert().NoError(err, "socket should exist")
 	}
 
 	srv.Stop()
 
 	// Files should be cleaned up.
 	_, err = os.Stat(filepath.Join(stateDir, "server.pid"))
-	assert.True(t, os.IsNotExist(err), "PID file should be removed")
+	s.Assert().True(os.IsNotExist(err), "PID file should be removed")
 	_, err = os.Stat(filepath.Join(stateDir, "server.addr"))
-	assert.True(t, os.IsNotExist(err), "addr file should be removed")
+	s.Assert().True(os.IsNotExist(err), "addr file should be removed")
 }
 
 // TestStaleSocketRecovery verifies that a stale unix socket is cleaned up.
-func TestStaleSocketRecovery(t *testing.T) {
+func (s *CLISuite) TestStaleSocketRecovery() {
 	if runtime.GOOS == "windows" {
-		t.Skip("unix sockets not used on Windows")
+		s.T().Skip("unix sockets not used on Windows")
 	}
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Create a stale socket file.
 	sockPath := filepath.Join(stateDir, "server.sock")
 	if err := os.WriteFile(sockPath, []byte("stale"), 0o644); err != nil {
-		t.Fatal(err)
+		s.T().Fatal(err)
 	}
 
 	// IsServerRunning should return false (stale socket, no listener).
-	assert.False(t, localserver.IsServerRunning(stateDir))
+	s.Assert().False(localserver.IsServerRunning(stateDir))
 
 	// Start should succeed by replacing the stale socket.
 	srv, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
-	assert.True(t, localserver.IsServerRunning(stateDir))
+	s.Assert().True(localserver.IsServerRunning(stateDir))
 }
 
 // TestSessionAttachAndInput tests attaching to a session and writing input.
-func TestSessionAttachAndInput(t *testing.T) {
+func (s *CLISuite) TestSessionAttachAndInput() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir: stateDir,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target := srv.Target()
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
@@ -591,7 +600,7 @@ func TestSessionAttachAndInput(t *testing.T) {
 		InitialCols: 80,
 		InitialRows: 24,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Wait for session to be running.
 	time.Sleep(500 * time.Millisecond)
@@ -603,7 +612,7 @@ func TestSessionAttachAndInput(t *testing.T) {
 		ClientId:  clientID,
 		AfterSeq:  0,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	var received strings.Builder
 	var mu sync.Mutex
@@ -638,7 +647,7 @@ func TestSessionAttachAndInput(t *testing.T) {
 	select {
 	case <-attached:
 	case <-time.After(3 * time.Second):
-		t.Log("timeout waiting for attach event, trying write anyway")
+		s.T().Log("timeout waiting for attach event, trying write anyway")
 	}
 
 	// Write some input. The echo provider (cat) echoes it back.
@@ -648,7 +657,7 @@ func TestSessionAttachAndInput(t *testing.T) {
 		ClientId:  stream.ClientID(),
 		Data:      []byte(testMsg),
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Wait for output — require it to arrive.
 	select {
@@ -659,37 +668,37 @@ func TestSessionAttachAndInput(t *testing.T) {
 	mu.Lock()
 	got := received.String()
 	mu.Unlock()
-	require.NotEmpty(t, got, "echo provider should return output")
-	assert.Contains(t, got, "HELLO_FROM_E2E")
+	s.Require().NotEmpty(got, "echo provider should return output")
+	s.Assert().Contains(got, "HELLO_FROM_E2E")
 
 	// Stop.
 	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{
 		SessionId: sessionID,
 		Force:     true,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 }
 
 // --- Tier-1 auto-PKI tests (Section 2 of test plan) ---
 
 // TestAutoPKIGeneratesAllFiles verifies that starting a secure-mode server
 // with no Step CA flags generates the full set of PKI files.
-func TestAutoPKIGeneratesAllFiles(t *testing.T) {
+func (s *CLISuite) TestAutoPKIGeneratesAllFiles() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err, "secure server should start")
+	s.Require().NoError(err, "secure server should start")
 	defer srv.Stop()
 
 	certsDir := filepath.Join(stateDir, "certs")
@@ -707,41 +716,41 @@ func TestAutoPKIGeneratesAllFiles(t *testing.T) {
 	for _, name := range expectedFiles {
 		path := filepath.Join(certsDir, name)
 		_, err := os.Stat(path)
-		assert.NoError(t, err, "PKI file should exist: %s", name)
+		s.Assert().NoError(err, "PKI file should exist: %s", name)
 	}
 
 	// Private keys should have restricted permissions (0600).
 	privateKeys := []string{"ca.key", "server.key", "local-client.key", "jwt-signing.key"}
 	for _, name := range privateKeys {
 		info, err := os.Stat(filepath.Join(certsDir, name))
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+		s.Require().NoError(err)
+		s.Assert().Equal(os.FileMode(0o600), info.Mode().Perm(),
 			"private key %s should be 0600", name)
 	}
 
 	// Health check should succeed with the auto-generated creds.
 	target, _ := localserver.DiscoverTarget(stateDir)
-	client := secureClient(t, target, stateDir)
+	client := s.secureClient(target, stateDir)
 	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	resp, err := client.Health(ctx)
-	require.NoError(t, err, "health check should succeed with auto-PKI creds")
-	assert.NotEmpty(t, resp.ServerInstanceId)
+	s.Require().NoError(err, "health check should succeed with auto-PKI creds")
+	s.Assert().NotEmpty(resp.ServerInstanceId)
 }
 
 // TestAutoPKIIdempotentAcrossRestart verifies that stopping and restarting
 // a secure-mode server does not regenerate certificates.
-func TestAutoPKIIdempotentAcrossRestart(t *testing.T) {
+func (s *CLISuite) TestAutoPKIIdempotentAcrossRestart() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// First start — generates PKI.
 	srv1, err := localserver.Start(localserver.Config{
@@ -749,7 +758,7 @@ func TestAutoPKIIdempotentAcrossRestart(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	certsDir := filepath.Join(stateDir, "certs")
 	bundlePath := filepath.Join(certsDir, "ca-bundle.crt")
@@ -757,9 +766,9 @@ func TestAutoPKIIdempotentAcrossRestart(t *testing.T) {
 
 	// Record contents from first start.
 	bundle1, err := os.ReadFile(bundlePath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	ca1, err := os.ReadFile(caPath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	srv1.Stop()
 
@@ -769,40 +778,40 @@ func TestAutoPKIIdempotentAcrossRestart(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv2.Stop()
 
 	bundle2, err := os.ReadFile(bundlePath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	ca2, err := os.ReadFile(caPath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	assert.Equal(t, bundle1, bundle2, "ca-bundle.crt should not be regenerated")
-	assert.Equal(t, ca1, ca2, "ca.crt should not be regenerated")
+	s.Assert().Equal(bundle1, bundle2, "ca-bundle.crt should not be regenerated")
+	s.Assert().Equal(ca1, ca2, "ca.crt should not be regenerated")
 
 	// Server should still be fully functional with the original certs.
 	target, _ := localserver.DiscoverTarget(stateDir)
-	client := secureClient(t, target, stateDir)
+	client := s.secureClient(target, stateDir)
 	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	resp, err := client.Health(ctx)
-	require.NoError(t, err, "health check should pass after restart with same certs")
-	assert.NotEmpty(t, resp.ServerInstanceId)
+	s.Require().NoError(err, "health check should pass after restart with same certs")
+	s.Assert().NotEmpty(resp.ServerInstanceId)
 }
 
 // TestIssuedClientCertCanConnect verifies that a client using credentials
 // from IssueClientCert can connect to and authenticate with the server.
-func TestIssuedClientCertCanConnect(t *testing.T) {
+func (s *CLISuite) TestIssuedClientCertCanConnect() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	// Start and stop a server to generate PKI.
@@ -811,23 +820,23 @@ func TestIssuedClientCertCanConnect(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	srv1.Stop()
 
 	// Issue a client certificate. This writes the JWT public key to
 	// certs/jwt-clients/ which the server reads at startup.
 	clientName := "sdk-test"
 	certPath, keyPath, err := localserver.IssueClientCert(stateDir, clientName, logger)
-	require.NoError(t, err, "should issue client cert")
+	s.Require().NoError(err, "should issue client cert")
 
 	// Verify expected files were created.
 	clientDir := filepath.Join(stateDir, "certs", "clients", clientName)
-	assert.Equal(t, filepath.Join(clientDir, clientName+".crt"), certPath)
-	assert.Equal(t, filepath.Join(clientDir, clientName+".key"), keyPath)
+	s.Assert().Equal(filepath.Join(clientDir, clientName+".crt"), certPath)
+	s.Assert().Equal(filepath.Join(clientDir, clientName+".key"), keyPath)
 	_, err = os.Stat(filepath.Join(clientDir, "jwt-signing.key"))
-	require.NoError(t, err, "per-client JWT key should exist")
+	s.Require().NoError(err, "per-client JWT key should exist")
 	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", clientName+".pub"))
-	require.NoError(t, err, "server-side JWT pub should be registered")
+	s.Require().NoError(err, "server-side JWT pub should be registered")
 
 	// Restart server so it loads the new JWT public key.
 	srv2, err := localserver.Start(localserver.Config{
@@ -835,7 +844,7 @@ func TestIssuedClientCertCanConnect(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv2.Stop()
 
 	target, _ := localserver.DiscoverTarget(stateDir)
@@ -856,27 +865,27 @@ func TestIssuedClientCertCanConnect(t *testing.T) {
 			Audience:       "bridge",
 		}),
 	)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = issuedClient.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	resp, err := issuedClient.Health(ctx)
-	require.NoError(t, err, "issued client should authenticate successfully")
-	assert.NotEmpty(t, resp.ServerInstanceId)
+	s.Require().NoError(err, "issued client should authenticate successfully")
+	s.Assert().NotEmpty(resp.ServerInstanceId)
 }
 
 // TestClientNameValidation verifies that IssueClientCert rejects invalid
 // names (path traversal, special characters) and accepts valid ones.
-func TestClientNameValidation(t *testing.T) {
+func (s *CLISuite) TestClientNameValidation() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	// Generate PKI so IssueClientCert has a CA to sign with.
@@ -885,7 +894,7 @@ func TestClientNameValidation(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	// Invalid names should be rejected.
@@ -901,14 +910,14 @@ func TestClientNameValidation(t *testing.T) {
 	}
 	for _, tc := range invalidNames {
 		_, _, err := localserver.IssueClientCert(stateDir, tc.name, logger)
-		assert.Error(t, err, "should reject %q (%s)", tc.name, tc.reason)
+		s.Assert().Error(err, "should reject %q (%s)", tc.name, tc.reason)
 	}
 
 	// Valid names should be accepted.
 	validNames := []string{"a", "valid-client_1.0", "laptop2", "dev-machine", "server.local"}
 	for _, name := range validNames {
 		_, _, err := localserver.IssueClientCert(stateDir, name, logger)
-		assert.NoError(t, err, "should accept %q", name)
+		s.Assert().NoError(err, "should accept %q", name)
 	}
 }
 
@@ -916,15 +925,15 @@ func TestClientNameValidation(t *testing.T) {
 
 // TestStepCAMissingRoot verifies that starting a server with --step-ca-url
 // but without --step-ca-root returns a clear error.
-func TestStepCAMissingRoot(t *testing.T) {
+func (s *CLISuite) TestStepCAMissingRoot() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	_, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
@@ -933,22 +942,22 @@ func TestStepCAMissingRoot(t *testing.T) {
 		StepCAURL:  "https://ca.example.com",
 		// StepCARootPath intentionally omitted
 	})
-	require.Error(t, err, "should fail when --step-ca-root is missing")
-	assert.Contains(t, err.Error(), "step-ca-root is required",
+	s.Require().Error(err, "should fail when --step-ca-root is missing")
+	s.Assert().Contains(err.Error(), "step-ca-root is required",
 		"error should mention the missing flag")
 }
 
 // TestStepCANonexistentRoot verifies that a nonexistent --step-ca-root path
 // produces a clear error about the missing file.
-func TestStepCANonexistentRoot(t *testing.T) {
+func (s *CLISuite) TestStepCANonexistentRoot() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	_, err := localserver.Start(localserver.Config{
 		StateDir:       stateDir,
@@ -957,26 +966,26 @@ func TestStepCANonexistentRoot(t *testing.T) {
 		StepCAURL:      "https://ca.example.com",
 		StepCARootPath: "/nonexistent/root.crt",
 	})
-	require.Error(t, err, "should fail when root cert file does not exist")
-	assert.Contains(t, err.Error(), "copy Step CA root",
+	s.Require().Error(err, "should fail when root cert file does not exist")
+	s.Assert().Contains(err.Error(), "copy Step CA root",
 		"error should mention the copy failure")
 }
 
 // TestStepCAMissingStepCLI verifies that when `step` is not on PATH,
 // the server returns a clear error with an install link.
-func TestStepCAUnreachableCA(t *testing.T) {
+func (s *CLISuite) TestStepCAUnreachableCA() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Create a dummy root cert file so the copy step succeeds.
-	dummyRoot := filepath.Join(t.TempDir(), "root.crt")
-	require.NoError(t, os.WriteFile(dummyRoot, []byte("dummy-cert"), 0o644))
+	dummyRoot := filepath.Join(s.T().TempDir(), "root.crt")
+	s.Require().NoError(os.WriteFile(dummyRoot, []byte("dummy-cert"), 0o644))
 
 	_, err := localserver.Start(localserver.Config{
 		StateDir:       stateDir,
@@ -985,22 +994,22 @@ func TestStepCAUnreachableCA(t *testing.T) {
 		StepCAURL:      "https://ca.example.com",
 		StepCARootPath: dummyRoot,
 	})
-	require.Error(t, err, "should fail when Step CA is unreachable")
-	assert.Contains(t, err.Error(), "Step CA",
+	s.Require().Error(err, "should fail when Step CA is unreachable")
+	s.Assert().Contains(err.Error(), "Step CA",
 		"error should mention Step CA")
 }
 
 // TestOIDCFlagValidation verifies that IssueClientCertViaOIDC rejects
 // incomplete flag combinations with clear error messages.
-func TestOIDCFlagValidation(t *testing.T) {
+func (s *CLISuite) TestOIDCFlagValidation() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	tests := []struct {
@@ -1056,14 +1065,14 @@ func TestOIDCFlagValidation(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+		s.Run(tc.name, func() {
 			// Ensure step is not on PATH for the last test case.
 			if tc.name == "step CLI not on PATH" {
-				t.Setenv("PATH", t.TempDir())
+				s.T().Setenv("PATH", s.T().TempDir())
 			}
 			_, _, err := localserver.IssueClientCertViaOIDC(stateDir, tc.client, tc.stepCA, logger)
-			require.Error(t, err, "should fail for case: %s", tc.name)
-			assert.Contains(t, err.Error(), tc.wantErr,
+			s.Require().Error(err, "should fail for case: %s", tc.name)
+			s.Assert().Contains(err.Error(), tc.wantErr,
 				"error for %q should mention %q", tc.name, tc.wantErr)
 		})
 	}
@@ -1071,15 +1080,15 @@ func TestOIDCFlagValidation(t *testing.T) {
 
 // TestOIDCMissingNameFlag verifies that the CLI rejects issue-client --oidc-provider
 // when --name is not provided (Cobra flag validation).
-func TestOIDCMissingNameFlag(t *testing.T) {
+func (s *CLISuite) TestOIDCMissingNameFlag() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	cmd := exec.Command(cliBinary, "server", "issue-client",
 		"--oidc-provider", "https://accounts.google.com",
@@ -1090,8 +1099,8 @@ func TestOIDCMissingNameFlag(t *testing.T) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	require.Error(t, err, "should fail when --name is missing")
-	assert.Contains(t, stderr.String(), "name",
+	s.Require().Error(err, "should fail when --name is missing")
+	s.Assert().Contains(stderr.String(), "name",
 		"error should mention the missing --name flag")
 }
 
@@ -1099,8 +1108,8 @@ func TestOIDCMissingNameFlag(t *testing.T) {
 
 // startEchoSession creates a session using the echo provider and waits for it
 // to reach the running state. It returns the session ID.
-func startEchoSession(t *testing.T, ctx context.Context, client *bridgeclient.Client, repoDir string) string {
-	t.Helper()
+func (s *CLISuite) startEchoSession(ctx context.Context, client *bridgeclient.Client, repoDir string) string {
+	s.T().Helper()
 	sessionID := uuid.NewString()
 	_, err := client.StartSession(ctx, &bridgev1.StartSessionRequest{
 		ProjectId:   "test",
@@ -1110,7 +1119,7 @@ func startEchoSession(t *testing.T, ctx context.Context, client *bridgeclient.Cl
 		InitialCols: 80,
 		InitialRows: 24,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	// Wait for session to be running.
 	time.Sleep(500 * time.Millisecond)
 	return sessionID
@@ -1119,14 +1128,13 @@ func startEchoSession(t *testing.T, ctx context.Context, client *bridgeclient.Cl
 // attachAndCollectEvents attaches to a session and collects events in the
 // background. Returns the stream, a channel that signals when ATTACHED is
 // received, and a function to retrieve collected events.
-func attachAndCollectEvents(
-	t *testing.T,
+func (s *CLISuite) attachAndCollectEvents(
 	ctx context.Context,
 	client *bridgeclient.Client,
 	sessionID, clientID string,
 	role bridgev1.AttachRole,
 ) (stream *bridgeclient.OutputStream, attached <-chan struct{}, getEvents func() []*bridgev1.AttachSessionEvent, cancel context.CancelFunc) {
-	t.Helper()
+	s.T().Helper()
 	recvCtx, recvCancel := context.WithCancel(ctx)
 
 	stream, err := client.AttachSession(recvCtx, &bridgev1.AttachSessionRequest{
@@ -1135,7 +1143,7 @@ func attachAndCollectEvents(
 		AfterSeq:  0,
 		Role:      role,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	var mu sync.Mutex
 	var events []*bridgev1.AttachSessionEvent
@@ -1166,12 +1174,12 @@ func attachAndCollectEvents(
 }
 
 // waitForAttach blocks until the attached channel fires or a timeout expires.
-func waitForAttach(t *testing.T, attached <-chan struct{}) {
-	t.Helper()
+func (s *CLISuite) waitForAttach(attached <-chan struct{}) {
+	s.T().Helper()
 	select {
 	case <-attached:
 	case <-time.After(3 * time.Second):
-		t.Fatal("timeout waiting for attach event")
+		s.T().Fatal("timeout waiting for attach event")
 	}
 }
 
@@ -1187,16 +1195,16 @@ func hasEventType(events []*bridgev1.AttachSessionEvent, typ bridgev1.AttachEven
 
 // TestWriterReleasedOnDisconnect verifies that when the active writer
 // disconnects, observers receive a WRITER_RELEASED event.
-func TestWriterReleasedOnDisconnect(t *testing.T) {
+func (s *CLISuite) TestWriterReleasedOnDisconnect() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
 
 	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target := srv.Target()
@@ -1205,28 +1213,28 @@ func TestWriterReleasedOnDisconnect(t *testing.T) {
 
 	// Create two clients sharing the same gRPC connection.
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
-	sessionID := startEchoSession(t, ctx, client, repoDir)
+	sessionID := s.startEchoSession(ctx, client, repoDir)
 
 	// Client A: attach as writer.
 	writerID := uuid.NewString()
-	_, writerAttached, _, writerCancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, writerID,
+	_, writerAttached, _, writerCancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, writerID,
 		bridgev1.AttachRole_ATTACH_ROLE_WRITER,
 	)
-	waitForAttach(t, writerAttached)
+	s.waitForAttach(writerAttached)
 
 	// Client B: attach as observer.
 	observerID := uuid.NewString()
-	_, observerAttached, getObserverEvents, observerCancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, observerID,
+	_, observerAttached, getObserverEvents, observerCancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, observerID,
 		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	)
 	defer observerCancel()
-	waitForAttach(t, observerAttached)
+	s.waitForAttach(observerAttached)
 
 	// Writer disconnects — cancel its stream context.
 	writerCancel()
@@ -1235,13 +1243,13 @@ func TestWriterReleasedOnDisconnect(t *testing.T) {
 
 	// Observer should have received WRITER_RELEASED.
 	events := getObserverEvents()
-	assert.True(t, hasEventType(events, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
+	s.Assert().True(hasEventType(events, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
 		"observer should receive WRITER_RELEASED when writer disconnects; got events: %v", eventTypes(events))
 
 	// Verify the WRITER_RELEASED event identifies the disconnected writer.
 	for _, ev := range events {
 		if ev.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED {
-			assert.Equal(t, writerID, ev.WriterClientId,
+			s.Assert().Equal(writerID, ev.WriterClientId,
 				"WRITER_RELEASED should identify the disconnected writer")
 		}
 	}
@@ -1255,16 +1263,16 @@ func TestWriterReleasedOnDisconnect(t *testing.T) {
 // TestWriterEvictionBroadcastsEvents verifies that force-claiming the writer
 // slot broadcasts WRITER_RELEASED (for the evicted writer) and WRITER_CLAIMED
 // (for the new writer) to all observers.
-func TestWriterEvictionBroadcastsEvents(t *testing.T) {
+func (s *CLISuite) TestWriterEvictionBroadcastsEvents() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
 
 	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target := srv.Target()
@@ -1272,38 +1280,38 @@ func TestWriterEvictionBroadcastsEvents(t *testing.T) {
 	defer ctxCancel()
 
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
-	sessionID := startEchoSession(t, ctx, client, repoDir)
+	sessionID := s.startEchoSession(ctx, client, repoDir)
 
 	// Client A: attach as writer.
 	writerAID := uuid.NewString()
-	_, writerAAttached, getWriterAEvents, writerACancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, writerAID,
+	_, writerAAttached, getWriterAEvents, writerACancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, writerAID,
 		bridgev1.AttachRole_ATTACH_ROLE_WRITER,
 	)
 	defer writerACancel()
-	waitForAttach(t, writerAAttached)
+	s.waitForAttach(writerAAttached)
 
 	// Client B: attach as observer.
 	observerID := uuid.NewString()
-	_, observerAttached, getObserverEvents, observerCancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, observerID,
+	_, observerAttached, getObserverEvents, observerCancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, observerID,
 		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	)
 	defer observerCancel()
-	waitForAttach(t, observerAttached)
+	s.waitForAttach(observerAttached)
 
 	// Client C: attach as observer first (ClaimWriter requires an attached client).
 	claimantID := uuid.NewString()
-	_, claimantAttached, _, claimantCancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, claimantID,
+	_, claimantAttached, _, claimantCancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, claimantID,
 		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	)
 	defer claimantCancel()
-	waitForAttach(t, claimantAttached)
+	s.waitForAttach(claimantAttached)
 
 	// Client C: force-claim the writer slot, evicting Client A.
 	claimResp, err := client.ClaimWriter(ctx, &bridgev1.ClaimWriterRequest{
@@ -1311,9 +1319,9 @@ func TestWriterEvictionBroadcastsEvents(t *testing.T) {
 		ClientId:  claimantID,
 		Force:     true,
 	})
-	require.NoError(t, err)
-	assert.True(t, claimResp.Claimed, "force claim should succeed")
-	assert.Equal(t, writerAID, claimResp.PreviousWriterClientId,
+	s.Require().NoError(err)
+	s.Assert().True(claimResp.Claimed, "force claim should succeed")
+	s.Assert().Equal(writerAID, claimResp.PreviousWriterClientId,
 		"should report the evicted writer")
 
 	// Give the server time to broadcast events.
@@ -1321,28 +1329,28 @@ func TestWriterEvictionBroadcastsEvents(t *testing.T) {
 
 	// Observer (Client B) should see both WRITER_RELEASED and WRITER_CLAIMED.
 	obsEvents := getObserverEvents()
-	assert.True(t, hasEventType(obsEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
+	s.Assert().True(hasEventType(obsEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
 		"observer should receive WRITER_RELEASED for the evicted writer; got: %v", eventTypes(obsEvents))
-	assert.True(t, hasEventType(obsEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED),
+	s.Assert().True(hasEventType(obsEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED),
 		"observer should receive WRITER_CLAIMED for the new writer; got: %v", eventTypes(obsEvents))
 
 	// Verify the event payloads identify the correct clients.
 	for _, ev := range obsEvents {
 		switch ev.Type {
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED:
-			assert.Equal(t, writerAID, ev.WriterClientId,
+			s.Assert().Equal(writerAID, ev.WriterClientId,
 				"WRITER_RELEASED should identify the evicted writer")
 		case bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED:
-			assert.Equal(t, claimantID, ev.WriterClientId,
+			s.Assert().Equal(claimantID, ev.WriterClientId,
 				"WRITER_CLAIMED should identify the new writer")
 		}
 	}
 
 	// Client A (evicted writer, now observer) should also see the events.
 	writerAEvents := getWriterAEvents()
-	assert.True(t, hasEventType(writerAEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
+	s.Assert().True(hasEventType(writerAEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
 		"evicted writer should receive WRITER_RELEASED; got: %v", eventTypes(writerAEvents))
-	assert.True(t, hasEventType(writerAEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED),
+	s.Assert().True(hasEventType(writerAEvents, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_CLAIMED),
 		"evicted writer should receive WRITER_CLAIMED; got: %v", eventTypes(writerAEvents))
 
 	// Cleanup.
@@ -1353,16 +1361,16 @@ func TestWriterEvictionBroadcastsEvents(t *testing.T) {
 
 // TestObserverClaimsWriterAfterRelease verifies that an observer can claim the
 // writer slot after it is voluntarily released, and then write input.
-func TestObserverClaimsWriterAfterRelease(t *testing.T) {
+func (s *CLISuite) TestObserverClaimsWriterAfterRelease() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
 
 	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target := srv.Target()
@@ -1370,44 +1378,44 @@ func TestObserverClaimsWriterAfterRelease(t *testing.T) {
 	defer ctxCancel()
 
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
-	sessionID := startEchoSession(t, ctx, client, repoDir)
+	sessionID := s.startEchoSession(ctx, client, repoDir)
 
 	// Client A: attach as writer.
 	writerAID := uuid.NewString()
-	_, writerAAttached, _, writerACancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, writerAID,
+	_, writerAAttached, _, writerACancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, writerAID,
 		bridgev1.AttachRole_ATTACH_ROLE_WRITER,
 	)
 	defer writerACancel()
-	waitForAttach(t, writerAAttached)
+	s.waitForAttach(writerAAttached)
 
 	// Client B: attach as observer.
 	observerID := uuid.NewString()
-	observerStream, observerAttached, getObserverEvents, observerCancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, observerID,
+	observerStream, observerAttached, getObserverEvents, observerCancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, observerID,
 		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	)
 	defer observerCancel()
-	waitForAttach(t, observerAttached)
+	s.waitForAttach(observerAttached)
 
 	// Client A: voluntarily release the writer slot.
 	releaseResp, err := client.ReleaseWriter(ctx, &bridgev1.ReleaseWriterRequest{
 		SessionId: sessionID,
 		ClientId:  writerAID,
 	})
-	require.NoError(t, err)
-	assert.True(t, releaseResp.Released, "release should succeed")
+	s.Require().NoError(err)
+	s.Assert().True(releaseResp.Released, "release should succeed")
 
 	// Give the server time to broadcast WRITER_RELEASED.
 	time.Sleep(300 * time.Millisecond)
 
 	// Observer should have received the release notification.
 	events := getObserverEvents()
-	assert.True(t, hasEventType(events, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
+	s.Assert().True(hasEventType(events, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_WRITER_RELEASED),
 		"observer should see WRITER_RELEASED after voluntary release; got: %v", eventTypes(events))
 
 	// Client B (observer): claim the now-vacant writer slot (force=false).
@@ -1416,8 +1424,8 @@ func TestObserverClaimsWriterAfterRelease(t *testing.T) {
 		ClientId:  observerID,
 		Force:     false,
 	})
-	require.NoError(t, err, "non-force claim should succeed when slot is vacant")
-	assert.True(t, claimResp.Claimed)
+	s.Require().NoError(err, "non-force claim should succeed when slot is vacant")
+	s.Assert().True(claimResp.Claimed)
 
 	// Client B should now be able to write input.
 	_, err = client.WriteInput(ctx, &bridgev1.WriteInputRequest{
@@ -1425,7 +1433,7 @@ func TestObserverClaimsWriterAfterRelease(t *testing.T) {
 		ClientId:  observerStream.ClientID(),
 		Data:      []byte("OBSERVER_NOW_WRITER\n"),
 	})
-	require.NoError(t, err, "promoted observer should be able to write input")
+	s.Require().NoError(err, "promoted observer should be able to write input")
 
 	// Cleanup.
 	_, _ = client.StopSession(ctx, &bridgev1.StopSessionRequest{
@@ -1452,16 +1460,16 @@ func eventTypes(events []*bridgev1.AttachSessionEvent) []string {
 // existing observer entry is still present. The writer conflict check runs
 // first, so a realistic reconnect re-attaches as observer and then reclaims
 // the writer slot.
-func TestSameClientIDReattachment(t *testing.T) {
+func (s *CLISuite) TestSameClientIDReattachment() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
 
 	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target := srv.Target()
@@ -1469,27 +1477,27 @@ func TestSameClientIDReattachment(t *testing.T) {
 	defer ctxCancel()
 
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
-	sessionID := startEchoSession(t, ctx, client, repoDir)
+	sessionID := s.startEchoSession(ctx, client, repoDir)
 
 	// First attachment as observer with a fixed clientID.
 	fixedClientID := "reattach-test-client"
-	_, firstAttached, _, firstCancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, fixedClientID,
+	_, firstAttached, _, firstCancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, fixedClientID,
 		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	)
-	waitForAttach(t, firstAttached)
+	s.waitForAttach(firstAttached)
 
 	// Second attachment with the SAME clientID as observer — the server
 	// closes the stale channel and registers the new one.
-	_, secondAttached, getSecondEvents, secondCancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, fixedClientID,
+	_, secondAttached, getSecondEvents, secondCancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, fixedClientID,
 		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	)
-	waitForAttach(t, secondAttached)
+	s.waitForAttach(secondAttached)
 
 	// The first stream's context is still live, but the server closed its
 	// channel. Cancel it to clean up the goroutine.
@@ -1498,7 +1506,7 @@ func TestSameClientIDReattachment(t *testing.T) {
 	// The second attachment should be functional — verify it received the
 	// ATTACHED event.
 	events := getSecondEvents()
-	assert.True(t, hasEventType(events, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED),
+	s.Assert().True(hasEventType(events, bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED),
 		"re-attached stream should receive ATTACHED event")
 
 	secondCancel()
@@ -1511,16 +1519,16 @@ func TestSameClientIDReattachment(t *testing.T) {
 
 // TestReattachmentAsObserverThenClaimWriter verifies that a client can
 // re-attach as observer after being a writer, and then reclaim the writer slot.
-func TestReattachmentAsObserverThenClaimWriter(t *testing.T) {
+func (s *CLISuite) TestReattachmentAsObserverThenClaimWriter() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
 
 	srv, err := localserver.Start(localserver.Config{StateDir: stateDir})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target := srv.Target()
@@ -1528,28 +1536,28 @@ func TestReattachmentAsObserverThenClaimWriter(t *testing.T) {
 	defer ctxCancel()
 
 	client, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
-	sessionID := startEchoSession(t, ctx, client, repoDir)
+	sessionID := s.startEchoSession(ctx, client, repoDir)
 
 	clientID := "role-switch-client"
 
 	// Attach as writer.
-	_, writerAttached, _, writerCancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, clientID,
+	_, writerAttached, _, writerCancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, clientID,
 		bridgev1.AttachRole_ATTACH_ROLE_WRITER,
 	)
-	waitForAttach(t, writerAttached)
+	s.waitForAttach(writerAttached)
 
 	// Re-attach the same clientID as observer. The server closes the stale
 	// writer channel and re-registers as observer.
-	_, observerAttached, _, observerCancel := attachAndCollectEvents(
-		t, ctx, client, sessionID, clientID,
+	_, observerAttached, _, observerCancel := s.attachAndCollectEvents(
+		ctx, client, sessionID, clientID,
 		bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	)
-	waitForAttach(t, observerAttached)
+	s.waitForAttach(observerAttached)
 	writerCancel() // clean up old stream goroutine
 
 	// The writer slot should now be vacant since re-attach cleared it.
@@ -1559,8 +1567,8 @@ func TestReattachmentAsObserverThenClaimWriter(t *testing.T) {
 		ClientId:  clientID,
 		Force:     false,
 	})
-	require.NoError(t, err, "claim should succeed when writer slot is vacant")
-	assert.True(t, claimResp.Claimed)
+	s.Require().NoError(err, "claim should succeed when writer slot is vacant")
+	s.Assert().True(claimResp.Claimed)
 
 	// Verify we can write input as the reclaimed writer.
 	_, err = client.WriteInput(ctx, &bridgev1.WriteInputRequest{
@@ -1568,7 +1576,7 @@ func TestReattachmentAsObserverThenClaimWriter(t *testing.T) {
 		ClientId:  clientID,
 		Data:      []byte("RECLAIMED\n"),
 	})
-	require.NoError(t, err, "write should succeed after reclaiming writer slot")
+	s.Require().NoError(err, "write should succeed after reclaiming writer slot")
 
 	observerCancel()
 	_, _ = client.StopSession(ctx, &bridgev1.StopSessionRequest{
@@ -1587,12 +1595,12 @@ func TestReattachmentAsObserverThenClaimWriter(t *testing.T) {
 // fakeStepBin writes a stub `step` binary into a temp directory and prepends
 // that directory to PATH. The stub writes placeholder files for
 // `step ca certificate <name> <cert> <key> ...`.
-func fakeStepBin(t *testing.T) {
-	t.Helper()
+func (s *CLISuite) fakeStepBin() {
+	s.T().Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("fake step script not supported on Windows")
+		s.T().Skip("fake step script not supported on Windows")
 	}
-	dir := t.TempDir()
+	dir := s.T().TempDir()
 	script := `#!/bin/sh
 # Fake step CLI: write placeholder cert/key for "step ca certificate <name> <cert> <key> ..."
 if [ "$1" = "ca" ] && [ "$2" = "certificate" ]; then
@@ -1602,15 +1610,15 @@ fi
 exit 0
 `
 	scriptPath := filepath.Join(dir, "step")
-	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	s.Require().NoError(os.WriteFile(scriptPath, []byte(script), 0o755))
+	s.T().Setenv("PATH", dir+":"+os.Getenv("PATH"))
 }
 
 // mockCertRequester overrides the native JWK/ACME cert request functions with
 // a stub that writes placeholder cert/key files. This replaces fakeStepBin for
 // tests that call EnsurePKI with a StepCAConfig.
-func mockCertRequester(t *testing.T) {
-	t.Helper()
+func (s *CLISuite) mockCertRequester() {
+	s.T().Helper()
 	mock := func(_ *localserver.StepCAConfig, _ []string, certPath, keyPath string, _ *slog.Logger) error {
 		if err := os.WriteFile(certPath, []byte("fake-cert"), 0o644); err != nil {
 			return err
@@ -1618,80 +1626,80 @@ func mockCertRequester(t *testing.T) {
 		return os.WriteFile(keyPath, []byte("fake-key"), 0o600)
 	}
 	restore := localserver.SetCertRequestFuncs(mock, mock)
-	t.Cleanup(restore)
+	s.T().Cleanup(restore)
 }
 
 // TestStepCADualCAArchitecture verifies that EnsurePKI with Step CA config
 // creates both Step CA-derived server certs and a local CA for CLI credentials,
 // and that the ca-bundle.crt contains both trust roots.
-func TestStepCADualCAArchitecture(t *testing.T) {
+func (s *CLISuite) TestStepCADualCAArchitecture() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	mockCertRequester(t)
-	stateDir := testStateDir(t)
+	s.mockCertRequester()
+	stateDir := s.testStateDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	// Write a fake Step CA root cert.
-	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
-	require.NoError(t, os.WriteFile(rootPEM, []byte("step-ca-root-cert"), 0o644))
+	rootPEM := filepath.Join(s.T().TempDir(), "step-ca-root.crt")
+	s.Require().NoError(os.WriteFile(rootPEM, []byte("step-ca-root-cert"), 0o644))
 
 	stepCfg := &localserver.StepCAConfig{
 		URL:      "https://ca.example.internal:443",
 		RootPath: rootPEM,
 	}
 	mat, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg, 0)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// 1. ca-bundle.crt should contain the Step CA root first, then the local CA.
 	bundle, err := os.ReadFile(mat.CABundlePath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	bundleStr := string(bundle)
-	assert.True(t, strings.HasPrefix(bundleStr, "step-ca-root-cert"),
+	s.Assert().True(strings.HasPrefix(bundleStr, "step-ca-root-cert"),
 		"bundle should start with Step CA root")
-	assert.Contains(t, bundleStr, "BEGIN CERTIFICATE",
+	s.Assert().Contains(bundleStr, "BEGIN CERTIFICATE",
 		"bundle should also contain local CA cert (PEM)")
 
 	// 2. Local CA should exist and be self-signed.
 	_, err = os.Stat(mat.CACertPath)
-	assert.NoError(t, err, "local CA cert should exist")
+	s.Assert().NoError(err, "local CA cert should exist")
 	_, err = os.Stat(mat.CAKeyPath)
-	assert.NoError(t, err, "local CA key should exist")
+	s.Assert().NoError(err, "local CA key should exist")
 
 	// 3. Server cert and key should exist (from fake step binary).
 	_, err = os.Stat(mat.ServerCertPath)
-	assert.NoError(t, err, "server cert should exist")
+	s.Assert().NoError(err, "server cert should exist")
 	_, err = os.Stat(mat.ServerKeyPath)
-	assert.NoError(t, err, "server key should exist")
+	s.Assert().NoError(err, "server key should exist")
 
 	// 4. Local-client cert should exist (for bridgectl CLI).
 	_, err = os.Stat(mat.LocalClientCert)
-	assert.NoError(t, err, "local-client cert should exist")
+	s.Assert().NoError(err, "local-client cert should exist")
 	_, err = os.Stat(mat.LocalClientKey)
-	assert.NoError(t, err, "local-client key should exist")
+	s.Assert().NoError(err, "local-client key should exist")
 
 	// 5. JWT keypair should be auto-generated.
 	_, err = os.Stat(mat.JWTSigningPub)
-	assert.NoError(t, err, "JWT pub should exist")
+	s.Assert().NoError(err, "JWT pub should exist")
 	_, err = os.Stat(mat.JWTSigningKey)
-	assert.NoError(t, err, "JWT key should exist")
+	s.Assert().NoError(err, "JWT key should exist")
 }
 
 // TestStepCAIdempotency verifies that a second EnsurePKI call with Step CA
 // config is a no-op when ca-bundle.crt already exists.
-func TestStepCAIdempotency(t *testing.T) {
+func (s *CLISuite) TestStepCAIdempotency() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	mockCertRequester(t)
+	s.mockCertRequester()
 	// Stub mTLS so the renewal fallback path works when
 	// ensureStepCACertFresh encounters an unreadable fake cert.
 	restoreMTLS := localserver.SetCertRenewerFunc(
@@ -1699,16 +1707,16 @@ func TestStepCAIdempotency(t *testing.T) {
 			return fmt.Errorf("cert unreadable")
 		},
 	)
-	t.Cleanup(restoreMTLS)
+	s.T().Cleanup(restoreMTLS)
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
-	require.NoError(t, os.WriteFile(rootPEM, []byte("original-root"), 0o644))
+	rootPEM := filepath.Join(s.T().TempDir(), "step-ca-root.crt")
+	s.Require().NoError(os.WriteFile(rootPEM, []byte("original-root"), 0o644))
 
-	pwFile := filepath.Join(t.TempDir(), "password")
-	require.NoError(t, os.WriteFile(pwFile, []byte("test"), 0o600))
+	pwFile := filepath.Join(s.T().TempDir(), "password")
+	s.Require().NoError(os.WriteFile(pwFile, []byte("test"), 0o600))
 
 	stepCfg := &localserver.StepCAConfig{
 		URL:                     "https://ca.example.internal:443",
@@ -1718,44 +1726,44 @@ func TestStepCAIdempotency(t *testing.T) {
 
 	// First call — generates everything.
 	mat1, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg, 0)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	bundle1, err := os.ReadFile(mat1.CABundlePath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Overwrite root with different content.
-	require.NoError(t, os.WriteFile(rootPEM, []byte("changed-root"), 0o644))
+	s.Require().NoError(os.WriteFile(rootPEM, []byte("changed-root"), 0o644))
 
 	// Second call — should be no-op; bundle should retain original content.
 	mat2, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg, 0)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	bundle2, err := os.ReadFile(mat2.CABundlePath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
-	assert.Equal(t, bundle1, bundle2,
+	s.Assert().Equal(bundle1, bundle2,
 		"ca-bundle.crt should not be regenerated on second call")
-	assert.True(t, strings.HasPrefix(string(bundle2), "original-root"),
+	s.Assert().True(strings.HasPrefix(string(bundle2), "original-root"),
 		"bundle should retain the original Step CA root")
-	assert.NotContains(t, string(bundle2), "changed-root",
+	s.Assert().NotContains(string(bundle2), "changed-root",
 		"bundle should not reflect the overwritten root file")
 }
 
 // TestStepCATier1ClientIssuance verifies that Tier-1 client certificate
 // issuance (IssueClientCert, no OIDC) works correctly when the server PKI
 // was initialized with Step CA — the local CA signs the client cert.
-func TestStepCATier1ClientIssuance(t *testing.T) {
+func (s *CLISuite) TestStepCATier1ClientIssuance() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	mockCertRequester(t)
-	stateDir := testStateDir(t)
+	s.mockCertRequester()
+	stateDir := s.testStateDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
-	require.NoError(t, os.WriteFile(rootPEM, []byte("step-ca-root-cert"), 0o644))
+	rootPEM := filepath.Join(s.T().TempDir(), "step-ca-root.crt")
+	s.Require().NoError(os.WriteFile(rootPEM, []byte("step-ca-root-cert"), 0o644))
 
 	stepCfg := &localserver.StepCAConfig{
 		URL:      "https://ca.example.internal:443",
@@ -1764,25 +1772,25 @@ func TestStepCATier1ClientIssuance(t *testing.T) {
 
 	// Initialize PKI with Step CA.
 	_, err := localserver.EnsurePKI(stateDir, []string{"10.0.0.1"}, logger, stepCfg, 0)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Issue a Tier-1 client cert (signed by local CA, not Step CA).
 	clientName := "sdk-client"
 	certPath, keyPath, err := localserver.IssueClientCert(stateDir, clientName, logger)
-	require.NoError(t, err, "Tier-1 client issuance should work with Step CA PKI")
+	s.Require().NoError(err, "Tier-1 client issuance should work with Step CA PKI")
 
 	// Verify expected file layout.
 	clientDir := filepath.Join(stateDir, "certs", "clients", clientName)
-	assert.Equal(t, filepath.Join(clientDir, clientName+".crt"), certPath)
-	assert.Equal(t, filepath.Join(clientDir, clientName+".key"), keyPath)
+	s.Assert().Equal(filepath.Join(clientDir, clientName+".crt"), certPath)
+	s.Assert().Equal(filepath.Join(clientDir, clientName+".key"), keyPath)
 
 	// Per-client JWT key should exist.
 	_, err = os.Stat(filepath.Join(clientDir, "jwt-signing.key"))
-	require.NoError(t, err, "per-client JWT key should exist")
+	s.Require().NoError(err, "per-client JWT key should exist")
 
 	// Server-side JWT pub key should be registered.
 	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", clientName+".pub"))
-	require.NoError(t, err, "server-side JWT pub key should be registered")
+	s.Require().NoError(err, "server-side JWT pub key should be registered")
 }
 
 // --- OIDC client enrollment tests (Section 7 of test plan) ---
@@ -1794,20 +1802,20 @@ func TestStepCATier1ClientIssuance(t *testing.T) {
 // TestOIDCEnrollmentHappyPath verifies that IssueClientCertViaOIDC creates
 // the expected file layout (cert, key, JWT keypair) and registers the
 // server-side JWT public key.
-func TestOIDCEnrollmentHappyPath(t *testing.T) {
+func (s *CLISuite) TestOIDCEnrollmentHappyPath() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	fakeStepBin(t)
-	stateDir := testStateDir(t)
+	s.fakeStepBin()
+	stateDir := s.testStateDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
-	require.NoError(t, os.WriteFile(rootPEM, []byte("fake-root"), 0o644))
+	rootPEM := filepath.Join(s.T().TempDir(), "step-ca-root.crt")
+	s.Require().NoError(os.WriteFile(rootPEM, []byte("fake-root"), 0o644))
 
 	stepCfg := &localserver.StepCAConfig{
 		URL:             "https://ca.example.internal:443",
@@ -1817,46 +1825,46 @@ func TestOIDCEnrollmentHappyPath(t *testing.T) {
 
 	clientName := "human1"
 	certPath, keyPath, err := localserver.IssueClientCertViaOIDC(stateDir, clientName, stepCfg, logger)
-	require.NoError(t, err, "OIDC enrollment should succeed with fake step")
+	s.Require().NoError(err, "OIDC enrollment should succeed with fake step")
 
 	// Verify expected file layout.
 	clientDir := filepath.Join(stateDir, "certs", "clients", clientName)
-	assert.Equal(t, filepath.Join(clientDir, clientName+".crt"), certPath)
-	assert.Equal(t, filepath.Join(clientDir, clientName+".key"), keyPath)
+	s.Assert().Equal(filepath.Join(clientDir, clientName+".crt"), certPath)
+	s.Assert().Equal(filepath.Join(clientDir, clientName+".key"), keyPath)
 
 	// Cert and key files should exist (written by fake step).
 	_, err = os.Stat(certPath)
-	assert.NoError(t, err, "client cert should exist")
+	s.Assert().NoError(err, "client cert should exist")
 	_, err = os.Stat(keyPath)
-	assert.NoError(t, err, "client key should exist")
+	s.Assert().NoError(err, "client key should exist")
 
 	// Per-client JWT keypair should be generated locally.
 	_, err = os.Stat(filepath.Join(clientDir, "jwt-signing.key"))
-	assert.NoError(t, err, "per-client JWT signing key should exist")
+	s.Assert().NoError(err, "per-client JWT signing key should exist")
 
 	// Server-side JWT public key should be registered.
 	serverPub := filepath.Join(stateDir, "certs", "jwt-clients", clientName+".pub")
 	_, err = os.Stat(serverPub)
-	assert.NoError(t, err, "server-side JWT pub key should be registered")
+	s.Assert().NoError(err, "server-side JWT pub key should be registered")
 }
 
 // TestOIDCPerClientJWTIsolation verifies that two OIDC-enrolled clients get
 // independent JWT keypairs — each client's jwt-signing.key is unique, and each
 // has its own entry in jwt-clients/.
-func TestOIDCPerClientJWTIsolation(t *testing.T) {
+func (s *CLISuite) TestOIDCPerClientJWTIsolation() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	fakeStepBin(t)
-	stateDir := testStateDir(t)
+	s.fakeStepBin()
+	stateDir := s.testStateDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	rootPEM := filepath.Join(t.TempDir(), "step-ca-root.crt")
-	require.NoError(t, os.WriteFile(rootPEM, []byte("fake-root"), 0o644))
+	rootPEM := filepath.Join(s.T().TempDir(), "step-ca-root.crt")
+	s.Require().NoError(os.WriteFile(rootPEM, []byte("fake-root"), 0o644))
 
 	stepCfg := &localserver.StepCAConfig{
 		URL:             "https://ca.example.internal:443",
@@ -1866,37 +1874,37 @@ func TestOIDCPerClientJWTIsolation(t *testing.T) {
 
 	// Enroll two clients.
 	_, _, err := localserver.IssueClientCertViaOIDC(stateDir, "human1", stepCfg, logger)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	_, _, err = localserver.IssueClientCertViaOIDC(stateDir, "human2", stepCfg, logger)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Each client should have its own JWT signing key.
 	key1, err := os.ReadFile(filepath.Join(stateDir, "certs", "clients", "human1", "jwt-signing.key"))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	key2, err := os.ReadFile(filepath.Join(stateDir, "certs", "clients", "human2", "jwt-signing.key"))
-	require.NoError(t, err)
-	assert.NotEqual(t, key1, key2, "each client should have a unique JWT signing key")
+	s.Require().NoError(err)
+	s.Assert().NotEqual(key1, key2, "each client should have a unique JWT signing key")
 
 	// Each client should have its own server-side JWT public key.
 	pub1, err := os.ReadFile(filepath.Join(stateDir, "certs", "jwt-clients", "human1.pub"))
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	pub2, err := os.ReadFile(filepath.Join(stateDir, "certs", "jwt-clients", "human2.pub"))
-	require.NoError(t, err)
-	assert.NotEqual(t, pub1, pub2, "each client should have a unique JWT public key")
+	s.Require().NoError(err)
+	s.Assert().NotEqual(pub1, pub2, "each client should have a unique JWT public key")
 
 	// Both public keys should be registered.
 	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", "human1.pub"))
-	assert.NoError(t, err)
+	s.Assert().NoError(err)
 	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", "human2.pub"))
-	assert.NoError(t, err)
+	s.Assert().NoError(err)
 }
 
 // --- Secure mode tests ---
 
 // secureClient creates a bridgeclient connected to a secure-mode server
 // using the auto-generated local-client credentials.
-func secureClient(t *testing.T, target, stateDir string) *bridgeclient.Client {
-	t.Helper()
+func (s *CLISuite) secureClient(target, stateDir string) *bridgeclient.Client {
+	s.T().Helper()
 	mat := localserver.LoadPKIMaterial(stateDir)
 	client, err := bridgeclient.New(
 		bridgeclient.WithTarget(target),
@@ -1912,79 +1920,79 @@ func secureClient(t *testing.T, target, stateDir string) *bridgeclient.Client {
 			Audience:       "bridge",
 		}),
 	)
-	require.NoError(t, err, "secure client should connect")
+	s.Require().NoError(err, "secure client should connect")
 	return client
 }
 
 // TestSecureModeStartStop verifies that the server starts and stops
 // cleanly in secure (mTLS+JWT) mode.
-func TestSecureModeStartStop(t *testing.T) {
+func (s *CLISuite) TestSecureModeStartStop() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err, "secure server should start")
+	s.Require().NoError(err, "secure server should start")
 	defer srv.Stop()
 
 	// Verify mode file says "secure".
 	mode := localserver.DiscoverMode(stateDir)
-	assert.Equal(t, localserver.ModeSecure, mode)
+	s.Assert().Equal(localserver.ModeSecure, mode)
 
 	// Verify server is discoverable.
 	target, discoveredMode := localserver.DiscoverTarget(stateDir)
-	require.NotEmpty(t, target, "should discover running secure server")
-	assert.Equal(t, localserver.ModeSecure, discoveredMode)
+	s.Require().NotEmpty(target, "should discover running secure server")
+	s.Assert().Equal(localserver.ModeSecure, discoveredMode)
 
 	// Health check via mTLS client.
-	client := secureClient(t, target, stateDir)
+	client := s.secureClient(target, stateDir)
 	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	resp, err := client.Health(ctx)
-	require.NoError(t, err, "health check should succeed with mTLS")
-	assert.NotEmpty(t, resp.ServerInstanceId)
+	s.Require().NoError(err, "health check should succeed with mTLS")
+	s.Assert().NotEmpty(resp.ServerInstanceId)
 
 	// Stop server.
 	srv.Stop()
 
 	// Verify server is no longer discoverable.
-	assert.False(t, localserver.IsServerRunning(stateDir))
+	s.Assert().False(localserver.IsServerRunning(stateDir))
 }
 
 // TestSecureModeSessionLifecycle tests creating, listing, and stopping a
 // session on a secure-mode server.
-func TestSecureModeSessionLifecycle(t *testing.T) {
+func (s *CLISuite) TestSecureModeSessionLifecycle() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
-	repoDir := t.TempDir()
+	stateDir := s.testStateDir()
+	repoDir := s.T().TempDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target, _ := localserver.DiscoverTarget(stateDir)
-	client := secureClient(t, target, stateDir)
+	client := s.secureClient(target, stateDir)
 	defer func() { _ = client.Close() }()
 	client.SetProject("test")
 
@@ -2001,8 +2009,8 @@ func TestSecureModeSessionLifecycle(t *testing.T) {
 		InitialCols: 80,
 		InitialRows: 24,
 	})
-	require.NoError(t, err)
-	assert.Equal(t, sessionID, startResp.SessionId)
+	s.Require().NoError(err)
+	s.Assert().Equal(sessionID, startResp.SessionId)
 
 	// Wait for session to start.
 	var info *bridgev1.GetSessionResponse
@@ -2015,84 +2023,84 @@ func TestSecureModeSessionLifecycle(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// List sessions.
 	listResp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
 		ProjectId: "test",
 	})
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(listResp.Sessions), 1)
+	s.Require().NoError(err)
+	s.Assert().GreaterOrEqual(len(listResp.Sessions), 1)
 
 	// Stop session.
 	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{
 		SessionId: sessionID,
 		Force:     true,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 }
 
 // TestSecureModeRejectsInsecureClient verifies that an insecure client
 // cannot connect to a secure server.
-func TestSecureModeRejectsInsecureClient(t *testing.T) {
+func (s *CLISuite) TestSecureModeRejectsInsecureClient() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target, _ := localserver.DiscoverTarget(stateDir)
-	require.NotEmpty(t, target)
+	s.Require().NotEmpty(target)
 
 	// Try connecting without TLS — should fail.
 	insecureClient, err := bridgeclient.New(bridgeclient.WithTarget(target))
-	require.NoError(t, err, "dial should succeed (lazy connection)")
+	s.Require().NoError(err, "dial should succeed (lazy connection)")
 	defer func() { _ = insecureClient.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_, err = insecureClient.Health(ctx)
-	assert.Error(t, err, "insecure client should not be able to call secure server")
+	s.Assert().Error(err, "insecure client should not be able to call secure server")
 }
 
 // TestSecureModeCleanup verifies that secure-mode state files (including
 // server.mode) are cleaned up on stop.
-func TestSecureModeCleanup(t *testing.T) {
+func (s *CLISuite) TestSecureModeCleanup() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Mode file should exist.
 	_, err = os.Stat(filepath.Join(stateDir, "server.mode"))
-	assert.NoError(t, err, "mode file should exist while running")
+	s.Assert().NoError(err, "mode file should exist while running")
 
 	srv.Stop()
 
 	// Mode file should be cleaned up.
 	_, err = os.Stat(filepath.Join(stateDir, "server.mode"))
-	assert.True(t, os.IsNotExist(err), "mode file should be removed after stop")
+	s.Assert().True(os.IsNotExist(err), "mode file should be removed after stop")
 }
 
 // --- RegisterJWTKey enrollment tests (Section 8 of test plan) ---
@@ -2103,22 +2111,22 @@ func TestSecureModeCleanup(t *testing.T) {
 // 3. Generate a JWT keypair and call RegisterJWTKey
 // 4. Reconnect with mTLS + JWT using the newly registered key
 // 5. Verify an authenticated RPC succeeds
-func TestRegisterJWTKeyEnrollment(t *testing.T) {
+func (s *CLISuite) TestRegisterJWTKeyEnrollment() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err, "secure server should start")
+	s.Require().NoError(err, "secure server should start")
 	defer srv.Stop()
 
 	target, _ := localserver.DiscoverTarget(stateDir)
@@ -2136,18 +2144,18 @@ func TestRegisterJWTKeyEnrollment(t *testing.T) {
 		}),
 		bridgeclient.WithTimeout(5*time.Second),
 	)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = mtlsOnlyClient.Close() }()
 
 	// Step 2: Generate a JWT keypair locally (like `client enroll` would).
-	keyDir := t.TempDir()
+	keyDir := s.T().TempDir()
 	pubPath, privPath, err := pki.GenerateJWTKeypair(keyDir, "jwt-signing")
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	pubKey, err := pki.LoadEd25519PublicKey(pubPath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	pubDER, err := x509.MarshalPKIXPublicKey(pubKey)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Step 3: Call RegisterJWTKey — issuer must match the client cert CN
 	// ("local-client") to pass the identity check introduced to prevent
@@ -2158,12 +2166,12 @@ func TestRegisterJWTKeyEnrollment(t *testing.T) {
 		PublicKey: pubDER,
 		Issuer:    "local-client",
 	})
-	require.NoError(t, err, "RegisterJWTKey should succeed with mTLS-only auth")
-	assert.Equal(t, "local-client", resp.Issuer)
+	s.Require().NoError(err, "RegisterJWTKey should succeed with mTLS-only auth")
+	s.Assert().Equal("local-client", resp.Issuer)
 
 	// Verify the key was persisted to disk.
 	_, err = os.Stat(filepath.Join(stateDir, "certs", "jwt-clients", "local-client.pub"))
-	require.NoError(t, err, "JWT public key should be persisted to disk")
+	s.Require().NoError(err, "JWT public key should be persisted to disk")
 
 	// Step 4: Connect with mTLS + JWT using the newly registered key.
 	// No server restart needed — the key was hot-added.
@@ -2182,40 +2190,40 @@ func TestRegisterJWTKeyEnrollment(t *testing.T) {
 		}),
 		bridgeclient.WithTimeout(5*time.Second),
 	)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = enrolledClient.Close() }()
 
 	// Step 5: Verify an authenticated RPC works with the enrolled key.
 	enrolledClient.SetProject("test")
 	healthResp, err := enrolledClient.Health(ctx)
-	require.NoError(t, err, "Health should succeed with enrolled JWT credentials")
-	assert.NotEmpty(t, healthResp.ServerInstanceId)
+	s.Require().NoError(err, "Health should succeed with enrolled JWT credentials")
+	s.Assert().NotEmpty(healthResp.ServerInstanceId)
 
 	// Also verify a JWT-protected RPC (ListSessions) works.
 	_, err = enrolledClient.ListSessions(ctx, &bridgev1.ListSessionsRequest{
 		ProjectId: "test",
 	})
-	require.NoError(t, err, "ListSessions should succeed with enrolled JWT credentials")
+	s.Require().NoError(err, "ListSessions should succeed with enrolled JWT credentials")
 }
 
 // TestRegisterJWTKeyInsecureClientRejected verifies that an insecure client
 // (no mTLS) cannot call RegisterJWTKey on a secure server.
-func TestRegisterJWTKeyInsecureClientRejected(t *testing.T) {
+func (s *CLISuite) TestRegisterJWTKeyInsecureClientRejected() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target, _ := localserver.DiscoverTarget(stateDir)
@@ -2225,7 +2233,7 @@ func TestRegisterJWTKeyInsecureClientRejected(t *testing.T) {
 		bridgeclient.WithTarget(target),
 		bridgeclient.WithTimeout(3*time.Second),
 	)
-	require.NoError(t, err, "dial should succeed (lazy connection)")
+	s.Require().NoError(err, "dial should succeed (lazy connection)")
 	defer func() { _ = insecureClient.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -2234,20 +2242,20 @@ func TestRegisterJWTKeyInsecureClientRejected(t *testing.T) {
 		PublicKey: []byte("fake"),
 		Issuer:    "attacker",
 	})
-	assert.Error(t, err, "insecure client should not be able to call RegisterJWTKey")
+	s.Assert().Error(err, "insecure client should not be able to call RegisterJWTKey")
 }
 
 // TestRegisterJWTKeySurvivesRestart verifies that a key registered via
 // RegisterJWTKey persists across server restarts.
-func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
+func (s *CLISuite) TestRegisterJWTKeySurvivesRestart() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 	if runtime.GOOS == "windows" {
-		t.Skip("secure mode not supported on Windows")
+		s.T().Skip("secure mode not supported on Windows")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Start server, enroll a key, then stop.
 	srv1, err := localserver.Start(localserver.Config{
@@ -2255,20 +2263,20 @@ func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	target1, _ := localserver.DiscoverTarget(stateDir)
 	mat := localserver.LoadPKIMaterial(stateDir)
 
 	// Generate and register a key.
-	keyDir := t.TempDir()
+	keyDir := s.T().TempDir()
 	pubPath, privPath, err := pki.GenerateJWTKeypair(keyDir, "jwt-signing")
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	pubKey, err := pki.LoadEd25519PublicKey(pubPath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	pubDER, err := x509.MarshalPKIXPublicKey(pubKey)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	mtlsClient, err := bridgeclient.New(
 		bridgeclient.WithTarget(target1),
@@ -2280,7 +2288,7 @@ func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
 		}),
 		bridgeclient.WithTimeout(5*time.Second),
 	)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	// Issuer must match the local-client cert CN to pass the identity check.
 	ctx := context.Background()
@@ -2288,7 +2296,7 @@ func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
 		PublicKey: pubDER,
 		Issuer:    "local-client",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	_ = mtlsClient.Close()
 
 	// Stop the server.
@@ -2300,7 +2308,7 @@ func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		ServerSANs: []string{"127.0.0.1"},
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv2.Stop()
 
 	target2, _ := localserver.DiscoverTarget(stateDir)
@@ -2321,109 +2329,109 @@ func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
 		}),
 		bridgeclient.WithTimeout(5*time.Second),
 	)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer func() { _ = enrolledClient.Close() }()
 
 	enrolledClient.SetProject("test")
 	_, err = enrolledClient.ListSessions(ctx, &bridgev1.ListSessionsRequest{
 		ProjectId: "test",
 	})
-	require.NoError(t, err, "enrolled key should survive server restart")
+	s.Require().NoError(err, "enrolled key should survive server restart")
 }
 
 // --- v1.1 Security Refactor E2E Tests ---
 
 // TestTLSOnlyMode verifies that a server started with --mode tls accepts
 // connections without a client certificate (JWT is the sole auth mechanism).
-func TestTLSOnlyMode(t *testing.T) {
+func (s *CLISuite) TestTLSOnlyMode() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:     stateDir,
 		ListenAddr:   "127.0.0.1:0",
 		SecurityMode: localserver.ModeTLS,
 	})
-	require.NoError(t, err, "TLS-only server should start")
+	s.Require().NoError(err, "TLS-only server should start")
 	defer srv.Stop()
 
 	mode := localserver.DiscoverMode(stateDir)
-	assert.Equal(t, localserver.ModeTLS, mode, "mode file should say tls")
+	s.Assert().Equal(localserver.ModeTLS, mode, "mode file should say tls")
 
 	// The server should be discoverable.
 	target, discoveredMode := localserver.DiscoverTarget(stateDir)
-	require.NotEmpty(t, target, "TLS server should be discoverable")
-	assert.Equal(t, localserver.ModeTLS, discoveredMode)
+	s.Require().NotEmpty(target, "TLS server should be discoverable")
+	s.Assert().Equal(localserver.ModeTLS, discoveredMode)
 }
 
 // TestSecurityModeFlag verifies the bridgectl server start --mode flag
 // is recognized by the CLI binary.
-func TestSecurityModeFlag(t *testing.T) {
+func (s *CLISuite) TestSecurityModeFlag() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// --mode with an invalid value should fail.
 	cmd := exec.Command(cliBinary, "server", "start", "--mode", "insecure", "--listen", "127.0.0.1:0")
 	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
 	out, err := cmd.CombinedOutput()
-	assert.Error(t, err, "invalid --mode should fail")
-	assert.Contains(t, string(out), "unknown security mode", "error should mention the invalid mode")
+	s.Assert().Error(err, "invalid --mode should fail")
+	s.Assert().Contains(string(out), "unknown security mode", "error should mention the invalid mode")
 }
 
 // TestIdentityShowLocalMode verifies bridgectl identity show works after
 // a secure server has generated PKI material.
-func TestIdentityShowLocalMode(t *testing.T) {
+func (s *CLISuite) TestIdentityShowLocalMode() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Start a secure server so PKI is generated.
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	cmd := exec.Command(cliBinary, "identity", "show")
 	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
 	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "identity show should succeed; output: %s", out)
+	s.Require().NoError(err, "identity show should succeed; output: %s", out)
 
 	output := string(out)
-	assert.Contains(t, output, "Identity:")
-	assert.Contains(t, output, "Provider:")
-	assert.Contains(t, output, "Expires:")
-	assert.Contains(t, output, "Status:")
+	s.Assert().Contains(output, "Identity:")
+	s.Assert().Contains(output, "Provider:")
+	s.Assert().Contains(output, "Expires:")
+	s.Assert().Contains(output, "Status:")
 }
 
 // TestIdentityShowNoServer verifies identity show fails gracefully when
 // no PKI exists.
-func TestIdentityShowNoServer(t *testing.T) {
-	stateDir := testStateDir(t)
+func (s *CLISuite) TestIdentityShowNoServer() {
+	stateDir := s.testStateDir()
 
 	cmd := exec.Command(cliBinary, "identity", "show")
 	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
 	_, err := cmd.CombinedOutput()
-	assert.Error(t, err, "identity show without PKI should fail")
+	s.Assert().Error(err, "identity show without PKI should fail")
 }
 
 // TestEnrollmentCreateAndList verifies the enrollment token lifecycle:
 // create a token, verify it appears in the store.
-func TestEnrollmentCreateAndList(t *testing.T) {
+func (s *CLISuite) TestEnrollmentCreateAndList() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Create an enrollment token via CLI.
 	cmd := exec.Command(cliBinary, "enrollment", "create",
@@ -2431,83 +2439,83 @@ func TestEnrollmentCreateAndList(t *testing.T) {
 		"--expires", "5m")
 	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
 	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "enrollment create should succeed; output: %s", out)
+	s.Require().NoError(err, "enrollment create should succeed; output: %s", out)
 
 	output := string(out)
-	assert.Contains(t, output, "brg_enroll_", "output should contain the token")
-	assert.Contains(t, output, "test-agent", "output should mention the identity")
+	s.Assert().Contains(output, "brg_enroll_", "output should contain the token")
+	s.Assert().Contains(output, "test-agent", "output should mention the identity")
 
 	// Verify the token store file was created.
 	storePath := filepath.Join(stateDir, "enrollment-tokens.json")
 	_, err = os.Stat(storePath)
-	require.NoError(t, err, "enrollment store file should exist")
+	s.Require().NoError(err, "enrollment store file should exist")
 
 	data, err := os.ReadFile(storePath)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), "test-agent")
-	assert.Contains(t, string(data), "brg_enroll_")
+	s.Require().NoError(err)
+	s.Assert().Contains(string(data), "test-agent")
+	s.Assert().Contains(string(data), "brg_enroll_")
 }
 
 // TestClientSetupBundle verifies that client setup --bundle extracts
 // credentials into the correct directory.
-func TestClientSetupBundle(t *testing.T) {
+func (s *CLISuite) TestClientSetupBundle() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Start a secure server to generate PKI, then issue a client cert.
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	_, _, issueErr := localserver.IssueClientCert(stateDir, "test-remote", logger)
-	require.NoError(t, issueErr)
+	s.Require().NoError(issueErr)
 
 	bundlePath := filepath.Join(localserver.CertsDir(stateDir), "clients", "test-remote", "test-remote-creds.tar.gz")
 	bundleErr := localserver.BundleClientCreds(bundlePath, stateDir, "test-remote")
-	require.NoError(t, bundleErr)
+	s.Require().NoError(bundleErr)
 
 	srv.Stop()
 
 	// Set up a separate "client" state dir and run client setup --bundle.
-	clientStateDir := t.TempDir()
+	clientStateDir := s.T().TempDir()
 	cmd := exec.Command(cliBinary, "client", "setup", "--bundle", bundlePath)
 	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+clientStateDir)
 	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "client setup should succeed; output: %s", out)
+	s.Require().NoError(err, "client setup should succeed; output: %s", out)
 
 	// Verify files were extracted.
 	clientCertsDir := filepath.Join(clientStateDir, "certs")
 	_, err = os.Stat(filepath.Join(clientCertsDir, "ca-bundle.crt"))
-	assert.NoError(t, err, "ca-bundle.crt should exist")
+	s.Assert().NoError(err, "ca-bundle.crt should exist")
 	_, err = os.Stat(filepath.Join(clientCertsDir, "test-remote.crt"))
-	assert.NoError(t, err, "test-remote.crt should exist")
+	s.Assert().NoError(err, "test-remote.crt should exist")
 	_, err = os.Stat(filepath.Join(clientCertsDir, "test-remote.key"))
-	assert.NoError(t, err, "test-remote.key should exist")
+	s.Assert().NoError(err, "test-remote.key should exist")
 	_, err = os.Stat(filepath.Join(clientCertsDir, "jwt-signing.key"))
-	assert.NoError(t, err, "jwt-signing.key should exist")
+	s.Assert().NoError(err, "jwt-signing.key should exist")
 }
 
 // TestClientEnrollAutoDiscovery verifies that client enroll auto-discovers
 // credentials from ~/.config/bridgectl/certs/ after client setup.
-func TestClientEnrollAutoDiscovery(t *testing.T) {
+func (s *CLISuite) TestClientEnrollAutoDiscovery() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	serverStateDir := testStateDir(t)
+	serverStateDir := s.testStateDir()
 
 	// Start a secure server.
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   serverStateDir,
 		ListenAddr: "127.0.0.1:0",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	defer srv.Stop()
 
 	target := srv.Addr()
@@ -2516,18 +2524,18 @@ func TestClientEnrollAutoDiscovery(t *testing.T) {
 	// Issue a client cert.
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	_, _, issueErr := localserver.IssueClientCert(serverStateDir, "auto-disc-client", logger)
-	require.NoError(t, issueErr)
+	s.Require().NoError(issueErr)
 
 	bundlePath := filepath.Join(localserver.CertsDir(serverStateDir), "clients", "auto-disc-client", "auto-disc-client-creds.tar.gz")
 	bundleErr := localserver.BundleClientCreds(bundlePath, serverStateDir, "auto-disc-client")
-	require.NoError(t, bundleErr)
+	s.Require().NoError(bundleErr)
 
 	// Set up a separate "client" state dir with the bundle.
-	clientStateDir := t.TempDir()
+	clientStateDir := s.T().TempDir()
 	setupCmd := exec.Command(cliBinary, "client", "setup", "--bundle", bundlePath)
 	setupCmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+clientStateDir)
 	setupOut, setupErr := setupCmd.CombinedOutput()
-	require.NoError(t, setupErr, "client setup should succeed; output: %s", setupOut)
+	s.Require().NoError(setupErr, "client setup should succeed; output: %s", setupOut)
 
 	// Enroll using auto-discovery (no --ca, --cert, --key flags).
 	enrollCmd := exec.Command(cliBinary, "client", "enroll",
@@ -2535,56 +2543,56 @@ func TestClientEnrollAutoDiscovery(t *testing.T) {
 		"--server-name", serverName)
 	enrollCmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+clientStateDir)
 	enrollOut, enrollErr := enrollCmd.CombinedOutput()
-	require.NoError(t, enrollErr, "client enroll should succeed with auto-discovery; output: %s", enrollOut)
+	s.Require().NoError(enrollErr, "client enroll should succeed with auto-discovery; output: %s", enrollOut)
 
-	assert.Contains(t, string(enrollOut), "Enrolled:", "should confirm enrollment")
+	s.Assert().Contains(string(enrollOut), "Enrolled:", "should confirm enrollment")
 }
 
 // TestIdentityRenew verifies that identity renew re-issues the server
 // certificate with a new expiry.
-func TestIdentityRenew(t *testing.T) {
+func (s *CLISuite) TestIdentityRenew() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Start and immediately stop a secure server to generate PKI.
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:0",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	srv.Stop()
 
 	// Record the original cert expiry.
 	mat := localserver.LoadPKIMaterial(stateDir)
 	origCert, err := pki.LoadCert(mat.ServerCertPath)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	origExpiry := origCert.NotAfter
 
 	// Run identity renew.
 	cmd := exec.Command(cliBinary, "identity", "renew")
 	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
 	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "identity renew should succeed; output: %s", out)
-	assert.Contains(t, string(out), "Expires:", "should show new expiry")
+	s.Require().NoError(err, "identity renew should succeed; output: %s", out)
+	s.Assert().Contains(string(out), "Expires:", "should show new expiry")
 
 	// Verify the cert was renewed (new expiry >= original).
 	renewedCert, err := pki.LoadCert(mat.ServerCertPath)
-	require.NoError(t, err)
-	assert.True(t, !renewedCert.NotAfter.Before(origExpiry),
+	s.Require().NoError(err)
+	s.Assert().True(!renewedCert.NotAfter.Before(origExpiry),
 		"renewed cert expiry %v should not be before original %v", renewedCert.NotAfter, origExpiry)
 }
 
 // TestSecurityConfigFromYAML verifies that a YAML config with the new
 // security: block is correctly parsed and drives server startup.
-func TestSecurityConfigFromYAML(t *testing.T) {
+func (s *CLISuite) TestSecurityConfigFromYAML() {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		s.T().Skip("skipping in short mode")
 	}
 
-	stateDir := testStateDir(t)
+	stateDir := s.testStateDir()
 
 	// Write a YAML config with the new security block.
 	configPath := filepath.Join(stateDir, "bridge.yaml")
@@ -2608,15 +2616,15 @@ sessions:
   stop_grace_period: "10s"
   subscriber_ttl: "30m"
 `
-	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
+	s.Require().NoError(os.WriteFile(configPath, []byte(configContent), 0o644))
 
 	srv, err := localserver.Start(localserver.Config{
 		StateDir:   stateDir,
 		ConfigPath: configPath,
 	})
-	require.NoError(t, err, "server with security config should start")
+	s.Require().NoError(err, "server with security config should start")
 	defer srv.Stop()
 
 	mode := localserver.DiscoverMode(stateDir)
-	assert.Equal(t, localserver.ModeSecure, mode, "mtls mode should be discoverable as secure")
+	s.Assert().Equal(localserver.ModeSecure, mode, "mtls mode should be discoverable as secure")
 }
