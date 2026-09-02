@@ -96,15 +96,32 @@ func (s *BridgeServer) EnrollClient(ctx context.Context, req *bridgev1.EnrollCli
 		return nil, status.Errorf(codes.Internal, "load CA bundle: %v", err)
 	}
 
-	// Register the JWT public key.
+	// Register the JWT public key. Validate the issuer name to prevent
+	// path traversal in the on-disk key path and overwriting reserved issuers.
 	if s.jwtVerifier != nil {
 		issuer := tok.Identity
+		if !safeIssuerRe.MatchString(issuer) {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"enrollment identity %q is not a valid issuer name", issuer)
+		}
+		// Reject reserved issuer names that would overwrite built-in keys.
+		if issuer == "local" || issuer == "e2e" {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"enrollment identity %q conflicts with a reserved issuer", issuer)
+		}
+		// Reject if the issuer is already registered (prevent key overwrites).
+		if s.jwtVerifier.HasKey(issuer) {
+			return nil, status.Errorf(codes.AlreadyExists,
+				"issuer %q is already registered", issuer)
+		}
 		if s.certsDir != "" {
 			jwtClientsDir := filepath.Join(s.certsDir, "jwt-clients")
 			if err := os.MkdirAll(jwtClientsDir, 0o700); err != nil {
 				return nil, status.Errorf(codes.Internal, "create jwt-clients dir: %v", err)
 			}
-			pubPath := filepath.Join(jwtClientsDir, issuer+".pub")
+			// Use filepath.Base to prevent directory traversal.
+			safeName := filepath.Base(issuer)
+			pubPath := filepath.Join(jwtClientsDir, safeName+".pub")
 			if err := pki.WritePublicKeyPEM(pubPath, edKey); err != nil {
 				return nil, status.Errorf(codes.Internal, "write JWT public key: %v", err)
 			}
