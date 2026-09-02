@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -87,6 +88,27 @@ func TestSessionStartCmd_InvalidDirectory(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/nonexistent-dir-for-bridgectl-test") {
 		t.Fatalf("error should reference the directory, got: %v", err)
+	}
+}
+
+func TestSessionStartCmd_NotADirectory(t *testing.T) {
+	// Create a temporary file (not a directory) to pass as the directory arg.
+	f, err := os.CreateTemp(t.TempDir(), "not-a-dir-*")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close temp file: %v", err)
+	}
+
+	cmd := newSessionStartCmd()
+	cmd.SetArgs([]string{f.Name()})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for a file passed as directory")
+	}
+	if !strings.Contains(err.Error(), "is not a directory") {
+		t.Fatalf("error should say 'is not a directory', got: %v", err)
 	}
 }
 

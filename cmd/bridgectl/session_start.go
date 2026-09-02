@@ -50,8 +50,12 @@ stdout. Useful for scripting, piping input, and automated tests.`,
 			if err != nil {
 				return fmt.Errorf("resolve directory: %w", err)
 			}
-			if _, err := os.Stat(absDir); err != nil {
+			info, err := os.Stat(absDir)
+			if err != nil {
 				return fmt.Errorf("directory %q: %w", absDir, err)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("%q is not a directory", absDir)
 			}
 
 			if remote != "" {
