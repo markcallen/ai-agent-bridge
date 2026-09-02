@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -84,6 +85,11 @@ func TestSessionIDFormatValidation(t *testing.T) {
 			}
 			if got := status.Code(err); got != codes.InvalidArgument {
 				t.Fatalf("validateUUIDField(%q) code=%v want %v", tc.value, got, codes.InvalidArgument)
+			}
+			if tc.wantMsg != "" {
+				if msg := status.Convert(err).Message(); !strings.Contains(msg, tc.wantMsg) {
+					t.Errorf("validateUUIDField(%q) message=%q, want substring %q", tc.value, msg, tc.wantMsg)
+				}
 			}
 		})
 	}

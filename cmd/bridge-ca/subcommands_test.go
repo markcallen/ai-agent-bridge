@@ -12,9 +12,19 @@ import (
 
 var (
 	cachedBin     string
+	cachedBinDir  string
 	cachedBinOnce sync.Once
 	cachedBinErr  error
 )
+
+// TestMain cleans up the cached build directory after all tests complete.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if cachedBinDir != "" {
+		_ = os.RemoveAll(cachedBinDir)
+	}
+	os.Exit(code)
+}
 
 // buildBridgeCA compiles the bridge-ca binary once (cached across all tests)
 // and returns the path.
@@ -26,6 +36,7 @@ func buildBridgeCA(t *testing.T) string {
 			cachedBinErr = err
 			return
 		}
+		cachedBinDir = dir
 		bin := filepath.Join(dir, "bridge-ca")
 		build := exec.Command("go", "build", "-o", bin, ".")
 		build.Dir = "."
