@@ -50,18 +50,6 @@ pnpm_installed() {
   command -v pnpm >/dev/null 2>&1
 }
 
-nvm_installed() {
-  # nvm is a shell function, not always visible via command -v.
-  # Check the NVM_DIR environment variable or common install locations.
-  if [ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ]; then
-    return 0
-  fi
-  if [ -s "$HOME/.nvm/nvm.sh" ]; then
-    return 0
-  fi
-  return 1
-}
-
 brew_installed() {
   command -v brew >/dev/null 2>&1
 }
@@ -124,10 +112,10 @@ print_linux_instructions() {
 
 print_windows_instructions() {
   echo "  Option 2: winget"
-  echo "    winget install OpenJS.NodeJS.LTS"
+  echo "    winget install OpenJS.NodeJS --version ${REQUIRED_MAJOR}"
   echo ""
   echo "  Option 3: Chocolatey"
-  echo "    choco install nodejs-lts"
+  echo "    choco install nodejs --version=${REQUIRED_MAJOR}"
   echo ""
   echo "  Option 4: Direct download"
   echo "    https://nodejs.org/en/download/"
@@ -164,6 +152,7 @@ try_brew_install() {
     echo ""
     echo "Or link it:"
     echo "  brew link --overwrite node@${REQUIRED_MAJOR}"
+    return 1
   fi
 }
 

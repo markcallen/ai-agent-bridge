@@ -105,8 +105,8 @@ if [ -f .nvmrc ]; then
         MINGW*|MSYS*|CYGWIN*)
           echo "  Upgrade Node.js using one of:"
           echo "    nvm install $NVMRC_MAJOR               (if using nvm-windows)"
-          echo "    winget install OpenJS.NodeJS.LTS        (winget)"
-          echo "    choco install nodejs-lts                (Chocolatey)"
+          echo "    winget install OpenJS.NodeJS --version $NVMRC_MAJOR  (winget)"
+          echo "    choco install nodejs --version=$NVMRC_MAJOR        (Chocolatey)"
           echo "    https://nodejs.org/en/download/         (direct download)"
           ;;
         *)
@@ -136,8 +136,8 @@ if [ -f .nvmrc ]; then
         ;;
       MINGW*|MSYS*|CYGWIN*)
         echo "  Install Node.js using one of:"
-        echo "    winget install OpenJS.NodeJS.LTS         (winget)"
-        echo "    choco install nodejs-lts                 (Chocolatey)"
+        echo "    winget install OpenJS.NodeJS --version $NVMRC_MAJOR  (winget)"
+        echo "    choco install nodejs --version=$NVMRC_MAJOR        (Chocolatey)"
         echo "    https://nodejs.org/en/download/          (direct download)"
         ;;
       *)
