@@ -269,18 +269,20 @@ func newServerWithSupervisor(t *testing.T) (*BridgeServer, *bridge.Supervisor) {
 	return s, sup
 }
 
-func startServerSession(t *testing.T, s *BridgeServer, sessionID string) {
+func startServerSession(t *testing.T, s *BridgeServer, sessionID string) string {
 	t.Helper()
+	repoPath := t.TempDir()
 	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "proj"})
 	_, err := s.StartSession(ctx, &bridgev1.StartSessionRequest{
 		ProjectId: "proj",
 		SessionId: sessionID,
-		RepoPath:  t.TempDir(),
+		RepoPath:  repoPath,
 		Provider:  "cat",
 	})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
+	return repoPath
 }
 
 const (
@@ -372,7 +374,7 @@ func TestMapBridgeErrorWriterConflict(t *testing.T) {
 func TestStopWriteResizeRPCs(t *testing.T) {
 	s, sup := newServerWithSupervisor(t)
 	const sid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-	startServerSession(t, s, sid)
+	repoPath := startServerSession(t, s, sid)
 
 	ctx := auth.ContextWithClaims(context.Background(), &auth.BridgeClaims{ProjectID: "proj"})
 
@@ -417,6 +419,9 @@ func TestStopWriteResizeRPCs(t *testing.T) {
 	}
 	if resp.GetSessionId() != sid {
 		t.Errorf("GetSession id=%q want %q", resp.GetSessionId(), sid)
+	}
+	if resp.GetRepoPath() != repoPath {
+		t.Errorf("GetSession repo_path=%q want %q", resp.GetRepoPath(), repoPath)
 	}
 
 	// StopSession happy path.

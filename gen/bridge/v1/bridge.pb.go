@@ -525,6 +525,8 @@ type GetSessionResponse struct {
 	ActiveWriterClientId string `protobuf:"bytes,16,opt,name=active_writer_client_id,json=activeWriterClientId,proto3" json:"active_writer_client_id,omitempty"`
 	// observer_count is the number of read-only observers currently attached.
 	ObserverCount int32 `protobuf:"varint,17,opt,name=observer_count,json=observerCount,proto3" json:"observer_count,omitempty"`
+	// repo_path is the working directory the agent session is running in.
+	RepoPath      string `protobuf:"bytes,18,opt,name=repo_path,json=repoPath,proto3" json:"repo_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -676,6 +678,13 @@ func (x *GetSessionResponse) GetObserverCount() int32 {
 		return x.ObserverCount
 	}
 	return 0
+}
+
+func (x *GetSessionResponse) GetRepoPath() string {
+	if x != nil {
+		return x.RepoPath
+	}
+	return ""
 }
 
 type ListSessionsRequest struct {
@@ -2027,7 +2036,7 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.bridge.v1.SessionStatusR\x06status\"2\n" +
 	"\x11GetSessionRequest\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\xf8\x04\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"\x95\x05\n" +
 	"\x12GetSessionResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1d\n" +
@@ -2051,7 +2060,8 @@ const file_bridge_v1_bridge_proto_rawDesc = "" +
 	"\x04cols\x18\x0e \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x0f \x01(\rR\x04rows\x125\n" +
 	"\x17active_writer_client_id\x18\x10 \x01(\tR\x14activeWriterClientId\x12%\n" +
-	"\x0eobserver_count\x18\x11 \x01(\x05R\robserverCount\"4\n" +
+	"\x0eobserver_count\x18\x11 \x01(\x05R\robserverCount\x12\x1b\n" +
+	"\trepo_path\x18\x12 \x01(\tR\brepoPath\"4\n" +
 	"\x13ListSessionsRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\"Q\n" +

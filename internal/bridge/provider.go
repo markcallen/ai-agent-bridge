@@ -64,6 +64,7 @@ type SessionInfo struct {
 	SessionID        string
 	ProjectID        string
 	Provider         string
+	RepoPath         string
 	State            SessionState
 	ProcessID        int
 	CreatedAt        time.Time

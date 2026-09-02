@@ -123,6 +123,7 @@ func (s *server) listSessions(w http.ResponseWriter, r *http.Request) {
 		Provider  string `json:"provider"`
 		Status    string `json:"status"`
 		CreatedAt string `json:"createdAt"`
+		RepoPath  string `json:"repoPath"`
 	}
 
 	sessions := make([]sessionInfo, 0, len(resp.GetSessions()))
@@ -137,6 +138,7 @@ func (s *server) listSessions(w http.ResponseWriter, r *http.Request) {
 			Provider:  ss.GetProvider(),
 			Status:    ss.GetStatus().String(),
 			CreatedAt: createdAt,
+			RepoPath:  ss.GetRepoPath(),
 		})
 	}
 
