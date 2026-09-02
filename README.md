@@ -243,6 +243,26 @@ Full Go SDK reference: [docs/docs/reference/go-sdk.md](docs/docs/reference/go-sd
 
 ---
 
+## Secure by default
+
+bridgectl supports mTLS for workload identity and JWTs for authorization. Bring your existing PKI or use the Step CA integration for automated enrollment, short-lived certificates, and renewal.
+
+| Mode | Transport | Identity | Use case |
+|------|-----------|----------|----------|
+| `local` | Plaintext (loopback) | None | Development |
+| `tls` | Server TLS | JWT | Trusted networks |
+| `mtls` | Mutual TLS | Client cert + JWT | Production |
+
+Supported certificate sources: **Step CA**, **Kubernetes cert-manager**, **SPIFFE/SPIRE**, **Vault PKI**, **AWS Private CA**, **enterprise CAs**, and **manually managed X.509 certificates**.
+
+Production deployments should use mTLS unless the environment provides an equivalent trusted transport boundary.
+
+> **Secure by default. Bring your own identity.**
+
+See [Security Overview](docs/docs/security/overview.md) for details.
+
+---
+
 ## Using grpcurl
 
 Install [grpcurl](https://github.com/fullstorydev/grpcurl) to call the bridge from a shell.
