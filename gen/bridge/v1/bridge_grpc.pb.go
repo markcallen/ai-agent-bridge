@@ -59,10 +59,11 @@ type BridgeServiceClient interface {
 	// certificate itself authorizes the enrollment). After registration, the client
 	// can mint JWT tokens signed with the corresponding private key.
 	RegisterJWTKey(ctx context.Context, in *RegisterJWTKeyRequest, opts ...grpc.CallOption) (*RegisterJWTKeyResponse, error)
-	// Enroll bootstraps a new client identity using a one-time enrollment token.
-	// This RPC does not require mTLS or JWT — it is the bootstrap path for
-	// clients that do not yet have credentials. The enrollment token itself
-	// provides authorization.
+	// EnrollClient bootstraps a new client identity using a one-time enrollment
+	// token. JWT auth is not required for this RPC. In mTLS mode, the TLS
+	// handshake still requires a client certificate; this RPC is reachable
+	// without a client cert only when the server runs in TLS mode. The
+	// enrollment token provides application-level authorization.
 	EnrollClient(ctx context.Context, in *EnrollClientRequest, opts ...grpc.CallOption) (*EnrollClientResponse, error)
 }
 
@@ -238,10 +239,11 @@ type BridgeServiceServer interface {
 	// certificate itself authorizes the enrollment). After registration, the client
 	// can mint JWT tokens signed with the corresponding private key.
 	RegisterJWTKey(context.Context, *RegisterJWTKeyRequest) (*RegisterJWTKeyResponse, error)
-	// Enroll bootstraps a new client identity using a one-time enrollment token.
-	// This RPC does not require mTLS or JWT — it is the bootstrap path for
-	// clients that do not yet have credentials. The enrollment token itself
-	// provides authorization.
+	// EnrollClient bootstraps a new client identity using a one-time enrollment
+	// token. JWT auth is not required for this RPC. In mTLS mode, the TLS
+	// handshake still requires a client certificate; this RPC is reachable
+	// without a client cert only when the server runs in TLS mode. The
+	// enrollment token provides application-level authorization.
 	EnrollClient(context.Context, *EnrollClientRequest) (*EnrollClientResponse, error)
 	mustEmbedUnimplementedBridgeServiceServer()
 }

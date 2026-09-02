@@ -55,11 +55,16 @@ func (s *Store) Put(token *Token) error {
 	return s.flush()
 }
 
-// Get retrieves a token by its full value string. Returns nil if not found.
+// Get retrieves a copy of a token by its full value string. Returns nil if not found.
 func (s *Store) Get(value string) *Token {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.tokens[value]
+	tok, ok := s.tokens[value]
+	if !ok {
+		return nil
+	}
+	cp := *tok
+	return &cp
 }
 
 // Validate looks up a token and checks it is valid (not used, not expired).
@@ -124,19 +129,21 @@ func (s *Store) MarkUsed(value string) error {
 	return s.flush()
 }
 
-// List returns all tokens (including expired and used ones).
+// List returns copies of all tokens (including expired and used ones).
 func (s *Store) List() []*Token {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	result := make([]*Token, 0, len(s.tokens))
 	for _, t := range s.tokens {
-		result = append(result, t)
+		cp := *t
+		result = append(result, &cp)
 	}
 	return result
 }
 
-// flush writes the current token set to disk. Must be called with s.mu held.
+// flush writes the current token set to disk atomically using a
+// temp-file + rename pattern. Must be called with s.mu held.
 func (s *Store) flush() error {
 	tokens := make([]*Token, 0, len(s.tokens))
 	for _, t := range s.tokens {
@@ -148,5 +155,31 @@ func (s *Store) flush() error {
 		return fmt.Errorf("enrollment store: marshal: %w", err)
 	}
 
-	return os.WriteFile(s.path, data, 0o600)
+	// Write to a temp file then rename for atomic update.
+	dir := filepath.Dir(s.path)
+	tmp, err := os.CreateTemp(dir, ".enrollment-tokens-*.tmp")
+	if err != nil {
+		return fmt.Errorf("enrollment store: create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("enrollment store: write temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("enrollment store: close temp: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("enrollment store: chmod temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("enrollment store: rename: %w", err)
+	}
+
+	return nil
 }

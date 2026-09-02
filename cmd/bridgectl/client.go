@@ -268,8 +268,15 @@ func discoverFile(dir, name string) string {
 	return ""
 }
 
-// discoverCertFile finds the first .crt file in dir that is NOT the CA bundle.
+// discoverCertFile finds the first .crt file in dir that looks like a
+// client certificate (not a CA root, bundle, or server cert).
 func discoverCertFile(dir string) string {
+	skip := map[string]bool{
+		"ca-bundle.crt":    true,
+		"ca.crt":           true,
+		"step-ca-root.crt": true,
+		"server.crt":       true,
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
@@ -278,7 +285,12 @@ func discoverCertFile(dir string) string {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".crt") {
 			continue
 		}
-		if e.Name() == "ca-bundle.crt" || e.Name() == "ca.crt" {
+		if skip[e.Name()] {
+			continue
+		}
+		// Only select certs that have a matching .key file.
+		keyPath := filepath.Join(dir, strings.TrimSuffix(e.Name(), ".crt")+".key")
+		if _, err := os.Stat(keyPath); err != nil {
 			continue
 		}
 		return filepath.Join(dir, e.Name())

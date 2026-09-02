@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
+	"time"
 
 	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
 	"github.com/orchael/bridgectl/internal/pki"
@@ -17,11 +20,13 @@ import (
 )
 
 // EnrollClient implements the EnrollClient RPC. It validates the one-time
-// enrollment token, issues a certificate from the CSR, registers the client's
-// JWT public key, and returns the cert + CA bundle.
+// enrollment token, signs the client's CSR with the server's CA, registers
+// the client's JWT public key, and returns the cert + CA bundle.
 //
-// This RPC is exempt from mTLS and JWT auth in the interceptor chain — the
-// enrollment token is the sole authorization credential.
+// This RPC is exempt from JWT auth in the interceptor chain. In mTLS mode,
+// the TLS handshake still requires a client certificate, so this RPC is
+// only reachable without a client cert when the server runs in TLS mode.
+// The enrollment token provides application-level authorization.
 func (s *BridgeServer) EnrollClient(ctx context.Context, req *bridgev1.EnrollClientRequest) (*bridgev1.EnrollClientResponse, error) {
 	if !s.globalRL.allow("global") {
 		return nil, status.Error(codes.ResourceExhausted, "global RPC rate limit exceeded")
@@ -131,7 +136,8 @@ func (s *BridgeServer) EnrollClient(ctx context.Context, req *bridgev1.EnrollCli
 	return resp, nil
 }
 
-// issueFromCSR signs a CSR using the server's local CA.
+// issueFromCSR signs the CSR's public key using the server's local CA,
+// producing a client certificate that matches the client's private key.
 func (s *BridgeServer) issueFromCSR(csr *x509.CertificateRequest) ([]byte, error) {
 	if s.certsDir == "" {
 		return nil, fmt.Errorf("certs directory not configured")
@@ -145,19 +151,31 @@ func (s *BridgeServer) issueFromCSR(csr *x509.CertificateRequest) ([]byte, error
 		return nil, fmt.Errorf("load CA: %w", err)
 	}
 
-	// Issue a client cert with the CSR's CN and SANs.
-	sans := append([]string{}, csr.DNSNames...)
-	for _, ip := range csr.IPAddresses {
-		sans = append(sans, ip.String())
-	}
-
-	outDir := filepath.Join(s.certsDir, "enrolled")
-	certPath, _, err := pki.IssueCert(caCert, caKey, pki.CertTypeClient, csr.Subject.CommonName, sans, outDir, 0)
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		return nil, fmt.Errorf("issue cert: %w", err)
+		return nil, fmt.Errorf("generate serial: %w", err)
 	}
 
-	return os.ReadFile(certPath)
+	now := time.Now()
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      csr.Subject,
+		DNSNames:     csr.DNSNames,
+		IPAddresses:  csr.IPAddresses,
+		NotBefore:    now,
+		NotAfter:     now.Add(90 * 24 * time.Hour),
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+
+	// Sign the CSR's public key (not a new key) so the resulting
+	// certificate matches the client's private key.
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, csr.PublicKey, caKey)
+	if err != nil {
+		return nil, fmt.Errorf("sign CSR: %w", err)
+	}
+
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), nil
 }
 
 // loadCABundle reads the CA bundle file.

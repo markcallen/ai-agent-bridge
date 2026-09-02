@@ -33,10 +33,11 @@ service BridgeService {
   // can mint JWT tokens signed with the corresponding private key.
   rpc RegisterJWTKey(RegisterJWTKeyRequest) returns (RegisterJWTKeyResponse);
 
-  // Enroll bootstraps a new client identity using a one-time enrollment token.
-  // This RPC does not require mTLS or JWT — it is the bootstrap path for
-  // clients that do not yet have credentials. The enrollment token itself
-  // provides authorization.
+  // EnrollClient bootstraps a new client identity using a one-time enrollment
+  // token. JWT auth is not required for this RPC. In mTLS mode, the TLS
+  // handshake still requires a client certificate; this RPC is reachable
+  // without a client cert only when the server runs in TLS mode. The
+  // enrollment token provides application-level authorization.
   rpc EnrollClient(EnrollClientRequest) returns (EnrollClientResponse);
 }
 
