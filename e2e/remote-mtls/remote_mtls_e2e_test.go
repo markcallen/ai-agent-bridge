@@ -1,3 +1,5 @@
+//go:build e2e
+
 package remote_mtls_e2e
 
 import (

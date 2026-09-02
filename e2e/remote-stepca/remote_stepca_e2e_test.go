@@ -1,3 +1,5 @@
+//go:build e2e
+
 package remote_stepca_e2e
 
 import (
