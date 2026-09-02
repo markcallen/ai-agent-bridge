@@ -1059,6 +1059,11 @@ func TestStreamJSONThinkingEventsReplay(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
+	// Allow the provider goroutine to start writing before we Attach.
+	// Without this, a fast-exiting provider can close the session before
+	// Attach registers the observer, causing Detach to return ErrClientMismatch.
+	time.Sleep(50 * time.Millisecond)
+
 	// Attach as first client and drain until the process exits.
 	state, err := sup.Attach("replay-1", "client-first", 0, AttachRoleWriter)
 	if err != nil {
