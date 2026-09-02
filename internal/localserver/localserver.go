@@ -526,16 +526,38 @@ func Start(cfg Config) (*Server, error) {
 			ProviderRoot:   providerRoot,
 		}
 		var p bridge.Provider
-		if id == "codex" {
+		switch {
+		case pc.Transport == "opencode_server":
+			osCfg := provider.OpenCodeServerConfig{
+				ProviderID:     id,
+				Binary:         pc.Binary,
+				DefaultArgs:    pc.Args,
+				StartupTimeout: timeout,
+				StopGrace:      10 * time.Second,
+				RequiredEnv:    pc.RequiredEnv,
+				Hostname:       pc.Hostname,
+				ProviderRoot:   providerRoot,
+			}
+			if pc.PortRange != "" {
+				start, end, parseErr := config.ParsePortRange(pc.PortRange)
+				if parseErr != nil {
+					logger.Warn("skip config provider: invalid port_range", "provider", id, "error", parseErr)
+					continue
+				}
+				osCfg.PortRangeStart = start
+				osCfg.PortRangeEnd = end
+			}
+			p = provider.NewOpenCodeServerProvider(osCfg)
+		case id == "codex":
 			p = provider.NewCodexProvider(sc)
-		} else {
+		default:
 			p = provider.NewStdioProvider(sc)
 		}
 		if err := registry.Register(p); err != nil {
 			logger.Warn("skip config provider", "provider", id, "error", err)
 			continue
 		}
-		logger.Info("registered config provider", "provider", id, "binary", pc.Binary)
+		logger.Info("registered config provider", "provider", id, "binary", pc.Binary, "transport", pc.Transport)
 	}
 
 	// Build fallbacks map from config providers (merged with any set on cfg).
