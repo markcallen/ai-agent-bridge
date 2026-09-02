@@ -84,3 +84,27 @@ Remote session commands accept:
 | `--key <path>` | Client private key override. |
 | `--jwt-key <path>` | JWT signing private key override. |
 | `--server-name <name>` | TLS server name override when dialing by IP or alternate DNS name. |
+
+## bridge-ca (Deprecated)
+
+:::warning Deprecated
+`bridge-ca` is deprecated. Use `bridgectl server start` (auto-PKI) or [Step CA integration](/docs/security/step-ca) for all new deployments. `bridge-ca` will be removed in the next major release. See [#154](https://github.com/orchael/ai-agent-bridge/issues/154).
+:::
+
+`bridge-ca` is a standalone certificate management CLI. It was the primary way to set up PKI before `bridgectl server start` gained auto-PKI support and Step CA integration was added.
+
+For new deployments:
+- **Single machine / development**: `bridgectl server start` auto-generates a self-signed CA and server/client certificates.
+- **Multi-machine / production**: Use [Step CA integration](/docs/security/step-ca) for automated enrollment, short-lived certificates, and renewal.
+- **Existing enterprise CA**: Use the [filesystem provider](/docs/security/existing-ca) with certificates from your PKI.
+
+The `cross-sign` and `verify` subcommands remain available during the deprecation period as they have no equivalent in the current auto-PKI or Step CA workflows.
+
+```bash
+bridge-ca init          # Initialize a new ECDSA P-384 CA
+bridge-ca issue         # Issue a server or client certificate
+bridge-ca cross-sign    # Cross-sign an external CA for multi-tenant trust
+bridge-ca bundle        # Build a trust bundle from multiple CA certs
+bridge-ca jwt-keygen    # Generate an Ed25519 keypair for JWT signing
+bridge-ca verify        # Verify a certificate against a trust bundle
+```

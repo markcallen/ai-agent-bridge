@@ -12,6 +12,14 @@ import (
 var version = "dev"
 
 func main() {
+	// Deprecated: bridge-ca is deprecated. Use 'bridgectl server start' (auto-PKI)
+	// or Step CA integration instead. bridge-ca will be removed in the next major
+	// release. The 'cross-sign' and 'verify' subcommands remain available during
+	// the deprecation period.
+	fmt.Fprintln(os.Stderr, "WARNING: bridge-ca is deprecated. Use 'bridgectl server start' (auto-PKI) or Step CA integration instead.")
+	fmt.Fprintln(os.Stderr, "See https://github.com/orchael/ai-agent-bridge/issues/154 for details.")
+	fmt.Fprintln(os.Stderr, "")
+
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(1)
@@ -47,6 +55,11 @@ func main() {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, `bridge-ca - Certificate Authority management for bridgectl
+
+DEPRECATED: bridge-ca is deprecated. Use 'bridgectl server start' (auto-PKI)
+or Step CA integration for all new deployments. The 'cross-sign' and 'verify'
+subcommands remain available during the deprecation period. bridge-ca will be
+removed in the next major release.
 
 Commands:
   init         Initialize a new CA
