@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # BUILD_FROM selects the binary source:
 #   source   - build from Go source (default, for local docker build)
 #   prebuilt - use binaries already compiled by GoReleaser
@@ -67,9 +68,9 @@ RUN chmod +x /app/entrypoint.sh
 # e2e test helpers — excluded from production images by default.
 # Pass --build-arg INCLUDE_E2E_SCRIPTS=true to include them (e.g. in e2e compose).
 ARG INCLUDE_E2E_SCRIPTS=false
-RUN mkdir -p /app/scripts
-RUN --mount=type=bind,source=e2e/scripts/opencode_repl.js,target=/tmp/opencode_repl.js \
+RUN --mount=type=bind,source=e2e/scripts/opencode_repl.js,target=/tmp/opencode_repl.js,ro \
     if [ "$INCLUDE_E2E_SCRIPTS" = "true" ]; then \
+      mkdir -p /app/scripts && \
       cp /tmp/opencode_repl.js /app/scripts/opencode_repl.js; \
     fi
 
