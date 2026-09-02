@@ -17,8 +17,7 @@ import (
 	"github.com/orchael/bridgectl/internal/localserver"
 	"github.com/orchael/bridgectl/internal/pki"
 	"github.com/orchael/bridgectl/pkg/bridgeclient"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
 var (
@@ -27,9 +26,24 @@ var (
 	repoPath    = flag.String("repo", "/tmp/bridgectl", "path to test repo")
 )
 
+func TestMain(m *testing.M) {
+	flag.Parse()
+	os.Exit(m.Run())
+}
+
+// RemoteMTLSSuite tests remote mTLS connectivity, provider listing, and session lifecycle.
+type RemoteMTLSSuite struct {
+	suite.Suite
+}
+
+func TestRemoteMTLSSuite(t *testing.T) {
+	suite.Run(t, new(RemoteMTLSSuite))
+}
+
 // connectRemote creates a bridgeclient connected to the remote server
 // using auto-discovered credentials from the client state directory.
-func connectRemote(t *testing.T) *bridgeclient.Client {
+func (s *RemoteMTLSSuite) connectRemote() *bridgeclient.Client {
+	t := s.T()
 	t.Helper()
 
 	certsDir := localserver.CertsDir(*clientState)
@@ -39,13 +53,13 @@ func connectRemote(t *testing.T) *bridgeclient.Client {
 	key := strings.TrimSuffix(cert, ".crt") + ".key"
 	jwtKey := findFile(certsDir, "jwt-signing.key")
 
-	require.FileExists(t, caBundle, "ca-bundle.crt")
-	require.FileExists(t, cert, "client cert")
-	require.FileExists(t, key, "client key")
-	require.FileExists(t, jwtKey, "jwt-signing.key")
+	s.Require().FileExists(caBundle, "ca-bundle.crt")
+	s.Require().FileExists(cert, "client cert")
+	s.Require().FileExists(key, "client key")
+	s.Require().FileExists(jwtKey, "jwt-signing.key")
 
 	c, err := pki.LoadCert(cert)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	issuer := c.Subject.CommonName
 
 	serverName := *serverAddr
@@ -69,42 +83,42 @@ func connectRemote(t *testing.T) *bridgeclient.Client {
 		}),
 		bridgeclient.WithTimeout(30*time.Second),
 	)
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	t.Cleanup(func() { _ = client.Close() })
 	return client
 }
 
 // TestRemoteHealth verifies the client can reach the server.
-func TestRemoteHealth(t *testing.T) {
-	client := connectRemote(t)
+func (s *RemoteMTLSSuite) TestRemoteHealth() {
+	client := s.connectRemote()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	resp, err := client.Health(ctx)
-	require.NoError(t, err)
-	assert.NotEmpty(t, resp.ServerInstanceId)
+	s.Require().NoError(err)
+	s.Assert().NotEmpty(resp.ServerInstanceId)
 }
 
 // TestRemoteListProviders verifies provider discovery over mTLS.
-func TestRemoteListProviders(t *testing.T) {
-	client := connectRemote(t)
+func (s *RemoteMTLSSuite) TestRemoteListProviders() {
+	client := s.connectRemote()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	resp, err := client.ListProviders(ctx)
-	require.NoError(t, err)
-	assert.NotEmpty(t, resp.Providers)
+	s.Require().NoError(err)
+	s.Assert().NotEmpty(resp.Providers)
 
 	names := make(map[string]bool)
 	for _, p := range resp.Providers {
 		names[p.Provider] = true
 	}
-	assert.True(t, names["echo"], "echo provider should exist")
+	s.Assert().True(names["echo"], "echo provider should exist")
 }
 
 // TestRemoteEchoSession creates an echo session, lists it, and watches output.
-func TestRemoteEchoSession(t *testing.T) {
-	client := connectRemote(t)
+func (s *RemoteMTLSSuite) TestRemoteEchoSession() {
+	client := s.connectRemote()
 	client.SetProject("remote-e2e")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -118,23 +132,23 @@ func TestRemoteEchoSession(t *testing.T) {
 		InitialCols: 80,
 		InitialRows: 24,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	sessionID := startResp.SessionId
-	t.Logf("started echo session: %s", sessionID)
+	s.T().Logf("started echo session: %s", sessionID)
 
 	// List sessions — should see our session.
 	listResp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
 		ProjectId: "remote-e2e",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	found := false
-	for _, s := range listResp.Sessions {
-		if s.SessionId == sessionID {
+	for _, sess := range listResp.Sessions {
+		if sess.SessionId == sessionID {
 			found = true
 			break
 		}
 	}
-	assert.True(t, found, "session should appear in list")
+	s.Assert().True(found, "session should appear in list")
 
 	// Watch: attach as observer and confirm we receive the ATTACHED event.
 	watchCtx, watchCancel := context.WithTimeout(ctx, 10*time.Second)
@@ -145,34 +159,34 @@ func TestRemoteEchoSession(t *testing.T) {
 		ClientId:  "remote-watcher",
 		Role:      bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	var attached atomic.Bool
 	_ = stream.RecvAll(watchCtx, func(event *bridgev1.AttachSessionEvent) error {
 		if event.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED {
 			attached.Store(true)
-			t.Log("attached as observer to echo session")
+			s.T().Log("attached as observer to echo session")
 			return context.Canceled // stop after attach confirmation
 		}
 		return nil
 	})
-	assert.True(t, attached.Load(), "should have received ATTACHED event")
+	s.Assert().True(attached.Load(), "should have received ATTACHED event")
 
 	// Stop the session.
 	_, err = client.StopSession(ctx, &bridgev1.StopSessionRequest{
 		SessionId: sessionID,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 }
 
 // TestRemoteClaudeSession starts a Claude session if CLAUDE_CODE_OAUTH_TOKEN
 // is set, lists it remotely, and attaches as observer to read output.
-func TestRemoteClaudeSession(t *testing.T) {
+func (s *RemoteMTLSSuite) TestRemoteClaudeSession() {
 	if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
-		t.Skip("CLAUDE_CODE_OAUTH_TOKEN not set")
+		s.T().Skip("CLAUDE_CODE_OAUTH_TOKEN not set")
 	}
 
-	client := connectRemote(t)
+	client := s.connectRemote()
 	client.SetProject("remote-e2e")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -186,9 +200,9 @@ func TestRemoteClaudeSession(t *testing.T) {
 		InitialCols: 80,
 		InitialRows: 24,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	sessionID := startResp.SessionId
-	t.Logf("started claude session: %s", sessionID)
+	s.T().Logf("started claude session: %s", sessionID)
 	defer func() {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stopCancel()
@@ -199,16 +213,16 @@ func TestRemoteClaudeSession(t *testing.T) {
 	listResp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
 		ProjectId: "remote-e2e",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	found := false
-	for _, s := range listResp.Sessions {
-		if s.SessionId == sessionID {
+	for _, sess := range listResp.Sessions {
+		if sess.SessionId == sessionID {
 			found = true
-			t.Logf("claude session found: status=%s provider=%s", s.Status, s.Provider)
+			s.T().Logf("claude session found: status=%s provider=%s", sess.Status, sess.Provider)
 			break
 		}
 	}
-	require.True(t, found, "claude session should appear in remote list")
+	s.Require().True(found, "claude session should appear in remote list")
 
 	// Watch: attach as observer and read at least one output event.
 	watchCtx, watchCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -219,31 +233,31 @@ func TestRemoteClaudeSession(t *testing.T) {
 		ClientId:  "remote-claude-watcher",
 		Role:      bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	var gotOutput atomic.Bool
 	_ = stream.RecvAll(watchCtx, func(event *bridgev1.AttachSessionEvent) error {
 		if event.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT {
-			t.Logf("received claude output (%d bytes)", len(event.Payload))
+			s.T().Logf("received claude output (%d bytes)", len(event.Payload))
 			gotOutput.Store(true)
 			return context.Canceled
 		}
 		if event.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED {
-			t.Log("attached as observer to claude session")
+			s.T().Log("attached as observer to claude session")
 		}
 		return nil
 	})
-	assert.True(t, gotOutput.Load(), "should have received at least one output event from claude")
+	s.Assert().True(gotOutput.Load(), "should have received at least one output event from claude")
 }
 
 // TestRemoteCodexSession starts a Codex session if CODEX_AUTH is set,
 // lists it remotely, and attaches as observer to read output.
-func TestRemoteCodexSession(t *testing.T) {
+func (s *RemoteMTLSSuite) TestRemoteCodexSession() {
 	if os.Getenv("CODEX_AUTH") == "" {
-		t.Skip("CODEX_AUTH not set")
+		s.T().Skip("CODEX_AUTH not set")
 	}
 
-	client := connectRemote(t)
+	client := s.connectRemote()
 	client.SetProject("remote-e2e")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -257,9 +271,9 @@ func TestRemoteCodexSession(t *testing.T) {
 		InitialCols: 80,
 		InitialRows: 24,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	sessionID := startResp.SessionId
-	t.Logf("started codex session: %s", sessionID)
+	s.T().Logf("started codex session: %s", sessionID)
 	defer func() {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stopCancel()
@@ -270,16 +284,16 @@ func TestRemoteCodexSession(t *testing.T) {
 	listResp, err := client.ListSessions(ctx, &bridgev1.ListSessionsRequest{
 		ProjectId: "remote-e2e",
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 	found := false
-	for _, s := range listResp.Sessions {
-		if s.SessionId == sessionID {
+	for _, sess := range listResp.Sessions {
+		if sess.SessionId == sessionID {
 			found = true
-			t.Logf("codex session found: status=%s provider=%s", s.Status, s.Provider)
+			s.T().Logf("codex session found: status=%s provider=%s", sess.Status, sess.Provider)
 			break
 		}
 	}
-	require.True(t, found, "codex session should appear in remote list")
+	s.Require().True(found, "codex session should appear in remote list")
 
 	// Watch as observer.
 	watchCtx, watchCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -290,21 +304,21 @@ func TestRemoteCodexSession(t *testing.T) {
 		ClientId:  "remote-codex-watcher",
 		Role:      bridgev1.AttachRole_ATTACH_ROLE_OBSERVER,
 	})
-	require.NoError(t, err)
+	s.Require().NoError(err)
 
 	var gotOutput atomic.Bool
 	_ = stream.RecvAll(watchCtx, func(event *bridgev1.AttachSessionEvent) error {
 		if event.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_OUTPUT {
-			t.Logf("received codex output (%d bytes)", len(event.Payload))
+			s.T().Logf("received codex output (%d bytes)", len(event.Payload))
 			gotOutput.Store(true)
 			return context.Canceled
 		}
 		if event.Type == bridgev1.AttachEventType_ATTACH_EVENT_TYPE_ATTACHED {
-			t.Log("attached as observer to codex session")
+			s.T().Log("attached as observer to codex session")
 		}
 		return nil
 	})
-	assert.True(t, gotOutput.Load(), "should have received at least one output event from codex")
+	s.Assert().True(gotOutput.Load(), "should have received at least one output event from codex")
 }
 
 // --- helpers ---
