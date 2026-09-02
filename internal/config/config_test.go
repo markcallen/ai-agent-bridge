@@ -483,6 +483,99 @@ sessions:
 	}
 }
 
+// TestLoadRejectsDeprecatedModeField verifies that setting mode on a provider
+// (e.g. mode: exec) produces a clear startup error. This was the original
+// dispatch bug described in issue #4: mode: exec silently wired any provider
+// to the Codex-specific exec implementation.
+func TestLoadRejectsDeprecatedModeField(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantErr string
+	}{
+		{
+			name: "mode exec rejected",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+providers:
+  claude:
+    binary: "claude"
+    mode: exec
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantErr: ".mode is no longer supported",
+		},
+		{
+			name: "mode stdio rejected",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+providers:
+  codex:
+    binary: "codex"
+    mode: stdio
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+			wantErr: ".mode is no longer supported",
+		},
+		{
+			name: "stream_json accepted without mode",
+			content: `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+providers:
+  codex:
+    binary: "codex"
+    stream_json: true
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "bridge.yaml")
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+
+			cfg, err := Load(path)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatal("expected validation error")
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if !cfg.Providers["codex"].StreamJSON {
+				t.Fatal("expected stream_json to be true")
+			}
+		})
+	}
+}
+
 func TestLoadRuntimeProviderRoot(t *testing.T) {
 	homeDir := t.TempDir()
 	xdgDir := filepath.Join(t.TempDir(), "xdg-data")
