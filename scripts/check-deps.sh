@@ -79,16 +79,74 @@ if command -v pnpm >/dev/null 2>&1; then
   fi
 fi
 
-# Verify .nvmrc node version matches active node.
-if [ -f .nvmrc ] && command -v node >/dev/null 2>&1; then
+# Cross-platform Node.js detection and version check.
+# Supports nvm, Homebrew, system packages, winget, and direct installs.
+if [ -f .nvmrc ]; then
   NVMRC_MAJOR="$(tr -d '[:space:]' < .nvmrc)"
-  NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-  if [ "$NVMRC_MAJOR" != "$NODE_MAJOR" ]; then
-    echo "WARNING: .nvmrc requires Node $NVMRC_MAJOR but active Node is $NODE_MAJOR"
-    echo "  Run: nvm use"
-    ERRORS=$((ERRORS + 1))
+  if command -v node >/dev/null 2>&1; then
+    NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+    if [ "$NVMRC_MAJOR" != "$NODE_MAJOR" ]; then
+      echo "WARNING: .nvmrc requires Node $NVMRC_MAJOR but active Node is $NODE_MAJOR"
+      # Detect the OS and suggest platform-appropriate remediation.
+      case "$(uname -s)" in
+        Darwin)
+          echo "  Upgrade Node.js using one of:"
+          echo "    nvm install $NVMRC_MAJOR && nvm use    (if using nvm)"
+          echo "    brew install node@$NVMRC_MAJOR         (if using Homebrew)"
+          echo "    https://nodejs.org/en/download/         (direct download)"
+          ;;
+        Linux)
+          echo "  Upgrade Node.js using one of:"
+          echo "    nvm install $NVMRC_MAJOR && nvm use    (if using nvm)"
+          echo "    curl -fsSL https://deb.nodesource.com/setup_${NVMRC_MAJOR}.x | sudo -E bash -"
+          echo "    sudo apt-get install -y nodejs          (Ubuntu/Debian via NodeSource)"
+          echo "    https://nodejs.org/en/download/         (direct download)"
+          ;;
+        MINGW*|MSYS*|CYGWIN*)
+          echo "  Upgrade Node.js using one of:"
+          echo "    nvm install $NVMRC_MAJOR               (if using nvm-windows)"
+          echo "    winget install OpenJS.NodeJS.LTS        (winget)"
+          echo "    choco install nodejs-lts                (Chocolatey)"
+          echo "    https://nodejs.org/en/download/         (direct download)"
+          ;;
+        *)
+          echo "  Run: nvm install $NVMRC_MAJOR && nvm use"
+          echo "  Or download from: https://nodejs.org/en/download/"
+          ;;
+      esac
+      ERRORS=$((ERRORS + 1))
+    else
+      echo "Node version match: v$NODE_MAJOR (from .nvmrc)"
+    fi
   else
-    echo "Node version match: v$NODE_MAJOR (from .nvmrc)"
+    echo "WARNING: Node.js is not installed (required: v$NVMRC_MAJOR from .nvmrc)"
+    case "$(uname -s)" in
+      Darwin)
+        echo "  Install Node.js using one of:"
+        echo "    nvm install                             (recommended, https://github.com/nvm-sh/nvm)"
+        echo "    brew install node@$NVMRC_MAJOR          (Homebrew)"
+        echo "    https://nodejs.org/en/download/          (direct download)"
+        ;;
+      Linux)
+        echo "  Install Node.js using one of:"
+        echo "    nvm install                             (recommended, https://github.com/nvm-sh/nvm)"
+        echo "    curl -fsSL https://deb.nodesource.com/setup_${NVMRC_MAJOR}.x | sudo -E bash -"
+        echo "    sudo apt-get install -y nodejs           (Ubuntu/Debian via NodeSource)"
+        echo "    https://nodejs.org/en/download/          (direct download)"
+        ;;
+      MINGW*|MSYS*|CYGWIN*)
+        echo "  Install Node.js using one of:"
+        echo "    winget install OpenJS.NodeJS.LTS         (winget)"
+        echo "    choco install nodejs-lts                 (Chocolatey)"
+        echo "    https://nodejs.org/en/download/          (direct download)"
+        ;;
+      *)
+        echo "  Install Node.js from: https://nodejs.org/en/download/"
+        ;;
+    esac
+    echo ""
+    echo "  For detailed setup guidance, run: scripts/setup-node.sh"
+    ERRORS=$((ERRORS + 1))
   fi
 fi
 

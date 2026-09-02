@@ -334,3 +334,6 @@ install-user-service:
 
 check-deps:
 	./scripts/check-deps.sh
+
+setup-node:
+	./scripts/setup-node.sh
