@@ -32,6 +32,13 @@ service BridgeService {
   // certificate itself authorizes the enrollment). After registration, the client
   // can mint JWT tokens signed with the corresponding private key.
   rpc RegisterJWTKey(RegisterJWTKeyRequest) returns (RegisterJWTKeyResponse);
+
+  // EnrollClient bootstraps a new client identity using a one-time enrollment
+  // token. JWT auth is not required for this RPC. In mTLS mode, the TLS
+  // handshake still requires a client certificate; this RPC is reachable
+  // without a client cert only when the server runs in TLS mode. The
+  // enrollment token provides application-level authorization.
+  rpc EnrollClient(EnrollClientRequest) returns (EnrollClientResponse);
 }
 
 enum SessionStatus {
@@ -255,4 +262,27 @@ message RegisterJWTKeyResponse {
   // the server defaulted to the mTLS CN).
   string issuer = 1;
   string message = 2;
+}
+
+message EnrollClientRequest {
+  // One-time enrollment token (e.g. "brg_enroll_...").
+  string token = 1;
+  // PKCS#10 DER-encoded Certificate Signing Request.
+  bytes csr = 2;
+  // PKIX DER-encoded Ed25519 public key for JWT authentication.
+  // Registered as a JWT issuer upon successful enrollment.
+  bytes jwt_public_key = 3;
+}
+
+message EnrollClientResponse {
+  // PEM-encoded certificate chain issued to the client.
+  bytes certificate = 1;
+  // PEM-encoded CA trust bundle for verifying server certificates.
+  bytes ca_bundle = 2;
+  // JWT issuer name assigned to this client.
+  string issuer = 3;
+  // Certificate Common Name (identity).
+  string identity = 4;
+  // Certificate expiry.
+  google.protobuf.Timestamp expires = 5;
 }

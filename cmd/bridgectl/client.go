@@ -24,6 +24,7 @@ func newClientCmd() *cobra.Command {
 		Use:   "client",
 		Short: "Client credential management",
 	}
+	cmd.AddCommand(newClientSetupCmd())
 	cmd.AddCommand(newClientInitCmd())
 	cmd.AddCommand(newClientRenewCmd())
 	cmd.AddCommand(newClientEnrollCmd())
@@ -55,15 +56,38 @@ with a cert signed by the server's trusted CA can enroll.`,
 			if target == "" {
 				return fmt.Errorf("--target is required")
 			}
+
+			// Auto-discover credentials from ~/.config/bridgectl/certs/
+			// when explicit flags are not provided.
+			certsDir := localserver.CertsDir(localserver.StateDir())
 			if caBundle == "" {
-				return fmt.Errorf("--ca is required")
+				caBundle = discoverFile(certsDir, "ca-bundle.crt")
 			}
 			if cert == "" {
-				return fmt.Errorf("--cert is required")
+				cert = discoverCertFile(certsDir)
+			}
+			if key == "" && cert != "" {
+				// Derive key path from cert path: foo.crt -> foo.key
+				key = strings.TrimSuffix(cert, ".crt") + ".key"
+				if _, err := os.Stat(key); err != nil {
+					key = ""
+				}
+			}
+
+			if caBundle == "" {
+				return fmt.Errorf("--ca is required (or run 'bridgectl client setup --bundle' first)")
+			}
+			if cert == "" {
+				return fmt.Errorf("--cert is required (or run 'bridgectl client setup --bundle' first)")
 			}
 			if key == "" {
-				return fmt.Errorf("--key is required")
+				return fmt.Errorf("--key is required (or run 'bridgectl client setup --bundle' first)")
 			}
+
+			fmt.Printf("Using credentials:\n")
+			fmt.Printf("  CA bundle: %s\n", caBundle)
+			fmt.Printf("  Cert:      %s\n", cert)
+			fmt.Printf("  Key:       %s\n", key)
 
 			// Default --name to the cert's CN.
 			if name == "" {
@@ -75,7 +99,7 @@ with a cert signed by the server's trusted CA can enroll.`,
 			}
 
 			if outDir == "" {
-				outDir = "."
+				outDir = certsDir
 			}
 			target = normalizeRemoteTarget(target)
 			if serverName == "" {
@@ -178,12 +202,9 @@ with a cert signed by the server's trusted CA can enroll.`,
 
 	cmd.Flags().StringVar(&target, "target", "", "bridge server address (e.g. macbook.ts.net or macbook.ts.net:9445; default port 9445)")
 	_ = cmd.MarkFlagRequired("target")
-	cmd.Flags().StringVar(&caBundle, "ca", "", "path to CA bundle for server verification")
-	_ = cmd.MarkFlagRequired("ca")
-	cmd.Flags().StringVar(&cert, "cert", "", "path to client mTLS certificate")
-	_ = cmd.MarkFlagRequired("cert")
-	cmd.Flags().StringVar(&key, "key", "", "path to client mTLS private key")
-	_ = cmd.MarkFlagRequired("key")
+	cmd.Flags().StringVar(&caBundle, "ca", "", "path to CA bundle (auto-discovered from ~/.config/bridgectl/certs/)")
+	cmd.Flags().StringVar(&cert, "cert", "", "path to client mTLS certificate (auto-discovered)")
+	cmd.Flags().StringVar(&key, "key", "", "path to client mTLS private key (auto-discovered)")
 	cmd.Flags().StringVar(&name, "name", "", "issuer name for JWT tokens (defaults to cert CN)")
 	cmd.Flags().StringVar(&outDir, "out", "", "output directory for JWT keypair (defaults to current directory)")
 	cmd.Flags().StringVar(&serverName, "server-name", "", "TLS server name to verify (defaults to host from --target)")
@@ -236,4 +257,43 @@ func extractCN(certPath string) (string, error) {
 		return "", fmt.Errorf("certificate has no CN")
 	}
 	return cert.Subject.CommonName, nil
+}
+
+// discoverFile returns the full path to a named file in dir, or "" if not found.
+func discoverFile(dir, name string) string {
+	p := filepath.Join(dir, name)
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	return ""
+}
+
+// discoverCertFile finds the first .crt file in dir that looks like a
+// client certificate (not a CA root, bundle, or server cert).
+func discoverCertFile(dir string) string {
+	skip := map[string]bool{
+		"ca-bundle.crt":    true,
+		"ca.crt":           true,
+		"step-ca-root.crt": true,
+		"server.crt":       true,
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".crt") {
+			continue
+		}
+		if skip[e.Name()] {
+			continue
+		}
+		// Only select certs that have a matching .key file.
+		keyPath := filepath.Join(dir, strings.TrimSuffix(e.Name(), ".crt")+".key")
+		if _, err := os.Stat(keyPath); err != nil {
+			continue
+		}
+		return filepath.Join(dir, e.Name())
+	}
+	return ""
 }

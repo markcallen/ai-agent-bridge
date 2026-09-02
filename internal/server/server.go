@@ -12,6 +12,7 @@ import (
 	bridgev1 "github.com/orchael/bridgectl/gen/bridge/v1"
 	"github.com/orchael/bridgectl/internal/auth"
 	"github.com/orchael/bridgectl/internal/bridge"
+	"github.com/orchael/bridgectl/internal/enrollment"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -40,6 +41,9 @@ type BridgeServer struct {
 	jwtVerifier *auth.JWTVerifier
 	// certsDir is the certs directory for persisting enrolled JWT public keys.
 	certsDir string
+	// enrollStore is the enrollment token store. Nil when enrollment is
+	// not configured.
+	enrollStore *enrollment.Store
 }
 
 type RateLimitConfig struct {
@@ -67,6 +71,12 @@ func New(supervisor *bridge.Supervisor, registry *bridge.Registry, logger *slog.
 		jwtVerifier:       jwtVerifier,
 		certsDir:          certsDir,
 	}
+}
+
+// SetEnrollmentStore configures the enrollment token store for the
+// EnrollClient RPC. When nil, enrollment is not available.
+func (s *BridgeServer) SetEnrollmentStore(store *enrollment.Store) {
+	s.enrollStore = store
 }
 
 func (s *BridgeServer) StartSession(ctx context.Context, req *bridgev1.StartSessionRequest) (*bridgev1.StartSessionResponse, error) {

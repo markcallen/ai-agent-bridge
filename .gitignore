@@ -75,3 +75,4 @@ examples/web/web
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 /bridgectl
+test-results/

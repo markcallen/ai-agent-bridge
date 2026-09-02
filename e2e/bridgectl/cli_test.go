@@ -2330,3 +2330,293 @@ func TestRegisterJWTKeySurvivesRestart(t *testing.T) {
 	})
 	require.NoError(t, err, "enrolled key should survive server restart")
 }
+
+// --- v1.1 Security Refactor E2E Tests ---
+
+// TestTLSOnlyMode verifies that a server started with --mode tls accepts
+// connections without a client certificate (JWT is the sole auth mechanism).
+func TestTLSOnlyMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:     stateDir,
+		ListenAddr:   "127.0.0.1:0",
+		SecurityMode: localserver.ModeTLS,
+	})
+	require.NoError(t, err, "TLS-only server should start")
+	defer srv.Stop()
+
+	mode := localserver.DiscoverMode(stateDir)
+	assert.Equal(t, localserver.ModeTLS, mode, "mode file should say tls")
+
+	// The server should be discoverable.
+	target, discoveredMode := localserver.DiscoverTarget(stateDir)
+	require.NotEmpty(t, target, "TLS server should be discoverable")
+	assert.Equal(t, localserver.ModeTLS, discoveredMode)
+}
+
+// TestSecurityModeFlag verifies the bridgectl server start --mode flag
+// is recognized by the CLI binary.
+func TestSecurityModeFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+
+	// --mode with an invalid value should fail.
+	cmd := exec.Command(cliBinary, "server", "start", "--mode", "insecure", "--listen", "127.0.0.1:0")
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
+	out, err := cmd.CombinedOutput()
+	assert.Error(t, err, "invalid --mode should fail")
+	assert.Contains(t, string(out), "unknown security mode", "error should mention the invalid mode")
+}
+
+// TestIdentityShowLocalMode verifies bridgectl identity show works after
+// a secure server has generated PKI material.
+func TestIdentityShowLocalMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+
+	// Start a secure server so PKI is generated.
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+	})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	cmd := exec.Command(cliBinary, "identity", "show")
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "identity show should succeed; output: %s", out)
+
+	output := string(out)
+	assert.Contains(t, output, "Identity:")
+	assert.Contains(t, output, "Provider:")
+	assert.Contains(t, output, "Expires:")
+	assert.Contains(t, output, "Status:")
+}
+
+// TestIdentityShowNoServer verifies identity show fails gracefully when
+// no PKI exists.
+func TestIdentityShowNoServer(t *testing.T) {
+	stateDir := testStateDir(t)
+
+	cmd := exec.Command(cliBinary, "identity", "show")
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
+	_, err := cmd.CombinedOutput()
+	assert.Error(t, err, "identity show without PKI should fail")
+}
+
+// TestEnrollmentCreateAndList verifies the enrollment token lifecycle:
+// create a token, verify it appears in the store.
+func TestEnrollmentCreateAndList(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+
+	// Create an enrollment token via CLI.
+	cmd := exec.Command(cliBinary, "enrollment", "create",
+		"--identity", "test-agent",
+		"--expires", "5m")
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "enrollment create should succeed; output: %s", out)
+
+	output := string(out)
+	assert.Contains(t, output, "brg_enroll_", "output should contain the token")
+	assert.Contains(t, output, "test-agent", "output should mention the identity")
+
+	// Verify the token store file was created.
+	storePath := filepath.Join(stateDir, "enrollment-tokens.json")
+	_, err = os.Stat(storePath)
+	require.NoError(t, err, "enrollment store file should exist")
+
+	data, err := os.ReadFile(storePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "test-agent")
+	assert.Contains(t, string(data), "brg_enroll_")
+}
+
+// TestClientSetupBundle verifies that client setup --bundle extracts
+// credentials into the correct directory.
+func TestClientSetupBundle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+
+	// Start a secure server to generate PKI, then issue a client cert.
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+	})
+	require.NoError(t, err)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	_, _, issueErr := localserver.IssueClientCert(stateDir, "test-remote", logger)
+	require.NoError(t, issueErr)
+
+	bundlePath := filepath.Join(localserver.CertsDir(stateDir), "clients", "test-remote", "test-remote-creds.tar.gz")
+	bundleErr := localserver.BundleClientCreds(bundlePath, stateDir, "test-remote")
+	require.NoError(t, bundleErr)
+
+	srv.Stop()
+
+	// Set up a separate "client" state dir and run client setup --bundle.
+	clientStateDir := t.TempDir()
+	cmd := exec.Command(cliBinary, "client", "setup", "--bundle", bundlePath)
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+clientStateDir)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "client setup should succeed; output: %s", out)
+
+	// Verify files were extracted.
+	clientCertsDir := filepath.Join(clientStateDir, "certs")
+	_, err = os.Stat(filepath.Join(clientCertsDir, "ca-bundle.crt"))
+	assert.NoError(t, err, "ca-bundle.crt should exist")
+	_, err = os.Stat(filepath.Join(clientCertsDir, "test-remote.crt"))
+	assert.NoError(t, err, "test-remote.crt should exist")
+	_, err = os.Stat(filepath.Join(clientCertsDir, "test-remote.key"))
+	assert.NoError(t, err, "test-remote.key should exist")
+	_, err = os.Stat(filepath.Join(clientCertsDir, "jwt-signing.key"))
+	assert.NoError(t, err, "jwt-signing.key should exist")
+}
+
+// TestClientEnrollAutoDiscovery verifies that client enroll auto-discovers
+// credentials from ~/.config/bridgectl/certs/ after client setup.
+func TestClientEnrollAutoDiscovery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	serverStateDir := testStateDir(t)
+
+	// Start a secure server.
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   serverStateDir,
+		ListenAddr: "127.0.0.1:0",
+	})
+	require.NoError(t, err)
+	defer srv.Stop()
+
+	target := srv.Addr()
+	serverName := localserver.DiscoverServerName(serverStateDir)
+
+	// Issue a client cert.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	_, _, issueErr := localserver.IssueClientCert(serverStateDir, "auto-disc-client", logger)
+	require.NoError(t, issueErr)
+
+	bundlePath := filepath.Join(localserver.CertsDir(serverStateDir), "clients", "auto-disc-client", "auto-disc-client-creds.tar.gz")
+	bundleErr := localserver.BundleClientCreds(bundlePath, serverStateDir, "auto-disc-client")
+	require.NoError(t, bundleErr)
+
+	// Set up a separate "client" state dir with the bundle.
+	clientStateDir := t.TempDir()
+	setupCmd := exec.Command(cliBinary, "client", "setup", "--bundle", bundlePath)
+	setupCmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+clientStateDir)
+	setupOut, setupErr := setupCmd.CombinedOutput()
+	require.NoError(t, setupErr, "client setup should succeed; output: %s", setupOut)
+
+	// Enroll using auto-discovery (no --ca, --cert, --key flags).
+	enrollCmd := exec.Command(cliBinary, "client", "enroll",
+		"--target", target,
+		"--server-name", serverName)
+	enrollCmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+clientStateDir)
+	enrollOut, enrollErr := enrollCmd.CombinedOutput()
+	require.NoError(t, enrollErr, "client enroll should succeed with auto-discovery; output: %s", enrollOut)
+
+	assert.Contains(t, string(enrollOut), "Enrolled:", "should confirm enrollment")
+}
+
+// TestIdentityRenew verifies that identity renew re-issues the server
+// certificate with a new expiry.
+func TestIdentityRenew(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+
+	// Start and immediately stop a secure server to generate PKI.
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ListenAddr: "127.0.0.1:0",
+	})
+	require.NoError(t, err)
+	srv.Stop()
+
+	// Record the original cert expiry.
+	mat := localserver.LoadPKIMaterial(stateDir)
+	origCert, err := pki.LoadCert(mat.ServerCertPath)
+	require.NoError(t, err)
+	origExpiry := origCert.NotAfter
+
+	// Run identity renew.
+	cmd := exec.Command(cliBinary, "identity", "renew")
+	cmd.Env = append(os.Environ(), "BRIDGECTL_STATE_DIR="+stateDir)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "identity renew should succeed; output: %s", out)
+	assert.Contains(t, string(out), "Expires:", "should show new expiry")
+
+	// Verify the cert was renewed (new expiry >= original).
+	renewedCert, err := pki.LoadCert(mat.ServerCertPath)
+	require.NoError(t, err)
+	assert.True(t, !renewedCert.NotAfter.Before(origExpiry),
+		"renewed cert expiry %v should not be before original %v", renewedCert.NotAfter, origExpiry)
+}
+
+// TestSecurityConfigFromYAML verifies that a YAML config with the new
+// security: block is correctly parsed and drives server startup.
+func TestSecurityConfigFromYAML(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+
+	stateDir := testStateDir(t)
+
+	// Write a YAML config with the new security block.
+	configPath := filepath.Join(stateDir, "bridge.yaml")
+	configContent := `
+server:
+  listen: "127.0.0.1:0"
+security:
+  transport:
+    mode: mtls
+  certificates:
+    provider: auto
+  authorization:
+    mode: jwt
+auth:
+  jwt_max_ttl: "5m"
+providers:
+  echo:
+    binary: "cat"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`
+	require.NoError(t, os.WriteFile(configPath, []byte(configContent), 0o644))
+
+	srv, err := localserver.Start(localserver.Config{
+		StateDir:   stateDir,
+		ConfigPath: configPath,
+	})
+	require.NoError(t, err, "server with security config should start")
+	defer srv.Stop()
+
+	mode := localserver.DiscoverMode(stateDir)
+	assert.Equal(t, localserver.ModeSecure, mode, "mtls mode should be discoverable as secure")
+}

@@ -64,6 +64,42 @@ test-step-ca-e2e:
 	docker compose -f e2e/step-ca/docker-compose.yml down -v; \
 	exit $$rc
 
+test-remote-mtls:
+	@set +e; \
+	docker compose -f e2e/remote-mtls/docker-compose.yml up --build --abort-on-container-exit --exit-code-from remote-client; \
+	rc=$$?; \
+	echo ""; \
+	echo "========================================"; \
+	if [ $$rc -eq 0 ]; then \
+		echo "  test-remote-mtls: PASSED"; \
+	else \
+		echo "  test-remote-mtls: FAILED (exit $$rc)"; \
+	fi; \
+	echo "========================================"; \
+	docker compose -f e2e/remote-mtls/docker-compose.yml down -v; \
+	exit $$rc
+
+test-remote-stepca:
+	@set +e; \
+	CF=e2e/remote-stepca/docker-compose.yml; \
+	docker compose -f $$CF build; \
+	docker compose -f $$CF up -d; \
+	docker compose -f $$CF logs -f remote-client & \
+	LOG_PID=$$!; \
+	docker wait $$(docker compose -f $$CF ps -q remote-client) 2>/dev/null; \
+	rc=$$?; \
+	kill $$LOG_PID 2>/dev/null; wait $$LOG_PID 2>/dev/null; \
+	echo ""; \
+	echo "========================================"; \
+	if [ $$rc -eq 0 ]; then \
+		echo "  test-remote-stepca: PASSED"; \
+	else \
+		echo "  test-remote-stepca: FAILED (exit $$rc)"; \
+	fi; \
+	echo "========================================"; \
+	docker compose -f $$CF down -v; \
+	exit $$rc
+
 test-cover:
 	./scripts/test-go-coverage.sh
 	go tool cover -html=coverage.out -o coverage.html
@@ -268,7 +304,13 @@ docs-start: docs-install
 	cd docs && pnpm start
 
 test-cli-e2e:
-	go test -v -count=1 -race -timeout 120s ./e2e/bridgectl/
+	@mkdir -p test-results
+	@if command -v gotestsum >/dev/null 2>&1; then \
+		gotestsum --format short-verbose --junitfile test-results/cli-e2e.xml \
+			-- -count=1 -race -timeout 120s ./e2e/bridgectl/; \
+	else \
+		go test -v -count=1 -race -timeout 120s ./e2e/bridgectl/; \
+	fi
 
 test-cli-e2e-docker:
 	./scripts/test-cli-e2e-docker.sh

@@ -13,6 +13,7 @@ import (
 // Config is the top-level bridge daemon configuration.
 type Config struct {
 	Server       ServerConfig              `yaml:"server"`
+	Security     SecurityConfig            `yaml:"security"`
 	StepCA       StepCAYAMLConfig          `yaml:"step_ca"`
 	TLS          TLSConfig                 `yaml:"tls"`
 	Auth         AuthConfig                `yaml:"auth"`
@@ -26,6 +27,75 @@ type Config struct {
 	Providers    map[string]ProviderConfig `yaml:"providers"`
 	AllowedPaths []string                  `yaml:"allowed_paths"`
 	Logging      LoggingConfig             `yaml:"logging"`
+}
+
+// SecurityConfig holds the v1.1 security model: explicit transport mode,
+// certificate provider, and authorization mode. When absent in the YAML file,
+// it is synthesized from legacy fields (server.listen, step_ca, tls) for
+// backward compatibility.
+type SecurityConfig struct {
+	Transport     TransportConfig     `yaml:"transport"`
+	Certificates  CertificatesConfig  `yaml:"certificates"`
+	Authorization AuthorizationConfig `yaml:"authorization"`
+}
+
+// TransportMode constants for the security.transport.mode field.
+const (
+	TransportModeLocal = "local"
+	TransportModeTLS   = "tls"
+	TransportModeMTLS  = "mtls"
+)
+
+// TransportConfig controls the transport security level.
+type TransportConfig struct {
+	// Mode is one of "local", "tls", or "mtls".
+	Mode string `yaml:"mode"`
+}
+
+// CertificatesConfig controls where certificate material comes from.
+type CertificatesConfig struct {
+	// Provider is the certificate provider name: "filesystem", "auto", or "stepca".
+	Provider   string                   `yaml:"provider"`
+	Filesystem FilesystemCertConfig     `yaml:"filesystem"`
+	StepCA     StepCACertProviderConfig `yaml:"stepca"`
+}
+
+// FilesystemCertConfig holds paths for the filesystem certificate provider.
+type FilesystemCertConfig struct {
+	CA          string `yaml:"ca"`
+	Certificate string `yaml:"certificate"`
+	PrivateKey  string `yaml:"private_key"`
+	ServerCert  string `yaml:"server_certificate"`
+	ServerKey   string `yaml:"server_private_key"`
+}
+
+// StepCACertProviderConfig holds settings for the Step CA certificate provider.
+type StepCACertProviderConfig struct {
+	URL                     string `yaml:"url"`
+	Root                    string `yaml:"root"`
+	Provisioner             string `yaml:"provisioner"`
+	ProvisionerPasswordFile string `yaml:"provisioner_password_file"`
+}
+
+// AuthorizationConfig controls the authorization mechanism.
+type AuthorizationConfig struct {
+	// Mode is "jwt" or "none".
+	Mode string `yaml:"mode"`
+}
+
+// SecurityMode returns the resolved transport mode, falling back to "local"
+// if not configured.
+func (s *SecurityConfig) SecurityMode() string {
+	if s.Transport.Mode != "" {
+		return s.Transport.Mode
+	}
+	return TransportModeLocal
+}
+
+// IsSecurityConfigured reports whether the security block was explicitly set
+// in the YAML (i.e. has a non-empty transport mode).
+func (s *SecurityConfig) IsSecurityConfigured() bool {
+	return s.Transport.Mode != ""
 }
 
 // RuntimeConfig controls how the bridge locates provider CLIs and the Node.js
@@ -172,6 +242,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyDefaults(cfg)
+	synthesizeSecurity(cfg)
 	if err := expandRuntimeConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -209,6 +280,55 @@ func ParseDuration(s string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// synthesizeSecurity fills in cfg.Security from legacy fields when the
+// security block is not explicitly configured in the YAML file. This
+// provides backward compatibility so existing configs continue to work
+// after the v1.1 security model is introduced.
+func synthesizeSecurity(cfg *Config) {
+	if cfg.Security.IsSecurityConfigured() {
+		// The new security block is explicitly set — nothing to synthesize.
+		return
+	}
+
+	// Legacy detection: determine mode from existing fields.
+	hasListen := cfg.Server.Listen != "" && cfg.Server.Listen != "0.0.0.0:9445"
+	hasStepCA := cfg.StepCA.URL != ""
+	hasExplicitTLS := cfg.TLS.CABundle != ""
+
+	if !hasListen && !hasStepCA && !hasExplicitTLS {
+		// No remote/secure config at all — default to local.
+		cfg.Security.Transport.Mode = TransportModeLocal
+		cfg.Security.Authorization.Mode = "none"
+		cfg.Security.Certificates.Provider = "auto"
+		return
+	}
+
+	// Remote mode — determine provider and transport.
+	cfg.Security.Transport.Mode = TransportModeMTLS
+
+	switch {
+	case hasStepCA:
+		cfg.Security.Certificates.Provider = "stepca"
+		cfg.Security.Certificates.StepCA = StepCACertProviderConfig{
+			URL:                     cfg.StepCA.URL,
+			Root:                    cfg.StepCA.Root,
+			Provisioner:             cfg.StepCA.Provisioner,
+			ProvisionerPasswordFile: cfg.StepCA.ProvisionerPasswordFile,
+		}
+	case hasExplicitTLS:
+		cfg.Security.Certificates.Provider = "filesystem"
+		cfg.Security.Certificates.Filesystem = FilesystemCertConfig{
+			CA:         cfg.TLS.CABundle,
+			ServerCert: cfg.TLS.Cert,
+			ServerKey:  cfg.TLS.Key,
+		}
+	default:
+		cfg.Security.Certificates.Provider = "auto"
+	}
+
+	cfg.Security.Authorization.Mode = "jwt"
 }
 
 func applyDefaults(cfg *Config) {
@@ -314,6 +434,9 @@ func expandProviderRoot(root string) (string, error) {
 }
 
 func validate(cfg *Config) error {
+	if err := validateSecurity(cfg); err != nil {
+		return err
+	}
 	if cfg.Server.Listen == "" {
 		return fmt.Errorf("config: server.listen is required")
 	}
@@ -441,6 +564,34 @@ func validate(cfg *Config) error {
 			}
 		}
 	}
+	return nil
+}
+
+func validateSecurity(cfg *Config) error {
+	mode := cfg.Security.SecurityMode()
+	switch mode {
+	case TransportModeLocal, TransportModeTLS, TransportModeMTLS:
+		// valid
+	default:
+		return fmt.Errorf("config: security.transport.mode must be one of local, tls, mtls; got %q", mode)
+	}
+
+	provider := cfg.Security.Certificates.Provider
+	switch provider {
+	case "filesystem", "auto", "stepca", "":
+		// valid (empty means not configured, will default to "auto")
+	default:
+		return fmt.Errorf("config: security.certificates.provider must be one of filesystem, auto, stepca; got %q", provider)
+	}
+
+	authMode := cfg.Security.Authorization.Mode
+	switch authMode {
+	case "jwt", "none", "":
+		// valid (empty means not configured)
+	default:
+		return fmt.Errorf("config: security.authorization.mode must be one of jwt, none; got %q", authMode)
+	}
+
 	return nil
 }
 

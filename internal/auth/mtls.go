@@ -115,6 +115,46 @@ func ServerTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 	}, nil
 }
 
+// ServerTLSOnlyConfig returns a TLS config that presents a server certificate
+// but does NOT require or verify client certificates. This is used for the
+// "tls" security mode where JWT provides authorization without mutual TLS.
+// Minimum TLS 1.3. The server certificate is loaded via a CertReloader.
+func ServerTLSOnlyConfig(cfg TLSConfig) (*tls.Config, error) {
+	caPool, err := loadCAPool(cfg.CABundlePath)
+	if err != nil {
+		return nil, err
+	}
+
+	reloader, err := NewCertReloader(cfg.CertPath, cfg.KeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("init cert reloader: %w", err)
+	}
+
+	return &tls.Config{
+		MinVersion:     tls.VersionTLS13,
+		GetCertificate: reloader.GetCertificate,
+		ClientAuth:     tls.NoClientCert,
+		ClientCAs:      caPool,
+	}, nil
+}
+
+// ClientTLSOnlyConfig returns a TLS config that verifies the server's
+// certificate but does NOT present a client certificate. This is used
+// for clients connecting in "tls" mode where only JWT is used for auth.
+// Minimum TLS 1.3.
+func ClientTLSOnlyConfig(cfg TLSConfig) (*tls.Config, error) {
+	caPool, err := loadCAPool(cfg.CABundlePath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		RootCAs:    caPool,
+		ServerName: cfg.ServerName,
+	}, nil
+}
+
 // ClientTLSConfig returns a TLS config that verifies server certs and presents a client cert (mTLS).
 // Minimum TLS 1.3.
 func ClientTLSConfig(cfg TLSConfig) (*tls.Config, error) {

@@ -40,7 +40,13 @@ if [ -n "${E2E_ONLY:-}" ] && [ "${E2E_ONLY}" != "all" ]; then
   run_filter="-test.run TestBridgeSuite/Test${provider}"
 fi
 
-e2e-suite \
+RESULTS_DIR="/results"
+mkdir -p "$RESULTS_DIR"
+
+gotestsum \
+  --format short-verbose \
+  --junitfile "$RESULTS_DIR/e2e-tests.xml" \
+  --raw-command -- test2json -t -p e2e e2e-suite \
   -test.v \
   -test.timeout "$E2E_TEST_TIMEOUT" \
   ${run_filter} \

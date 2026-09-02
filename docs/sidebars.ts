@@ -15,6 +15,17 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Security',
+      items: [
+        'security/overview',
+        'security/step-ca',
+        'security/existing-ca',
+        'security/certificate-rotation',
+        'security/migration-v1.1',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Reference',
       items: [
         'reference/cli',
