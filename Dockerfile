@@ -64,8 +64,16 @@ COPY config/bridge-docker-stepca.yaml /app/config/bridge-docker-stepca.yaml
 COPY docker-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-RUN mkdir -p /app/scripts
-COPY e2e/scripts/opencode_repl.js /app/scripts/opencode_repl.js
+# e2e test helpers — excluded from production images by default.
+# Pass --build-arg INCLUDE_E2E_SCRIPTS=true to include them (e.g. in e2e compose).
+ARG INCLUDE_E2E_SCRIPTS=false
+COPY e2e/scripts/opencode_repl.js /tmp/opencode_repl.js
+RUN mkdir -p /app/scripts && \
+    if [ "$INCLUDE_E2E_SCRIPTS" = "true" ]; then \
+      mv /tmp/opencode_repl.js /app/scripts/opencode_repl.js; \
+    else \
+      rm -f /tmp/opencode_repl.js; \
+    fi
 
 EXPOSE 9445
 
