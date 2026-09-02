@@ -143,6 +143,22 @@ function formatDate(iso: string): string {
   }
 }
 
+function shortDir(repoPath: string): string {
+  if (!repoPath) return ''
+  // Replace common home directory prefixes with ~/
+  const homePatterns = [
+    /^\/Users\/[^/]+\//,   // macOS: /Users/<user>/
+    /^\/home\/[^/]+\//,    // Linux: /home/<user>/
+    /^\/root\//,           // Linux root
+  ]
+  for (const pattern of homePatterns) {
+    if (pattern.test(repoPath)) {
+      return repoPath.replace(pattern, '~/')
+    }
+  }
+  return repoPath
+}
+
 export default function SessionList({ remote, onAttach, onWatch, onNewSession }: Props) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(false)
@@ -200,6 +216,7 @@ export default function SessionList({ remote, onAttach, onWatch, onNewSession }:
                 <th style={styles.th}>Session ID</th>
                 <th style={styles.th}>Project</th>
                 <th style={styles.th}>Provider</th>
+                <th style={styles.th}>Directory</th>
                 <th style={styles.th}>Status</th>
                 <th style={styles.th}>Created</th>
                 <th style={styles.th}>Actions</th>
@@ -215,6 +232,11 @@ export default function SessionList({ remote, onAttach, onWatch, onNewSession }:
                   </td>
                   <td style={styles.td}>{s.projectId}</td>
                   <td style={styles.td}>{s.provider}</td>
+                  <td style={styles.td}>
+                    <span style={styles.mono} title={s.repoPath}>
+                      {shortDir(s.repoPath)}
+                    </span>
+                  </td>
                   <td style={styles.td}>
                     <span style={statusStyle(s.status)}>{s.status}</span>
                   </td>

@@ -6,6 +6,7 @@ export interface Session {
   provider: string
   status: string
   createdAt: string
+  repoPath: string
 }
 
 export interface SessionEvent {

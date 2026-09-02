@@ -131,6 +131,8 @@ message GetSessionResponse {
   string active_writer_client_id = 16;
   // observer_count is the number of read-only observers currently attached.
   int32 observer_count = 17;
+  // repo_path is the working directory the agent session is running in.
+  string repo_path = 18;
 }
 
 message ListSessionsRequest {

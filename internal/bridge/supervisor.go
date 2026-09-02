@@ -469,6 +469,7 @@ func (s *Supervisor) Start(ctx context.Context, cfg SessionConfig) (*SessionInfo
 			SessionID: cfg.SessionID,
 			ProjectID: cfg.ProjectID,
 			Provider:  provider.ID(),
+			RepoPath:  cfg.RepoPath,
 			State:     SessionStateRunning,
 			CreatedAt: now,
 			Cols:      cfg.InitialCols,

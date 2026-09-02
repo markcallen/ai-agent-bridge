@@ -538,6 +538,7 @@ func sessionInfoToProto(info *bridge.SessionInfo) *bridgev1.GetSessionResponse {
 		SessionId:            info.SessionID,
 		ProjectId:            info.ProjectID,
 		Provider:             info.Provider,
+		RepoPath:             info.RepoPath,
 		Status:               mapState(info.State),
 		CreatedAt:            timestamppb.New(info.CreatedAt),
 		Error:                info.Error,
