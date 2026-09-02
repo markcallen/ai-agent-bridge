@@ -1491,7 +1491,7 @@ func knownProviders() []providerDef {
 		},
 		{
 			ID:             "gemini",
-			Binary:         "gemini",
+			Binary:         "agy",
 			Args:           nil,
 			StartupTimeout: 60 * time.Second,
 			StartupProbe:   "prompt",

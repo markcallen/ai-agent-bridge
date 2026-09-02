@@ -5,7 +5,7 @@ providers=(
   "claude:./node_modules/.bin/claude"
   "opencode:./node_modules/.bin/opencode"
   "codex:./node_modules/.bin/codex"
-  "gemini:./node_modules/.bin/gemini"
+  "gemini:agy"
 )
 
 echo "| Provider | Version |"
