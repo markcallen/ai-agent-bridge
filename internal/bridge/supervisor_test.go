@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -813,6 +815,26 @@ func (p *streamJSONTestProvider) BuildCommand(ctx context.Context, cfg SessionCo
 	return cmd, nil
 }
 
+// streamJSONGatedProvider wraps streamJSONTestProvider but keeps the
+// process alive until a signal file appears. This prevents the provider
+// from exiting before the test has called Attach.
+type streamJSONGatedProvider struct {
+	streamJSONTestProvider
+	signalPath string // the process waits for this file to appear before exiting
+}
+
+func (p *streamJSONGatedProvider) BuildCommand(ctx context.Context, cfg SessionConfig) (*exec.Cmd, error) {
+	script := ""
+	for _, line := range p.jsonLines {
+		script += "printf '%s\\n' '" + line + "';"
+	}
+	// After printing lines, poll for the signal file every 10ms up to 10s.
+	script += fmt.Sprintf("i=0; while [ ! -f '%s' ] && [ $i -lt 1000 ]; do sleep 0.01; i=$((i+1)); done;", p.signalPath)
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+	cmd.Dir = cfg.RepoPath
+	return cmd, nil
+}
+
 func TestReadLoopStreamJSONParsing(t *testing.T) {
 	sup := NewSupervisor(NewRegistry(), DefaultPolicy(), 64*1024, time.Minute)
 	defer sup.Close()
@@ -1036,9 +1058,18 @@ func TestStreamJSONThinkingEventsReplay(t *testing.T) {
 		`{"type":"content_block_delta","delta":{"type":"text_delta","text":"final answer"}}`,
 		`{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"reasoning step 2"}}`,
 	}
-	p := &streamJSONTestProvider{
-		testProvider: testProvider{id: "stream-replay"},
-		jsonLines:    jsonLines,
+
+	// Use a signal file so the provider waits after printing its lines,
+	// giving the test time to Attach before the session exits. Without
+	// this synchronisation the provider can finish before Attach registers
+	// the observer, which causes Detach to return ErrClientMismatch.
+	signalFile := filepath.Join(t.TempDir(), "done")
+	p := &streamJSONGatedProvider{
+		streamJSONTestProvider: streamJSONTestProvider{
+			testProvider: testProvider{id: "stream-replay"},
+			jsonLines:    jsonLines,
+		},
+		signalPath: signalFile,
 	}
 	registry := NewRegistry()
 	if err := registry.Register(p); err != nil {
@@ -1059,16 +1090,17 @@ func TestStreamJSONThinkingEventsReplay(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Allow the provider goroutine to start writing before we Attach.
-	// Without this, a fast-exiting provider can close the session before
-	// Attach registers the observer, causing Detach to return ErrClientMismatch.
-	time.Sleep(50 * time.Millisecond)
-
-	// Attach as first client and drain until the process exits.
+	// Attach as first client before the provider exits.
 	state, err := sup.Attach("replay-1", "client-first", 0, AttachRoleWriter)
 	if err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
+
+	// Signal the provider to exit now that the observer is registered.
+	if err := os.WriteFile(signalFile, []byte("done"), 0o644); err != nil {
+		t.Fatalf("write signal file: %v", err)
+	}
+
 	timeout := time.After(5 * time.Second)
 drainLoop:
 	for {
