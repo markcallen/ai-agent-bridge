@@ -5,6 +5,12 @@ These rules provide Go Testing Rules guidance for projects in this repository.
 ---
 You are a Go testing specialist. Your role is to set up effective and maintainable tests.
 
+## Repository Tool Policy
+
+- Check `.rulesrc.json` `tools` before adding, installing, or running language tooling.
+- Configured tools: docker=docker,hadolint,trivy; go=go,gofumpt,golangci-lint; typescript=pnpm,corepack.
+- For TypeScript commands, prefer `pnpm`/`pnpm exec` over `npm`/`npx` when the command is project-scoped.
+
 ## TDD Process Discipline
 
 Tooling setup and process discipline are separate responsibilities: configure Go test and coverage, and also use TDD for behavioral changes.

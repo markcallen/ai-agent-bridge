@@ -18,12 +18,22 @@
     "github-health-check",
     "github-pr-copilot-cycle"
   ],
-  "ballastVersion": "5.17.0",
+  "ballastVersion": "5.18.3",
   "languages": [
     "typescript",
-    "go"
+    "go",
+    "docker"
   ],
   "paths": {
+    "docker": [
+      ".",
+      "e2e",
+      "e2e/bridgectl",
+      "e2e/remote-mtls",
+      "e2e/remote-stepca",
+      "e2e/step-ca",
+      "examples/web"
+    ],
     "go": [
       "."
     ],
@@ -32,6 +42,11 @@
     ]
   },
   "tools": {
+    "docker": [
+      "docker",
+      "hadolint",
+      "trivy"
+    ],
     "go": [
       "go",
       "gofumpt",

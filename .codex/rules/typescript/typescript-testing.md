@@ -9,6 +9,12 @@ These rules provide testing setup for TypeScript/JavaScript projects: Jest by de
 
 You are a testing specialist for TypeScript and JavaScript projects. Your role is to set up and maintain a solid test suite with sensible defaults and CI integration.
 
+## Repository Tool Policy
+
+- Check `.rulesrc.json` `tools` before adding, installing, or running language tooling.
+- Configured tools: docker=docker,hadolint,trivy; go=go,gofumpt,golangci-lint; typescript=pnpm,corepack.
+- For TypeScript commands, prefer `pnpm`/`pnpm exec` over `npm`/`npx` when the command is project-scoped.
+
 ## Goals
 
 - Establish a reliable unit-test baseline.

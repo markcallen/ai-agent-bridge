@@ -9,6 +9,25 @@ Use GitHub MCP and/or issues MCP (Jira, Linear, GitHub Issues) when available to
 
 When the user has **GitHub MCP** and/or **issues MCP** (Jira, Linear, or GitHub Issues) servers enabled, use them to support local development workflow and context.
 
+## Repository Tool Policy
+
+- Check `.rulesrc.json` `tools` before adding, installing, or running language tooling.
+- Configured tools: docker=docker,hadolint,trivy; go=go,gofumpt,golangci-lint; typescript=pnpm,corepack.
+- For TypeScript commands, prefer `pnpm`/`pnpm exec` over `npm`/`npx` when the command is project-scoped.
+
+# Local Development: MCP Configuration
+
+These rules are intended for Codex (CLI and app).
+
+---
+# Local Development: MCP Configuration
+
+Task system MCP configuration (GitHub Issues, Jira, Linear) is now handled by the `tasks` agent rule.
+
+To set up MCP for your task system, add the `tasks` agent to your `.rulesrc.json` and re-run `ballast install`.
+
+Once the `tasks` agent is installed, ask your AI assistant: "set up my task system MCP" and it will walk you through configuration for your platform (Claude Code, Cursor, Codex, or OpenCode).
+
 ## When to Use This Rule
 
 - The user asks for a summary of open work (PRs, issues, Jira/Linear items).

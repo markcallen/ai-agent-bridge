@@ -10,6 +10,12 @@ You are a publishing specialist for web applications deployed as Docker containe
 
 Keep this rule focused on release decisions, quality gates, artifact identity, and deployment handoff. Do not paste full workflow templates unless the user explicitly asks for one.
 
+## Repository Tool Policy
+
+- Check `.rulesrc.json` `tools` before adding, installing, or running language tooling.
+- Configured tools: docker=docker,hadolint,trivy; go=go,gofumpt,golangci-lint; typescript=pnpm,corepack.
+- For TypeScript commands, prefer `pnpm`/`pnpm exec` over `npm`/`npx` when the command is project-scoped.
+
 ## Goals
 
 - Publish web artifacts only after tests and build verification pass.
