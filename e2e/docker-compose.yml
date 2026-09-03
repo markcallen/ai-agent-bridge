@@ -3,6 +3,8 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      args:
+        INCLUDE_E2E_SCRIPTS: "true"
     environment:
       BRIDGE_CONFIG: /app/config/bridge-e2e.yaml
       BRIDGE_CN: bridge

@@ -1,7 +1,9 @@
+# syntax=docker/dockerfile:1
 # BUILD_FROM selects the binary source:
 #   source   - build from Go source (default, for local docker build)
 #   prebuilt - use binaries already compiled by GoReleaser
 ARG BUILD_FROM=source
+ARG INCLUDE_E2E_SCRIPTS=false
 
 # Source build stage
 FROM golang:1.25 AS source
@@ -20,6 +22,19 @@ COPY bridgectl bridge-ca /out/
 
 # Select binary source — BuildKit skips whichever stage is not referenced
 FROM ${BUILD_FROM} AS build
+
+# e2e test helpers — conditional multi-stage selector.
+# When INCLUDE_E2E_SCRIPTS=true, the e2e-scripts stage contains the helper;
+# when false, the stage is empty so the final COPY is a no-op.
+# When true, copy the e2e helper into a staging directory.
+FROM busybox AS e2e-scripts-true
+COPY e2e/scripts/opencode_repl.js /scripts/opencode_repl.js
+
+# When false, create the same path as an empty directory so the COPY is a no-op.
+FROM busybox AS e2e-scripts-false
+RUN mkdir -p /scripts
+
+FROM e2e-scripts-${INCLUDE_E2E_SCRIPTS} AS e2e-scripts
 
 # Runtime stage
 FROM ubuntu:24.04
@@ -64,8 +79,10 @@ COPY config/bridge-docker-stepca.yaml /app/config/bridge-docker-stepca.yaml
 COPY docker-entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-RUN mkdir -p /app/scripts
-COPY e2e/scripts/opencode_repl.js /app/scripts/opencode_repl.js
+# e2e test helpers — excluded from production images by default.
+# Pass --build-arg INCLUDE_E2E_SCRIPTS=true to include them (e.g. in e2e compose).
+# When false, the e2e-scripts stage is empty so this COPY is a no-op and adds no layer.
+COPY --from=e2e-scripts /scripts/ /app/scripts/
 
 EXPOSE 9445
 
