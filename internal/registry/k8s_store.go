@@ -23,9 +23,9 @@ const (
 )
 
 // K8sStore implements Store by reading and writing files in a directory
-// that mirrors Kubernetes Secrets projected volumes. In a Kubernetes
-// deployment, this directory is backed by a Secret per issuer. Outside
-// Kubernetes, it operates as a file-backed store.
+// structured as one subdirectory per issuer. In a Kubernetes deployment,
+// a persistent volume or emptyDir backs the directory. Outside Kubernetes,
+// it operates as a plain file-backed store.
 type K8sStore struct {
 	mu      sync.RWMutex
 	baseDir string
@@ -153,6 +153,9 @@ func parseEd25519PEM(data []byte) (ed25519.PublicKey, error) {
 	block, _ := pem.Decode(data)
 	if block == nil {
 		return nil, fmt.Errorf("no PEM block found")
+	}
+	if block.Type != "PUBLIC KEY" {
+		return nil, fmt.Errorf("unexpected PEM type %q, expected PUBLIC KEY", block.Type)
 	}
 	key, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {

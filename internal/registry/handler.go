@@ -72,10 +72,11 @@ func (h *Handler) UploadKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read and validate the public key
-	body, err := io.ReadAll(io.LimitReader(r.Body, MaxKeyUploadBytes))
+	// Read and validate the public key — enforce a hard body size limit at the HTTP layer
+	r.Body = http.MaxBytesReader(w, r.Body, MaxKeyUploadBytes)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "failed to read body")
+		h.writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
 		return
 	}
 
@@ -119,15 +120,16 @@ func (h *Handler) GetJWKS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Filter to only allowed issuers for this server
+	// Filter to only allowed issuers for this server (case-insensitive to
+	// match the case-insensitive CN check used during upload authorization).
 	allowedSet := make(map[string]bool, len(allowed))
 	for _, iss := range allowed {
-		allowedSet[iss] = true
+		allowedSet[strings.ToLower(iss)] = true
 	}
 
 	var filtered []ClientKey
 	for _, ck := range allKeys {
-		if allowedSet[ck.Issuer] {
+		if allowedSet[strings.ToLower(ck.Issuer)] {
 			filtered = append(filtered, ck)
 		}
 	}
