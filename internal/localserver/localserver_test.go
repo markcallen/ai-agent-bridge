@@ -233,6 +233,10 @@ func TestStartWithProviderFallbacksDisabled(t *testing.T) {
 		},
 	})
 	assert.NotNil(t, srv)
+	// The server must have cleared the fallback map because the feature flag
+	// was not enabled. This catches regressions where fallbacks are still
+	// applied despite the flag being off.
+	assert.Nil(t, srv.providerFallbacks, "fallbacks should be nil when feature flag is disabled")
 }
 
 // TestServerAddrLocalMode verifies that Addr() returns a non-empty string in

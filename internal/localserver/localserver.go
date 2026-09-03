@@ -82,6 +82,10 @@ type Server struct {
 	mu         sync.Mutex
 	stopped    bool
 
+	// providerFallbacks is the resolved fallback map passed to the bridge
+	// server. Nil when the feature flag is disabled.
+	providerFallbacks map[string][]string
+
 	// Certificate renewal (secure mode only).
 	renewCancel              context.CancelFunc               // cancels the renewal goroutine
 	serverSANs               []string                         // SANs for cert re-issuance
@@ -340,7 +344,7 @@ func Start(cfg Config) (*Server, error) {
 				configProviderDefs = fileCfg.Providers
 			}
 			providerRoot = fileCfg.Runtime.ProviderRoot
-			providerFallbacksEnabled = fileCfg.FeatureFlags.ProviderFallbacks
+			providerFallbacksEnabled = providerFallbacksEnabled || fileCfg.FeatureFlags.ProviderFallbacks
 			repoSetupEnabled = fileCfg.RepoSetup.IsEnabled()
 			repoSetupConfigPath = fileCfg.RepoSetup.ConfigPath
 			repoSetupDefaultTimeout = config.ParseDuration(fileCfg.RepoSetup.DefaultTimeout, repoSetupDefaultTimeout)
@@ -836,13 +840,14 @@ func Start(cfg Config) (*Server, error) {
 	logger.Info("server starting", "mode", mode, "addr", listenAddr, "pid", os.Getpid())
 
 	s := &Server{
-		grpcServer: grpcServer,
-		supervisor: sup,
-		store:      store,
-		registry:   registry,
-		listener:   ln,
-		logger:     logger,
-		stateDir:   stateDir,
+		grpcServer:        grpcServer,
+		supervisor:        sup,
+		store:             store,
+		registry:          registry,
+		listener:          ln,
+		logger:            logger,
+		stateDir:          stateDir,
+		providerFallbacks: providerFallbacks,
 	}
 
 	// Construct a CertificateProvider from the security config when the
