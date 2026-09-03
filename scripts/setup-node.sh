@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Cross-platform Node.js detection and setup guidance.
+#
+# This script checks whether Node.js is installed and meets the version
+# requirement from .nvmrc. When Node.js is missing or outdated, it prints
+# platform-specific installation instructions without forcing any changes.
+#
+# Usage:
+#   scripts/setup-node.sh          Check and advise.
+#   scripts/setup-node.sh --install  Attempt automatic install (macOS Homebrew only).
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Read required major version from .nvmrc
+if [ ! -f "$PROJECT_ROOT/.nvmrc" ]; then
+  echo "ERROR: .nvmrc not found in $PROJECT_ROOT" >&2
+  exit 1
+fi
+REQUIRED_MAJOR="$(tr -d '[:space:]' < "$PROJECT_ROOT/.nvmrc")"
+
+AUTO_INSTALL=0
+for arg in "$@"; do
+  case "$arg" in
+    --install) AUTO_INSTALL=1 ;;
+    *) echo "setup-node: unknown argument: $arg" >&2; exit 1 ;;
+  esac
+done
+
+detect_os() {
+  case "$(uname -s)" in
+    Darwin)  echo "macos" ;;
+    Linux)   echo "linux" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+    *)       echo "unknown" ;;
+  esac
+}
+
+node_installed() {
+  command -v node >/dev/null 2>&1
+}
+
+node_major() {
+  node --version 2>/dev/null | sed 's/v//;s/\..*//'
+}
+
+pnpm_installed() {
+  command -v pnpm >/dev/null 2>&1
+}
+
+brew_installed() {
+  command -v brew >/dev/null 2>&1
+}
+
+print_header() {
+  echo ""
+  echo "=== Node.js Setup Check ==="
+  echo ""
+  echo "Required Node.js version: ${REQUIRED_MAJOR} (from .nvmrc)"
+  echo ""
+}
+
+print_nvm_instructions() {
+  echo "  Option 1: nvm (recommended)"
+  echo "    Install nvm: https://github.com/nvm-sh/nvm"
+  echo "    Then run:"
+  echo "      nvm install"
+  echo "      nvm use"
+  echo ""
+}
+
+print_macos_instructions() {
+  echo "  Option 2: Homebrew (macOS)"
+  if brew_installed; then
+    echo "    brew install node@${REQUIRED_MAJOR}"
+    echo ""
+    echo "    Or auto-install with:"
+    echo "      scripts/setup-node.sh --install"
+  else
+    echo "    Install Homebrew first: https://brew.sh"
+    echo "    Then: brew install node@${REQUIRED_MAJOR}"
+  fi
+  echo ""
+  echo "  Option 3: Direct download"
+  echo "    https://nodejs.org/en/download/"
+  echo ""
+}
+
+print_linux_instructions() {
+  echo "  Option 2: Package manager"
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "    # Ubuntu / Debian (via NodeSource):"
+    echo "    curl -fsSL https://deb.nodesource.com/setup_${REQUIRED_MAJOR}.x | sudo -E bash -"
+    echo "    sudo apt-get install -y nodejs"
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "    # Fedora / RHEL:"
+    echo "    curl -fsSL https://rpm.nodesource.com/setup_${REQUIRED_MAJOR}.x | sudo bash -"
+    echo "    sudo dnf install -y nodejs"
+  elif command -v pacman >/dev/null 2>&1; then
+    echo "    # Arch Linux:"
+    echo "    sudo pacman -S nodejs npm"
+  else
+    echo "    Use your distribution's package manager to install Node.js ${REQUIRED_MAJOR}."
+  fi
+  echo ""
+  echo "  Option 3: Direct download"
+  echo "    https://nodejs.org/en/download/"
+  echo ""
+}
+
+print_windows_instructions() {
+  echo "  Option 2: winget"
+  echo "    winget install OpenJS.NodeJS --version ${REQUIRED_MAJOR}"
+  echo ""
+  echo "  Option 3: Chocolatey"
+  echo "    choco install nodejs --version=${REQUIRED_MAJOR}"
+  echo ""
+  echo "  Option 4: Direct download"
+  echo "    https://nodejs.org/en/download/"
+  echo ""
+}
+
+print_instructions() {
+  local os="$1"
+  print_nvm_instructions
+  case "$os" in
+    macos)   print_macos_instructions ;;
+    linux)   print_linux_instructions ;;
+    windows) print_windows_instructions ;;
+    *)
+      echo "  Option 2: Direct download"
+      echo "    https://nodejs.org/en/download/"
+      echo ""
+      ;;
+  esac
+}
+
+try_brew_install() {
+  if ! brew_installed; then
+    echo "Homebrew not found. Install Homebrew first: https://brew.sh"
+    return 1
+  fi
+  echo "Installing Node.js ${REQUIRED_MAJOR} via Homebrew..."
+  brew install "node@${REQUIRED_MAJOR}"
+  # Homebrew keg-only formulae need to be linked or added to PATH.
+  if ! node_installed; then
+    echo ""
+    echo "Node was installed but is keg-only. You may need to add it to PATH:"
+    echo "  export PATH=\"\$(brew --prefix)/opt/node@${REQUIRED_MAJOR}/bin:\$PATH\""
+    echo ""
+    echo "Or link it:"
+    echo "  brew link --overwrite node@${REQUIRED_MAJOR}"
+    return 1
+  fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────
+
+OS="$(detect_os)"
+print_header
+
+if node_installed; then
+  ACTUAL_MAJOR="$(node_major)"
+  echo "Node.js detected: v${ACTUAL_MAJOR} ($(command -v node))"
+
+  if [ "$ACTUAL_MAJOR" = "$REQUIRED_MAJOR" ]; then
+    echo "Version OK: matches .nvmrc requirement (${REQUIRED_MAJOR})"
+    echo ""
+
+    # Also check pnpm
+    if pnpm_installed; then
+      echo "pnpm detected: $(pnpm --version) ($(command -v pnpm))"
+    else
+      echo "pnpm not found. Install with:"
+      echo "  corepack enable"
+      echo "  corepack prepare pnpm@latest --activate"
+    fi
+
+    echo ""
+    echo "=== Node.js setup is complete ==="
+    exit 0
+  else
+    echo "WARNING: Node.js ${ACTUAL_MAJOR} found but ${REQUIRED_MAJOR} is required."
+    echo ""
+    echo "Upgrade Node.js using one of these methods:"
+    echo ""
+    print_instructions "$OS"
+    exit 1
+  fi
+else
+  echo "Node.js is not installed."
+  echo ""
+
+  if [ "$AUTO_INSTALL" -eq 1 ] && [ "$OS" = "macos" ]; then
+    try_brew_install
+    exit $?
+  fi
+
+  echo "Install Node.js ${REQUIRED_MAJOR} using one of these methods:"
+  echo ""
+  print_instructions "$OS"
+  exit 1
+fi

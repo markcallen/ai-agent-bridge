@@ -32,16 +32,26 @@ See the Docusaurus documentation under [docs/](docs/) for architecture details.
 ### Prerequisites
 
 - [Go 1.25+](https://go.dev/dl/)
-- [nvm](https://github.com/nvm-sh/nvm) and Node.js 24.x (for provider CLIs — use the version in `.nvmrc`)
-- (optional) `protoc` + `protoc-gen-go` + `protoc-gen-go-grpc` — only if modifying `.proto` files
+- **Node.js 24.x** (for provider CLIs -- use the version in `.nvmrc`). Install via any of these methods:
+  - [nvm](https://github.com/nvm-sh/nvm) (recommended): `nvm install` after cloning
+  - **macOS Homebrew**: `brew install node@24`
+  - **Windows winget**: `winget install OpenJS.NodeJS --version 24`
+  - **Windows Chocolatey**: `choco install nodejs --version=24`
+  - **Ubuntu/Debian**: use [NodeSource](https://github.com/nodesource/distributions): `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs`
+  - **Direct download**: [nodejs.org/en/download](https://nodejs.org/en/download/)
+- (optional) `protoc` + `protoc-gen-go` + `protoc-gen-go-grpc` -- only if modifying `.proto` files
+
+Run `scripts/setup-node.sh` to verify your Node.js installation meets the project requirements, or `scripts/setup-node.sh --install` to attempt automatic installation via Homebrew on macOS.
 
 ### 1. Clone and configure
 
 ```bash
 git clone https://github.com/orchael/bridgectl.git
 cd bridgectl
-nvm install
-nvm use
+
+# Set up Node.js (pick one):
+nvm install           # if using nvm (recommended)
+# Or verify your system Node: scripts/setup-node.sh
 ```
 
 Set up `env-secrets` once for this repo. `env-secrets` in this environment uses AWS Secrets Manager:
@@ -349,6 +359,7 @@ Providers are configured in `config/bridge-dev.yaml`. See [docs/docs/reference/c
 | `make fmt` | Format code with gofmt + goimports |
 | `make dev-setup` | Build binaries and generate dev certificates |
 | `make docs-build` | Build the Docusaurus documentation site |
+| `make setup-node` | Check Node.js installation and print setup guidance |
 | `make certs` | Initialize a bridge CA in `certs/` |
 | `make clean` | Remove build artifacts |
 
