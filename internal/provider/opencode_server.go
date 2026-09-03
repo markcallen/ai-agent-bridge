@@ -152,7 +152,7 @@ func (p *OpenCodeServerProvider) BuildCommand(ctx context.Context, cfg bridge.Se
 		cmd.Env = FilterEnv(os.Environ())
 	}
 
-	baseURL := fmt.Sprintf("http://%s:%d", p.cfg.Hostname, port)
+	baseURL := "http://" + net.JoinHostPort(p.cfg.Hostname, fmt.Sprintf("%d", port))
 
 	p.mu.Lock()
 	p.sessions[cfg.SessionID] = &openCodeSessionMeta{
@@ -309,7 +309,7 @@ func (p *OpenCodeServerProvider) allocatePort() (int, error) {
 		if usedPorts[port] {
 			continue
 		}
-		addr := fmt.Sprintf("%s:%d", p.cfg.Hostname, port)
+		addr := net.JoinHostPort(p.cfg.Hostname, fmt.Sprintf("%d", port))
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
 			continue
@@ -318,7 +318,7 @@ func (p *OpenCodeServerProvider) allocatePort() (int, error) {
 		return port, nil
 	}
 	// Fallback: let the OS pick a free port.
-	ln, err := net.Listen("tcp", p.cfg.Hostname+":0")
+	ln, err := net.Listen("tcp", net.JoinHostPort(p.cfg.Hostname, "0"))
 	if err != nil {
 		return 0, fmt.Errorf("no free port: %w", err)
 	}
@@ -453,8 +453,15 @@ type SSEEvent struct {
 }
 
 // parseSSEStream reads an SSE stream and sends parsed events to ch.
+// sseMaxTokenSize is the maximum line length the SSE scanner will accept.
+// The default bufio.Scanner buffer is 64 KB which can silently truncate
+// large SSE data payloads. 1 MB accommodates the large JSON events that
+// OpenCode emits for file diffs and tool results.
+const sseMaxTokenSize = 1024 * 1024 // 1 MB
+
 func parseSSEStream(ctx context.Context, r io.Reader, ch chan<- SSEEvent) {
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), sseMaxTokenSize)
 	var event SSEEvent
 	for scanner.Scan() {
 		if ctx.Err() != nil {

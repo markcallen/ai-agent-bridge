@@ -882,3 +882,58 @@ func TestOpenCodeServerProvider_HealthWithEnv(t *testing.T) {
 		t.Fatalf("HealthWithEnv: %v", err)
 	}
 }
+
+func TestOpenCodeServerProvider_BuildCommand_IPv6(t *testing.T) {
+	// When the hostname is an IPv6 address the base URL must wrap it in
+	// brackets so that the port is not confused with the address, e.g.
+	// http://[::1]:4100 rather than http://::1:4100.
+	p := NewOpenCodeServerProvider(OpenCodeServerConfig{
+		ProviderID:     "opencode-server",
+		Binary:         "/bin/echo",
+		Hostname:       "::1",
+		PortRangeStart: 14700,
+		PortRangeEnd:   14800,
+	})
+
+	cfg := bridge.SessionConfig{
+		ProjectID: "test-project",
+		SessionID: "sess-ipv6",
+		RepoPath:  t.TempDir(),
+	}
+	_, err := p.BuildCommand(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("BuildCommand: %v", err)
+	}
+
+	baseURL, err := p.SessionBaseURL("sess-ipv6")
+	if err != nil {
+		t.Fatalf("SessionBaseURL: %v", err)
+	}
+	// The URL must contain brackets around the IPv6 address.
+	if !strings.HasPrefix(baseURL, "http://[::1]:") {
+		t.Fatalf("expected IPv6-bracketed base URL, got: %s", baseURL)
+	}
+}
+
+func TestParseSSEStream_LargeDataLine(t *testing.T) {
+	// Verify that SSE data lines larger than the default 64 KB scanner
+	// buffer are not silently truncated.
+	bigPayload := strings.Repeat("x", 128*1024) // 128 KB
+	input := fmt.Sprintf("event:big\ndata:%s\n\n", bigPayload)
+	reader := strings.NewReader(input)
+	ch := make(chan SSEEvent, 10)
+
+	parseSSEStream(context.Background(), reader, ch)
+	close(ch)
+
+	var events []SSEEvent
+	for evt := range ch {
+		events = append(events, evt)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Data != bigPayload {
+		t.Fatalf("data length = %d, want %d (truncated)", len(events[0].Data), len(bigPayload))
+	}
+}
