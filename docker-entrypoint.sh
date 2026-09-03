@@ -22,7 +22,12 @@ exec_as_bridge() {
 mkdir -p "$CERT_DIR" "$RUNTIME_CERT_DIR"
 chown bridge:bridge "$CERT_DIR"
 mkdir -p /home/bridge/.gemini /home/bridge/.config
-chown -R bridge:bridge /home/bridge
+# Use non-recursive chown on /home/bridge itself, then chown subdirectories
+# individually.  Mounted files (e.g. oauth_creds.json) may be read-only
+# bind-mounts, so a blanket `chown -R` would fail on them.
+chown bridge:bridge /home/bridge
+chown bridge:bridge /home/bridge/.gemini 2>/dev/null || true
+chown bridge:bridge /home/bridge/.config 2>/dev/null || true
 
 # Mirror what systemd RuntimeDirectory=bridge does: create and own
 # the runtime dir so the bridge process can write the system addr file.
