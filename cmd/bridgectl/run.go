@@ -40,12 +40,15 @@ func newRunCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "run [directory]",
-		Short: "Start an AI agent session in a directory",
+		Use:        "run [directory]",
+		Short:      "Start an AI agent session in a directory (deprecated: use 'session start')",
+		Deprecated: "use 'bridgectl session start' instead.",
 		Long: `Start a local bridge server (if not already running), create a new
 session with the specified provider, and attach your terminal.
 
-If another instance is already running, the existing server is reused.
+DEPRECATED: This command is deprecated and will be removed in a future release.
+Use 'bridgectl session start' instead, which also supports --remote for
+connecting to remote bridge servers.
 
 Press ctrl-] to detach from the session without stopping it.
 Use 'bridgectl session attach <id>' to reattach later.
@@ -62,8 +65,12 @@ stdout. Useful for scripting, piping input, and automated tests.`,
 			if err != nil {
 				return fmt.Errorf("resolve directory: %w", err)
 			}
-			if _, err := os.Stat(absDir); err != nil {
+			info, err := os.Stat(absDir)
+			if err != nil {
 				return fmt.Errorf("directory %q: %w", absDir, err)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("%q is not a directory", absDir)
 			}
 			if noTTY {
 				return runSessionNoTTY(absDir, providerName, project, timeout)
