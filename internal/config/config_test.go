@@ -217,9 +217,10 @@ sessions:
 }
 
 func TestLoadFeatureFlags(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "bridge.yaml")
-	content := `
+	t.Run("provider_fallbacks true", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "bridge.yaml")
+		content := `
 server:
   listen: "127.0.0.1:9445"
 auth:
@@ -237,17 +238,47 @@ sessions:
   stop_grace_period: "10s"
   subscriber_ttl: "30m"
 `
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
 
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if !cfg.FeatureFlags.ProviderFallbacks {
-		t.Fatal("expected provider_fallbacks to be true")
-	}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !cfg.FeatureFlags.ProviderFallbacks {
+			t.Fatal("expected provider_fallbacks to be true")
+		}
+	})
+
+	t.Run("provider_fallbacks defaults to false", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "bridge.yaml")
+		content := `
+server:
+  listen: "127.0.0.1:9445"
+auth:
+  jwt_max_ttl: "5m"
+providers:
+  primary:
+    binary: "cat"
+sessions:
+  idle_timeout: "30m"
+  stop_grace_period: "10s"
+  subscriber_ttl: "30m"
+`
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.FeatureFlags.ProviderFallbacks {
+			t.Fatal("expected provider_fallbacks to default to false")
+		}
+	})
 }
 
 func TestLoadRepoSetupDefaultsAndValidation(t *testing.T) {
